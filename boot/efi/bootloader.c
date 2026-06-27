@@ -69,6 +69,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (EFI_ERROR(status))
     return status;
 
+    UINTN mode_to_set = 0;
+    int mode_res = 0; 
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *final_info;
+    UINTN size_of_final_info;
 
     for (UINTN i = 0; i < gop->Mode->MaxMode; i++) {
         EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
@@ -83,15 +87,34 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
             &info
         );
 
-        if (EFI_ERROR(status))
-        continue;
+        int cur_mode_res = info->HorizontalResolution * info->VerticalResolution;
 
-            Print(L"Mode %u: %ux%u\n",
-                i,
-                info->HorizontalResolution,
-                info->VerticalResolution);
+        if (cur_mode_res > mode_res) {
+            mode_res = cur_mode_res;
+            mode_to_set = i;
+        }
     }
 
+    status = uefi_call_wrapper(
+        gop->QueryMode,
+        4,
+        gop,
+        mode_to_set,
+        &size_of_final_info,
+        &final_info
+    );
+
+    gop->SetMode(gop, mode_to_set);
+
+    uint32_t *framebuffer = (uint32_t*)gop->Mode->FrameBufferBase;
+    
+
+    uefi_call_wrapper(BS->Stall, 1, 1000000);
+    for (int i = 0; i < mode_res; i++) {
+        framebuffer[i] = 0x00ff00;
+    }
+    
+    
     __asm__ __volatile__("cli");
 
     while (1) {
