@@ -7,6 +7,15 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     InitializeLib(ImageHandle, SystemTable);
 
+    EFI_LOADED_IMAGE *LoadedImage;
+
+    BS->HandleProtocol(
+        ImageHandle,
+        &gEfiLoadedImageProtocolGuid,
+        (void**)&LoadedImage
+    );
+
+
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
@@ -20,7 +29,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     );
 
 
-
+    
     UINTN memory_map_size = 0;
     EFI_MEMORY_DESCRIPTOR *memory_map = NULL;
     UINTN map_key;
@@ -108,11 +117,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     uint32_t *framebuffer = (uint32_t*)gop->Mode->FrameBufferBase;
     
-
-    uefi_call_wrapper(BS->Stall, 1, 1000000);
-    for (int i = 0; i < mode_res; i++) {
-        framebuffer[i] = 0x00ff00;
-    }
     
     
     __asm__ __volatile__("cli");
