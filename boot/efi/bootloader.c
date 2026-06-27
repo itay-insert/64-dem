@@ -7,7 +7,19 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     InitializeLib(ImageHandle, SystemTable);
 
-    EFI_STATUS status;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
+
+    EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+
+    EFI_STATUS status = uefi_call_wrapper(
+        ST->BootServices->LocateProtocol,
+        3,
+        &gop_guid,
+        NULL,
+        (void**)&gop
+    );
+
+
 
     UINTN memory_map_size = 0;
     EFI_MEMORY_DESCRIPTOR *memory_map = NULL;
@@ -57,61 +69,27 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (EFI_ERROR(status))
     return status;
 
-    EFI_MEMORY_DESCRIPTOR *desc = memory_map;
 
-    const CHAR16 *MemTypeToStr(UINT32 type)
-    {
-        switch (type)
-        {
-            case 0:  return L"Reserved";
-            case 1:  return L"LoaderCode";
-            case 2:  return L"LoaderData"; 
-            case 3:  return L"BootSC";  // bootServices Code
-            case 4:  return L"BootSD";  // bootServices Data
-            case 5:  return L"RtCode"; // Runtime Code
-            case 6:  return L"RtData"; // Runtime Data
-            case 7:  return L"Ram"; // usable memory
-            case 8:  return L"Broken"; // unusable memory
-            case 9:  return L"ACPIRC";  // acpi reclaim
-            case 10: return L"ACPINVS";
-            case 11: return L"MMIO";
-            case 12: return L"MMIOPS"; // MMIO Port Space
-            case 13: return L"PalCode";
-            default: return L"Unknown";
-        }
-    }
+    for (UINTN i = 0; i < gop->Mode->MaxMode; i++) {
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info;
+        UINTN size_of_info;
 
-    const CHAR16 *typetostr(UINT32 type)
-    {
-        switch (type) 
-        {
-            case 8: return L"Ram";
-            default: return L"Reserved";
-        }
-    }
-
-    int count = 0;
-
-    for (
-        UINTN offset = 0;
-        offset < memory_map_size;
-        offset += descriptor_size
-    )   {
-        desc = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)memory_map + offset);
-
-        if (count == 5) {
-            count = 0;
-            Print(L"\n");
-        } else count++;
-        
-
-        Print(L"Tp=%s", MemTypeToStr(desc->Type));
-
-        Print(
-            L" Pgs=%lu  St=%lx       ",
-            desc->NumberOfPages,
-            desc->PhysicalStart
+        status = uefi_call_wrapper(
+            gop->QueryMode,
+            4,
+            gop,
+            i,
+            &size_of_info,
+            &info
         );
+
+        if (EFI_ERROR(status))
+        continue;
+
+            Print(L"Mode %u: %ux%u\n",
+                i,
+                info->HorizontalResolution,
+                info->VerticalResolution);
     }
 
     __asm__ __volatile__("cli");
