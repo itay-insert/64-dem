@@ -16,7 +16,7 @@ ld \
   -o bootloader.so
 
 objcopy \
-  -j .text -j .rodata -j .sdata -j .data -j .dynamic -j .dynsym \
+  -j .text -j .rodata -j .sdata -j .data -j .bss \
   -j .rel -j .rela -j .reloc \
   --target efi-app-x86_64 \
   bootloader.so BOOTX64.efi

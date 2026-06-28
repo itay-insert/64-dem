@@ -8,13 +8,39 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     InitializeLib(ImageHandle, SystemTable);
 
     EFI_LOADED_IMAGE *LoadedImage;
+    EFI_HANDLE device;
+    EFI_DEVICE_PATH *path;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
 
-    BS->HandleProtocol(
+/* Get Loaded Image Protocol */
+    uefi_call_wrapper(
+        BS->HandleProtocol,
+        3,
         ImageHandle,
         &gEfiLoadedImageProtocolGuid,
         (void**)&LoadedImage
     );
 
+/* Device handle (boot device) */
+    device = LoadedImage->DeviceHandle;
+
+/* Get device path */
+    uefi_call_wrapper(
+        BS->HandleProtocol,
+        3,
+        LoadedImage->DeviceHandle,
+        &DevicePathProtocol,
+        (VOID **)&path
+    );
+
+/* Get filesystem protocol */
+    uefi_call_wrapper(
+        BS->HandleProtocol,
+        3,
+        device,
+        &FileSystemProtocol,
+        (void**)&fs
+    );
 
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
 
@@ -113,10 +139,47 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         &final_info
     );
 
-    gop->SetMode(gop, mode_to_set);
+    Print(L"reading file...\n");
 
-    uint32_t *framebuffer = (uint32_t*)gop->Mode->FrameBufferBase;
-    
+    EFI_FILE_PROTOCOL *root;
+    EFI_FILE_PROTOCOL *file;
+
+/* Open filesystem root */
+    uefi_call_wrapper(
+        fs->OpenVolume,
+        2,
+        fs,
+        &root
+    );
+
+/* Open file from root */
+    uefi_call_wrapper(
+        root->Open,
+        5,
+        root,
+        &file,
+        L"sign.bin",
+        EFI_FILE_MODE_READ,
+        0
+    );
+
+/* Read file */
+    UINTN size = 32000;
+    UINT8 file_buffer[32000];
+
+    uefi_call_wrapper(
+        file->Read,
+        3,
+        file,
+        &size,
+        file_buffer
+    );
+
+    if (file_buffer[0] == 'M' & file_buffer[1] == 'A') {
+        Print(L"file read successfull!");
+    } else {
+        Print(L"file read failed");
+    }
     
     
     __asm__ __volatile__("cli");
