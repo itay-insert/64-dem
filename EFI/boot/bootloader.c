@@ -2,7 +2,44 @@
 #include <efi.h>
 #include <efilib.h>
 
-// The true UEFI Entry Point
+#define u8 uint8_t
+#define u16 uint16_t
+#define u32 uint32_t
+#define u64 uint64_t
+
+#define i8 int8_t
+#define i16 int16_t
+#define i32 int32_t
+#define i64 int64_t 
+
+UINTN size = 32000;
+UINT8 file_buffer[32000];
+
+typedef struct {
+    u64 file_base;
+    u64 e_entry;
+    u16 e_phentsize;
+    u16 e_phnum;
+} pt_data;
+
+u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
+
+}
+
+
+u64 elf_loader(u64 file_base, u64 entry, EFI_FILE_PROTOCOL *file) {
+    char *magic_ptr = (char *)file_base;
+    if (*magic_ptr == 0x7f && magic_ptr[1] == 'E' &&
+    magic_ptr[2] == 'L' && magic_ptr[3] == 'F') {
+        void *p_header = (void *)file_base;
+        u64 e_phoff = *(u64 *)(p_header+0x20);
+        u16 e_phentsize = *(u16 *)(p_header+0x36);
+        u16 e_phnum = *(u16 *)(p_header+0x38);
+        pt_data e = {file_base+e_phoff, entry, e_phentsize, e_phnum};
+    } 
+    return entry;
+}
+// UEFI entry point
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     InitializeLib(ImageHandle, SystemTable);
@@ -144,16 +181,16 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     EFI_FILE_PROTOCOL *root;
     EFI_FILE_PROTOCOL *file;
 
-/* Open filesystem root */
-    uefi_call_wrapper(
+
+    uefi_call_wrapper(  // find root
         fs->OpenVolume,
         2,
         fs,
         &root
     );
 
-/* Open file from root */
-    uefi_call_wrapper(
+
+    uefi_call_wrapper( // open file from path
         root->Open,
         5,
         root,
@@ -164,8 +201,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     );
 
 /* Read file */
-    UINTN size = 32000;
-    UINT8 file_buffer[32000];
 
     uefi_call_wrapper(
         file->Read,
@@ -181,7 +216,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         Print(L"file read failed");
     }
     
+    u64 loader_entry = (u64)LoadedImage->ImageBase + LoadedImage->ImageSize;
     
+     
+
+
+
+
     __asm__ __volatile__("cli");
 
     while (1) {
