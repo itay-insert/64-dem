@@ -363,11 +363,36 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     u32 *fb = (u32 *)gop->Mode->FrameBufferBase;
 
-    fb[0] = 0xffffff;
+    typedef void (*kernel_entry_t)(u32 *fb_base);
+    kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
+    while (1) {
+        uefi_call_wrapper(
+            ST->BootServices->GetMemoryMap,
+            5,
+            &memory_map_size,
+            memory_map,
+            &map_key,
+            &descriptor_size,
+            &descriptor_version
+        );
+
+        status = uefi_call_wrapper(
+            ST->BootServices->ExitBootServices,
+            2,
+            ImageHandle,
+            map_key
+        );
+
+        if (status == EFI_SUCCESS)
+        break;
+    }
 
     __asm__ __volatile__("cli");
 
+
+    kernel_entry(fb);
+    
     while (1) {
         __asm__ __volatile__("hlt");
     }
