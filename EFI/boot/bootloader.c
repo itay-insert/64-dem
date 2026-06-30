@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 #include <efi.h>
 #include <efilib.h>
 
@@ -12,8 +13,10 @@
 #define i32 int32_t
 #define i64 int64_t 
 
-UINTN size = 32000;
-UINT8 file_buffer[32000];
+#define PT_LOAD 1
+
+UINTN size = 4096;
+UINT8 file_buffer[4096];
 
 typedef struct {
     u64 file_base;
@@ -22,22 +25,144 @@ typedef struct {
     u16 e_phnum;
 } pt_data;
 
-u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
+typedef struct {
+    u64 entry;
+    u64 end;
+} aloc_data;
+
+
+u64 find_end(u64 file_base, u64 p_entry) {
+    void *p_header = (void *)file_base;
+    u64 e_phoff = *(u64 *)(p_header+0x20);
+    u16 e_phentsize = *(u16 *)(p_header+0x36);
+    u16 e_phnum = *(u16 *)(p_header+0x38);
+    p_header += e_phoff;
+    for (u16 i = 0; i < e_phnum; i++) {
+        u32 p_type = *(u32 *)p_header;
+        u64 p_filesz = *(u64 *)(p_header+0x20);
+        u64 p_memsz = *(u64 *)(p_header+0x28);
+        if (p_type == PT_LOAD) {
+            if (p_memsz > p_filesz) {
+                p_entry += (p_memsz + 4095) & ~4095;
+            } else {
+                p_entry += (p_filesz + 4095) & ~4095;
+            }
+        }
+        p_header += e_phentsize;
+    }
+    return p_entry;
+}
+
+void handle_that(u64 p_offset, u64 p_filesz, VOID *buf, EFI_FILE_PROTOCOL *file) {
+    if (p_offset-p_filesz <= 4095) {
+        uefi_call_wrapper(
+            file->SetPosition,
+            2,
+            file,
+            p_offset
+        );
+        uefi_call_wrapper(
+            file->Read,
+            3,
+            file,
+            &size,
+            file_buffer
+        );
+        memcpy(buf, file_buffer, 4095-p_offset);
+        buf += 4095 - p_offset;
+    }
+    p_offset = p_offset >> 12;
+    for (u64 i = 0; i < p_offset; i++) {
+        uefi_call_wrapper(
+            file->Read,
+            3,
+            file,
+            &size,
+            file_buffer
+        );
+
+        memcpy(buf, file_buffer, (size_t)p_filesz);
+        buf += 4096;
+    }
+    uefi_call_wrapper(
+        file->SetPosition,
+        2,
+        file,
+        0
+    );
+
+    uefi_call_wrapper(
+        file->Read,
+        3,
+        file,
+        &size,
+        file_buffer
+    );
 
 }
 
 
-u64 elf_loader(u64 file_base, u64 entry, EFI_FILE_PROTOCOL *file) {
+u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
+    VOID *buf = (VOID *)e.e_entry;
+    void *p_header = (void *)e.file_base;
+    for (u16 i = 0; i < e.e_phnum; i++) {
+        u32 p_type = *(u32 *)p_header;
+        u64 p_offset = *(u64 *)(p_header+0x08);
+        u64 p_vaddr = *(u64 *)(p_header+0x10);
+        u64 p_filesz = *(u64 *)(p_header+0x20);
+        u64 p_memsz = *(u64 *)(p_header+0x28);
+        if (p_type == PT_LOAD) {
+            if (p_memsz > p_filesz) {
+                char *fix_buf = buf;
+                fix_buf = fix_buf + p_vaddr + p_filesz;
+                for (u64 i = 0; i < (p_memsz-p_filesz); i++) {
+                    fix_buf[i] = 0;
+                }
+            } 
+
+            buf += p_vaddr;
+
+
+            if (p_offset + p_filesz > 4095) {
+                handle_that(p_offset+p_filesz, p_filesz, buf, file);
+            } else {
+                VOID *segment = (VOID *)(e.file_base+p_offset);
+                memcpy(buf, segment, (size_t)p_filesz);
+            }
+
+            buf = buf - p_vaddr;
+
+            if (p_memsz > p_filesz) {
+                e.e_entry += (p_memsz + 4095) & ~4095;
+            } else {
+                e.e_entry += (p_filesz + 4095) & ~4095;
+            }
+
+        }
+        p_header += e.e_phentsize;
+
+    }
+    return e.e_entry;
+    
+}
+
+
+aloc_data elf_loader(u64 file_base, u64 p_entry, EFI_FILE_PROTOCOL *file) {
+    aloc_data ad = {0, 0};
     char *magic_ptr = (char *)file_base;
     if (*magic_ptr == 0x7f && magic_ptr[1] == 'E' &&
     magic_ptr[2] == 'L' && magic_ptr[3] == 'F') {
         void *p_header = (void *)file_base;
+        u64 e_entry = *(u64 *)(p_header+0x18);
+        e_entry = e_entry + p_entry;
         u64 e_phoff = *(u64 *)(p_header+0x20);
         u16 e_phentsize = *(u16 *)(p_header+0x36);
         u16 e_phnum = *(u16 *)(p_header+0x38);
-        pt_data e = {file_base+e_phoff, entry, e_phentsize, e_phnum};
+        pt_data e = {file_base+e_phoff, p_entry, e_phentsize, e_phnum};
+        ad.end = elf_allocator(e, file);
+        ad.entry = e_entry;
     } 
-    return entry;
+    return ad;
 }
 // UEFI entry point
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
