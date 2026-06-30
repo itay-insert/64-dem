@@ -336,16 +336,34 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     );
 
     
-    u64 kernel_start = 0x100000;
+    u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
-
+    
     u64 kernel_end = find_end(file_base, kernel_start);
+    UINTN pages = kernel_end >> 12;
 
-    Print(L"kernel_start=0x%lx\n", kernel_start);
-    Print(L"kernel_end=0x%lx", kernel_end);
-     
+    EFI_PHYSICAL_ADDRESS addr = 0;
 
+    uefi_call_wrapper(
+        gBS->AllocatePages,
+        4,
+        AllocateAnyPages,
+        pages,
+        &addr
+    );
 
+    aloc_data ad = elf_loader(file_base, (u64)addr, file);
+
+    uefi_call_wrapper(
+        gop->SetMode,
+        2,
+        gop,
+        mode_to_set
+    );
+    
+    u32 *fb = (u32 *)gop->Mode->FrameBufferBase;
+
+    fb[0] = 0xffffff;
 
 
     __asm__ __volatile__("cli");
