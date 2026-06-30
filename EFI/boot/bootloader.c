@@ -301,7 +301,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         &final_info
     );
 
-    Print(L"reading file...\n");
+    Print(L"reading kernel...\n");
 
     EFI_FILE_PROTOCOL *root;
     EFI_FILE_PROTOCOL *file;
@@ -320,7 +320,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         5,
         root,
         &file,
-        L"sign.bin",
+        L"boot\\kernel.elf",
         EFI_FILE_MODE_READ,
         0
     );
@@ -335,14 +335,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         file_buffer
     );
 
-    if (file_buffer[0] == 'M' & file_buffer[1] == 'A') {
-        Print(L"file read successfull!");
-    } else {
-        Print(L"file read failed");
-    }
     
-    u64 loader_entry = (u64)LoadedImage->ImageBase + LoadedImage->ImageSize;
-    
+    u64 kernel_start = 0x100000;
+    u64 file_base = (u64)file_buffer;
+
+    u64 kernel_end = find_end(file_base, kernel_start);
+
+    Print(L"kernel_start=0x%lx\n", kernel_start);
+    Print(L"kernel_end=0x%lx", kernel_end);
      
 
 

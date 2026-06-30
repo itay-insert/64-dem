@@ -8,8 +8,8 @@ cd ..
 
 cd boot
 
-gcc -fpic -pie -ffreestanding -nostdlib -c loader/loader.c -o loader.o
-ld -T loader/link.ld -o loader.elf *.o
+gcc -fpic -pie -ffreestanding -nostdlib -c kernel/kernel.c -o kernel.o
+ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o
 
