@@ -41,11 +41,20 @@ u64 find_end(u64 file_base, u64 p_entry) {
         u32 p_type = *(u32 *)p_header;
         u64 p_filesz = *(u64 *)(p_header+0x20);
         u64 p_memsz = *(u64 *)(p_header+0x28);
+        u64 p_align = *(u64 *)(p_header+0x30);
         if (p_type == PT_LOAD) {
             if (p_memsz > p_filesz) {
-                p_entry += (p_memsz + 4095) & ~4095;
+                if (p_align == 1 || p_align == 0) {
+                    p_entry += p_memsz;
+                } else {
+                    p_entry += (p_memsz + (p_align-1)) & ~(p_align-1);
+                }
             } else {
-                p_entry += (p_filesz + 4095) & ~4095;
+                if (p_align == 1 || p_align == 0) {
+                    p_entry += p_filesz;
+                } else {
+                    p_entry += (p_filesz + (p_align-1)) & ~(p_align-1);
+                }
             }
         }
         p_header += e_phentsize;
@@ -53,26 +62,22 @@ u64 find_end(u64 file_base, u64 p_entry) {
     return p_entry;
 }
 
-void handle_that(u64 p_offset, u64 p_filesz, VOID *buf, EFI_FILE_PROTOCOL *file) {
-    if (p_offset-p_filesz <= 4095) {
-        uefi_call_wrapper(
-            file->SetPosition,
-            2,
-            file,
-            p_offset
-        );
-        uefi_call_wrapper(
-            file->Read,
-            3,
-            file,
-            &size,
-            file_buffer
-        );
-        memcpy(buf, file_buffer, 4095-p_offset);
-        buf += 4095 - p_offset;
+void load_segment(u64 p_offset, u64 p_filesz, u64 p_align, VOID *buf, EFI_FILE_PROTOCOL *file) {
+    u64 iterations;
+    uefi_call_wrapper(
+        file->SetPosition,
+        2,
+        file,
+        p_offset
+    );
+    if (p_align == 0 || p_align == 1) {
+        iterations = p_filesz;
+        size = 1;
+    } else {
+        iterations = (p_filesz + (p_align-1)) / p_align;
+        size = p_align;
     }
-    p_offset = p_offset >> 12;
-    for (u64 i = 0; i < p_offset; i++) {
+    for (u64 i = 0; i < iterations; i++) {
         uefi_call_wrapper(
             file->Read,
             3,
@@ -81,9 +86,17 @@ void handle_that(u64 p_offset, u64 p_filesz, VOID *buf, EFI_FILE_PROTOCOL *file)
             file_buffer
         );
 
-        memcpy(buf, file_buffer, (size_t)p_filesz);
+        if (p_filesz - (i * size) > size) {
+            memcpy(buf, file_buffer, (size_t)size);
+        } else {
+            memcpy(buf, file_buffer, (size_t)(p_filesz - (i * size)));
+        }
+        
         buf += 4096;
     }
+
+    size = 4096;
+
     uefi_call_wrapper(
         file->SetPosition,
         2,
@@ -111,6 +124,7 @@ u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
         u64 p_vaddr = *(u64 *)(p_header+0x10);
         u64 p_filesz = *(u64 *)(p_header+0x20);
         u64 p_memsz = *(u64 *)(p_header+0x28);
+        u64 p_align = *(u64 *)(p_header+0x30);
         if (p_type == PT_LOAD) {
             if (p_memsz > p_filesz) {
                 char *fix_buf = buf;
@@ -122,20 +136,22 @@ u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
 
             buf += p_vaddr;
 
-
-            if (p_offset + p_filesz > 4095) {
-                handle_that(p_offset+p_filesz, p_filesz, buf, file);
-            } else {
-                VOID *segment = (VOID *)(e.file_base+p_offset);
-                memcpy(buf, segment, (size_t)p_filesz);
-            }
+            load_segment(p_offset, p_filesz, p_align, buf, file);
 
             buf = buf - p_vaddr;
 
             if (p_memsz > p_filesz) {
-                e.e_entry += (p_memsz + 4095) & ~4095;
+                if (p_align == 1 || p_align == 0) {
+                    e.e_entry += p_memsz;
+                } else {
+                    e.e_entry += (p_memsz + (p_align-1)) & ~(p_align-1);
+                }
             } else {
-                e.e_entry += (p_filesz + 4095) & ~4095;
+                if (p_align == 1 || p_align == 0) {
+                    e.e_entry += p_filesz;
+                } else {
+                    e.e_entry += (p_filesz + (p_align-1)) & ~(p_align-1);
+                }
             }
 
         }
