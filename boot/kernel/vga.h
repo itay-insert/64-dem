@@ -1,6 +1,4 @@
 #include <stdint.h>
-#include "vga.h"
-
 #define u8 uint8_t
 #define u16 uint16_t
 #define u32 uint32_t
@@ -11,9 +9,11 @@
 #define i32 int32_t
 #define i64 int64_t 
 
+#ifndef VGA_H
+#define VGA_H
 
-void main(u64 fb_base, int hres, int vres) {
-    vga_init(fb_base, hres, vres);
-    draw_16color(0, 0, 1);
-    while (1) { }
-}
+void vga_init(u64 fb_base, int hres, int vres);
+void draw_pixel(int x, int y, u32 color);
+void draw_16color(int x, int y, int color_index);
+
+#endif

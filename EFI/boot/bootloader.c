@@ -377,10 +377,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         mode_to_set
     );
     
-    u32 *fb = (u32 *)gop->Mode->FrameBufferBase;
-
-    typedef void (*kernel_entry_t)(u32 *fb_base);
+    u64 fb = (u64)gop->Mode->FrameBufferBase;
+    
+    typedef void (*kernel_entry_t)(u64 fb_base, int hres, int vres);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
+
+    int hreso = (int)final_info->HorizontalResolution;
+    int vreso = (int)final_info->VerticalResolution;
 
     while (1) {
         uefi_call_wrapper(
@@ -407,7 +410,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(fb);
+    kernel_entry(fb, hreso, vreso);
     
     while (1) {
         __asm__ __volatile__("hlt");
