@@ -73,6 +73,7 @@ void load_segment(u64 p_offset, u64 p_filesz, u64 p_align, VOID *buf, EFI_FILE_P
     if (p_align == 0 || p_align == 1) {
         iterations = p_filesz;
         size = 1;
+        p_align = 1;
     } else {
         iterations = (p_filesz + (p_align-1)) / p_align;
         size = p_align;
@@ -86,10 +87,10 @@ void load_segment(u64 p_offset, u64 p_filesz, u64 p_align, VOID *buf, EFI_FILE_P
             file_buffer
         );
 
-        if (p_filesz - (i * size) > size) {
-            memcpy(buf, file_buffer, (size_t)size);
+        if (p_filesz - (i * p_align) > p_align) {
+            memcpy(buf, file_buffer, (size_t)p_align);
         } else {
-            memcpy(buf, file_buffer, (size_t)(p_filesz - (i * size)));
+            memcpy(buf, file_buffer, (size_t)(p_filesz - (i * p_align)));
         }
         
         buf += 4096;
@@ -379,11 +380,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     u64 fb = (u64)gop->Mode->FrameBufferBase;
     
-    typedef void (*kernel_entry_t)(u64 fb_base, int hres, int vres);
+    typedef void (*kernel_entry_t)(u64 fb_base, int hres, int vres, int p_scan);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
     int hreso = (int)final_info->HorizontalResolution;
     int vreso = (int)final_info->VerticalResolution;
+    int p_scanln = (int)final_info->PixelsPerScanLine;
 
     while (1) {
         uefi_call_wrapper(
@@ -410,7 +412,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(fb, hreso, vreso);
+    kernel_entry(fb, hreso, vreso, p_scanln);
     
     while (1) {
         __asm__ __volatile__("hlt");

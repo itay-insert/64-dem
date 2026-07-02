@@ -12,8 +12,10 @@
 #define i64 int64_t 
 
 
-void main(u64 fb_base, int hres, int vres) {
-    vga_init(fb_base, hres, vres);
-    draw_16color(0, 0, 1);
-    while (1) { }
+void main(u64 fb_base, int hres, int vres, int p_scan) {
+    vga_init(fb_base, hres, vres, p_scan);
+    printf("Hello from kernel :)\n");
+    while (1) { 
+        draw_cursor(7);
+    }
 }
