@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdarg.h>
 
 #define u8 uint8_t
 #define u16 uint16_t
@@ -33,6 +34,9 @@
 #define MaskBlue 0xff
 #define MaskGreen 0xff00
 #define MaskRed 0xff0000
+
+#define Forwards 0
+#define Backwards 1
 
 u32 vga16_color[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 
@@ -487,20 +491,171 @@ void draw_cursor(int color_index) {
     }
 }
 
-void printf(char str[]) {
+void cursor_inc(void) {
+	cursor.coulmn++;
+	if (cursor.coulmn >= (p_scanln >> 3)) {
+        cursor.coulmn = 0;
+		cursor.row++;
+    }
+}
+
+void print_unsigned(unsigned int x)
+{
+    char buffer[10];   // enough for a 32-bit unsigned int
+    int i = 0;
+
+    do {
+        buffer[i++] = '0' + (x % 10);
+        x /= 10;
+    } while (x != 0);
+
+    while (i > 0) {
+        draw_char(buffer[--i], cursor.coulmn, cursor.row);
+		cursor_inc();
+	}
+}
+
+void print_unsigned_long(unsigned long x)
+{
+    char buffer[20];
+    int i = 0;
+
+    do {
+        buffer[i++] = '0' + (x % 10);
+        x /= 10;
+    } while (x != 0);
+
+    while (i > 0)
+        draw_char(buffer[--i], cursor.coulmn, cursor.row);
+		cursor_inc();
+}
+
+void print_int(int x)
+{
+    if (x < 0) {
+        draw_char('-', cursor.coulmn, cursor.row);
+		cursor_inc();
+
+        // Handle the most negative int safely
+        unsigned int u = (unsigned int)(-(x + 1)) + 1;
+
+        print_unsigned(u);
+    } else {
+        print_unsigned((unsigned int)x);
+    }
+}
+
+void print_long(long x)
+{ 
+    if (x < 0) {
+        draw_char('-', cursor.coulmn, cursor.row);
+		cursor_inc();
+
+        // Handle LONG_MIN safely
+        unsigned long u = (unsigned long)(-(x + 1)) + 1;
+
+        print_unsigned_long(u);
+    } else {
+        print_unsigned_long((unsigned long)x);
+    }
+}
+
+void print_byte_hex(u8 b)
+{
+    char hex[] = "0123456789ABCDEF";
+
+    char high = hex[(b >> 4) & 0xF];
+    char low  = hex[b & 0xF];
+
+    draw_char(high, cursor.coulmn, cursor.row);
+	cursor_inc();
+
+    draw_char(low, cursor.coulmn, cursor.row);
+	cursor_inc();
+}
+
+void print_word_hex(u16 w)
+{
+    print_byte_hex((u8)(w >> 8));
+    print_byte_hex((u8)(w & 0xFF));
+}
+
+void print_dword_hex(u32 d)
+{
+    print_word_hex((u16)(d >> 16));
+    print_word_hex((u16)(d & 0xFFFF));
+}
+
+void print_qword_hex(u64 q)
+{
+    print_dword_hex((u32)(q >> 32));
+    print_dword_hex((u32)(q & 0xFFFFFFFFULL));
+}
+
+void printf(char str[], ...) {
+	va_list args;
+	va_start (args, str);
+
     char *p_str = str;
     while (*p_str != '\0') {
         if (*p_str == '\n') {
             cursor.coulmn = 0;
             cursor.row++;
-        } else {
-            if (cursor.coulmn >= (p_scanln >> 3)) {
-                cursor.coulmn = 0;
-                cursor.row++;
-            }
+        } else if (*p_str == '%') {
+			p_str++;
+			switch (*p_str) {
+
+				case 'd':
+					print_int(va_arg(args, int));
+					break;
+
+				case 'u':
+					if (p_str[1] == 'x') {
+						print_dword_hex(va_arg(args, unsigned int));
+						p_str++;
+					} else {
+						print_unsigned(va_arg(args, unsigned int));
+					}
+					break;
+				
+				case 'l':
+					p_str++;
+					if (*p_str == 'd') {
+						print_long(va_arg(args, long));
+					} else if (*p_str == 'u') {
+						print_unsigned_long(va_arg(args, unsigned long));
+					} else if (*p_str == 'x') {
+						print_qword_hex(va_arg(args, u64));
+					} else {
+						draw_char('%', cursor.coulmn, cursor.row);
+						cursor_inc();
+						draw_char('l', cursor.coulmn, cursor.row);
+						cursor_inc();
+						p_str--;
+					}
+					break;
+				
+				case 'b':
+					print_byte_hex((u8)va_arg(args, int));
+					break;
+				
+				case 'w':
+					print_byte_hex((u16)va_arg(args, int));
+					break;
+				
+				default:
+					p_str--;
+					draw_char((char)*p_str, cursor.coulmn, cursor.row);
+					cursor_inc();
+					break;
+			}
+		}
+		else {
             draw_char((char)*p_str, cursor.coulmn, cursor.row);
-            cursor.coulmn++;
+			cursor_inc();
         }
-        p_str++;
+		p_str++;
     }
+
+	va_end(args);
 }

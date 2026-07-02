@@ -39,7 +39,8 @@
 
 void main(u64 *info_buffer64, int *info_buffer) {
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
-    printf("Hello from kernel!\n");
+    printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx ",
+         KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
     while (1) { 
         draw_cursor(LightGray);
     }

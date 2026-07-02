@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdarg.h>
 #define u8 uint8_t
 #define u16 uint16_t
 #define u32 uint32_t
@@ -18,7 +19,7 @@ void draw_16color(int x, int y, int color_index);
 void Set_GlobalTextColor(int color_index);
 void draw_char(char ch, int coulmn, int row);
 void draw_cursor(int color_index);
-void printf(char str[]);
+void printf(char str[], ...);
 
 
 #endif
