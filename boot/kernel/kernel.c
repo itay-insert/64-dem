@@ -11,11 +11,36 @@
 #define i32 int32_t
 #define i64 int64_t 
 
+#define KernelEntry info_buffer64[0]
+#define KernelStart info_buffer64[1]
+#define KernelEnd info_buffer64[2]
+#define Framebuffer_base info_buffer64[3]
+#define PixelMode info_buffer[0]
+#define Horizontal_res info_buffer[1]
+#define Vertical_res info_buffer[2]
+#define PixelsPerScanline info_buffer[3]
 
-void main(u64 fb_base, int hres, int vres, int p_scan) {
-    vga_init(fb_base, hres, vres, p_scan);
-    printf("Hello from kernel :)\n");
+#define Black 0
+#define Blue 1
+#define Green 2
+#define Cyan 3
+#define Red 4
+#define Purple 5
+#define Brown 6
+#define LightGray 7
+#define DarkGray 8
+#define LightBlue 9
+#define LightGreen 10
+#define LightCyan 11
+#define LightRed 12
+#define Pink 13
+#define Yellow 14
+#define White 15
+
+void main(u64 *info_buffer64, int *info_buffer) {
+    vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    printf("Hello from kernel!\n");
     while (1) { 
-        draw_cursor(7);
+        draw_cursor(LightGray);
     }
 }

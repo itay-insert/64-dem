@@ -28,6 +28,7 @@ typedef struct {
 typedef struct {
     u64 entry;
     u64 end;
+    u64 start;
 } aloc_data;
 
 
@@ -165,7 +166,7 @@ u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
 
 
 aloc_data elf_loader(u64 file_base, u64 p_entry, EFI_FILE_PROTOCOL *file) {
-    aloc_data ad = {0, 0};
+    aloc_data ad = {0, 0, 0};
     char *magic_ptr = (char *)file_base;
     if (*magic_ptr == 0x7f && magic_ptr[1] == 'E' &&
     magic_ptr[2] == 'L' && magic_ptr[3] == 'F') {
@@ -178,6 +179,7 @@ aloc_data elf_loader(u64 file_base, u64 p_entry, EFI_FILE_PROTOCOL *file) {
         pt_data e = {file_base+e_phoff, p_entry, e_phentsize, e_phnum};
         ad.end = elf_allocator(e, file);
         ad.entry = e_entry;
+        ad.start = p_entry;
     } 
     return ad;
 }
@@ -380,12 +382,39 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     u64 fb = (u64)gop->Mode->FrameBufferBase;
     
-    typedef void (*kernel_entry_t)(u64 fb_base, int hres, int vres, int p_scan);
+    typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
-    int hreso = (int)final_info->HorizontalResolution;
-    int vreso = (int)final_info->VerticalResolution;
-    int p_scanln = (int)final_info->PixelsPerScanLine;
+    int i_buff[4] = {0};
+
+    switch (gop->Mode->Info->PixelFormat) {
+        case PixelRedGreenBlueReserved8BitPerColor:
+            i_buff[0] = 0;
+            break;
+
+        case PixelBlueGreenRedReserved8BitPerColor:
+            i_buff[0] = 1;
+            break;
+
+        default:
+            i_buff[0] = 0;
+            break;
+    }
+
+
+    i_buff[1] = (int)final_info->HorizontalResolution;
+    i_buff[2] = (int)final_info->VerticalResolution;
+    i_buff[3] = (int)final_info->PixelsPerScanLine;
+
+    u64 i_buff64[4] = {0};
+
+    i_buff64[0] = ad.entry;
+    i_buff64[1] = ad.start;
+    i_buff64[2] = ad.end;
+    i_buff64[3] = fb;
+
+    int *p_buff = i_buff;
+    u64 *p_buff64 = i_buff64;
 
     while (1) {
         uefi_call_wrapper(
@@ -412,7 +441,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(fb, hreso, vreso, p_scanln);
+    kernel_entry(p_buff64, p_buff);
     
     while (1) {
         __asm__ __volatile__("hlt");

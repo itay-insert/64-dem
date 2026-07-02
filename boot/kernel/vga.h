@@ -12,7 +12,7 @@
 #ifndef VGA_H
 #define VGA_H
 
-void vga_init(u64 fb_base, int hres, int vres, int p_scan);
+void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode);
 void draw_pixel(int x, int y, u32 color);
 void draw_16color(int x, int y, int color_index);
 void Set_GlobalTextColor(int color_index);

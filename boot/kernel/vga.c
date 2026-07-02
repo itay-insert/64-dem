@@ -10,7 +10,29 @@
 #define i32 int32_t
 #define i64 int64_t 
 
+#define RGB 0
+#define BGR 1
 
+#define Black 0
+#define Blue 1
+#define Green 2
+#define Cyan 3
+#define Red 4
+#define Purple 5
+#define Brown 6
+#define LightGray 7
+#define DarkGray 8
+#define LightBlue 9
+#define LightGreen 10
+#define LightCyan 11
+#define LightRed 12
+#define Pink 13
+#define Yellow 14
+#define White 15
+
+#define MaskBlue 0xff
+#define MaskGreen 0xff00
+#define MaskRed 0xff0000
 
 u32 vga16_color[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 
@@ -24,21 +46,30 @@ u64 fb_addr = 0;
 int hor_res = 0;
 int ver_res = 0;
 int p_scanln = 0;
+int p_format = RGB;
 int size = 0;
 
-void vga_init(u64 fb_base, int hres, int vres, int p_scan) {
+void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
     fb_addr = fb_base;
     size = hres * vres;
     hor_res = hres;
     p_scanln = p_scan;
     ver_res = vres;
+	p_format = p_mode;
 }
 
 void draw_pixel(int x, int y, u32 color) {
     u32 *vga = (u32 *)fb_addr;
     int addr = (y * p_scanln) + x;
     if (addr <= size) {
-        vga[addr] = color;
+		if (p_format == BGR) {
+			u32 BgrColor = (color & MaskBlue) << 16;
+			BgrColor += color & MaskGreen;
+			BgrColor += (color & MaskRed) >> 16; 
+			vga[addr] = BgrColor;
+		} else if (p_format == RGB) {
+			vga[addr] = color;
+		}
     }
 }
 
@@ -47,11 +78,18 @@ void draw_16color(int x, int y, int color_index) {
     int addr = (y * p_scanln) + x;
     u32 color = vga16_color[color_index];
     if (addr <= size) {
-        vga[addr] = color;
+		if (p_format == BGR) {
+			u32 BgrColor = (color & MaskBlue) << 16;
+			BgrColor += color & MaskGreen;
+			BgrColor += (color & MaskRed) >> 16;
+			vga[addr] = BgrColor; 
+		} else if (p_format == RGB) {
+			vga[addr] = color;
+		}
     }
 }
 
-int global_textcolor = 7;
+int global_textcolor = LightGray;
 
 void Set_GlobalTextColor(int color_index) {
     global_textcolor = color_index;
@@ -456,7 +494,7 @@ void printf(char str[]) {
             cursor.coulmn = 0;
             cursor.row++;
         } else {
-            if (cursor.coulmn >= (hor_res >> 3)) {
+            if (cursor.coulmn >= (p_scanln >> 3)) {
                 cursor.coulmn = 0;
                 cursor.row++;
             }
