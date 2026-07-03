@@ -1,7 +1,9 @@
 #include <stdint.h>
+#include "lowlevel.h"
 #include "vga.h"
 #include "rtc.h"
 #include "ports.h"
+
 
 #define u8 uint8_t
 #define u16 uint16_t
@@ -41,6 +43,8 @@
 
 void main(u64 *info_buffer64, int *info_buffer) {
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    u64 stack = stack_get();
+    printf("rsp = %lx\n", stack);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
     printf("\n");
