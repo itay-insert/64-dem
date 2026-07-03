@@ -27,15 +27,19 @@ u8 rtc_read(u8 rtc_reg) {
     return inb(0x71);  // read from register
 }
 
-void print_date(void) {
-    u8 year = rtc_read(0x09);
-    u8 month = rtc_read(0x08);
-    u8 day = rtc_read(0x07);
-    u8 hour = rtc_read(0x04);
-    u8 min = rtc_read(0x02);
-    u8 sec = rtc_read(0x00);
-    text_data td = printf("%b/%b/20%b  %b:%b:%b\n   date       time",
-         day, month, year, hour, min, sec);
-    cursor_Setpos(td.coulmn, td.row);
+typedef struct {
+    u8 year, month, day;
+    u8 hour, min, sec;
+} rtc_data;
+
+rtc_data get_dateAndTime(void) {
+    rtc_data rt = {0};
+    rt.year = rtc_read(0x09);
+    rt.month = rtc_read(0x08);
+    rt.day = rtc_read(0x07);
+    rt.hour = rtc_read(0x04);
+    rt.min = rtc_read(0x02);
+    rt.sec = rtc_read(0x00);
+    return rt;
 }
 

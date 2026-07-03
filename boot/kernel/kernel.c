@@ -41,22 +41,23 @@
 #define Yellow 14
 #define White 15
 
-void main(u64 *info_buffer64, int *info_buffer) {
+void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack) {
+    rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
-    u64 stack = stack_get();
-    printf("rsp = %lx\n", stack);
+    printf("stack_top = %lx\n", stack);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
     printf("\n");
-    print_date();
-    u8 old_sec = rtc_read(0x00);
+    text_data td = printf("%b/%b/20%b    %b:%b:%b", rt.day, rt.month, rt.year, rt.hour, rt.min, rt.sec);
+    cursor_Setpos(td.coulmn, td.row);
+    u8 old_sec = rt.sec;
     while (1) {
-        u8 new_sec = rtc_read(0x00);
-        if (new_sec != old_sec) {
-            print_date();
-            old_sec = new_sec;
+        rt = get_dateAndTime();
+        if (rt.sec != old_sec) {
+            td = printf("%b/%b/20%b    %b:%b:%b", rt.day, rt.month, rt.year, rt.hour, rt.min, rt.sec);
+            cursor_Setpos(td.coulmn, td.row);
+            old_sec = rt.sec;
         }
-
     }
     
 }

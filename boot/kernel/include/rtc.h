@@ -14,5 +14,11 @@
 #define RTC_H
 
 u8 rtc_read(u8 rtc_reg);
-void print_date(void);
+
+typedef struct {
+    u8 year, month, day;
+    u8 hour, min, sec;
+} rtc_data;
+
+rtc_data get_dateAndTime(void);
 #endif

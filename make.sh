@@ -8,6 +8,7 @@ cd ..
 
 cd boot
 
+nasm -f elf64 kernel/entry.asm -o entry.o
 nasm -f elf64 kernel/x86-64/ports.asm -o ports.o
 nasm -f elf64 kernel/x86-64/lowlevel.asm -o lowlevel.o
 gcc -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/kernel.c -o kernel.o

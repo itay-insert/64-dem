@@ -359,7 +359,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     u64 file_base = (u64)file_buffer;
     
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = kernel_end >> 12;
+    UINTN pages = (kernel_end >> 12) + 65;
 
     EFI_PHYSICAL_ADDRESS addr = 0;
 
@@ -370,6 +370,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         pages,
         &addr
     );
+
+    EFI_PHYSICAL_ADDRESS stack = addr + kernel_end + 0x41000; 
 
     aloc_data ad = elf_loader(file_base, (u64)addr, file);
 
@@ -382,7 +384,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     u64 fb = (u64)gop->Mode->FrameBufferBase;
     
-    typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer);
+    typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer, u64 stack_top);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
     int i_buff[4] = {0};
@@ -441,7 +443,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(p_buff64, p_buff);
+    kernel_entry(p_buff64, p_buff, (u64)stack);
     
     while (1) {
         __asm__ __volatile__("hlt");
