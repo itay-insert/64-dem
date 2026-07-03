@@ -22,12 +22,12 @@
 
 
 static inline u8 rtc_read(u8 rtc_reg) {
-    outb(0x70, rtc_reg);  // write which register to read from
+    outb(0x70, rtc_reg | 0x80);  // write which register to read from
     return inb(0x71);  // read from register
 }
 
 static inline int rtc_is_updating() {
-    outb(0x70, StatusA);  // check update status
+    outb(0x70, StatusA | 0x80);  // check update status
     return inb(0x71) & 0x80;
 }
 
@@ -49,46 +49,30 @@ static inline u8 bin_to_bcd(u8 v) {
 }
 
 rtc_data get_DateAndTime(void) {
-    rtc_data t1, t2;
+    rtc_data t1;
     u8 statusb = rtc_read(StatusB);  // check whether we are in bin mode
     int binary_mode = (statusb & 0x04) != 0;
 
-    do {
-        rtc_wait_ready();
+    
+    rtc_wait_ready();
 
-        t1.sec   = rtc_read(Seconds);  // read date and time twice to confirm
-        t1.min   = rtc_read(Minutes);
-        t1.hour  = rtc_read(Hours);
-        t1.day   = rtc_read(Day);
-        t1.month = rtc_read(Month);
-        t1.year  = rtc_read(Year);
-
-        rtc_wait_ready();
-
-        t2.sec   = rtc_read(Seconds);
-        t2.min   = rtc_read(Minutes);
-        t2.hour  = rtc_read(Hours);
-        t2.day   = rtc_read(Day);
-        t2.month = rtc_read(Month);
-        t2.year  = rtc_read(Year);
-
-    } while (t1.sec != t2.sec ||
-             t1.min != t2.min ||
-             t1.hour != t2.hour ||
-             t1.day != t2.day ||
-             t1.month != t2.month ||
-             t1.year != t2.year);
+    t1.sec   = rtc_read(Seconds);  // read date and time twice to confirm
+    t1.min   = rtc_read(Minutes);
+    t1.hour  = rtc_read(Hours);
+    t1.day   = rtc_read(Day);
+    t1.month = rtc_read(Month);
+    t1.year  = rtc_read(Year);
 
             
     if (binary_mode) {
-        t2.sec   = bin_to_bcd(t2.sec);
-        t2.min   = bin_to_bcd(t2.min);
-        t2.hour  = bin_to_bcd(t2.hour);
-        t2.day   = bin_to_bcd(t2.day);
-        t2.month = bin_to_bcd(t2.month);
-        t2.year  = bin_to_bcd(t2.year);
+        t1.sec   = bin_to_bcd(t1.sec);
+        t1.min   = bin_to_bcd(t1.min);
+        t1.hour  = bin_to_bcd(t1.hour);
+        t1.day   = bin_to_bcd(t1.day);
+        t1.month = bin_to_bcd(t1.month);
+        t1.year  = bin_to_bcd(t1.year);
     }
 
-    return t2;
+    return t1;
 }
 
