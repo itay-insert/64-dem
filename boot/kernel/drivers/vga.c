@@ -465,7 +465,9 @@ void draw_char(char ch, int coulmn, int row) {
             u8 chk = check_byte(byte, j, 1);
             if (chk == 1) {
                 draw_16color(coulmn, row, global_textcolor);
-            }
+            } else {
+				draw_16color(coulmn, row, Black);
+			}
             coulmn++;
         }
         coulmn -= 8;
@@ -491,7 +493,7 @@ void draw_cursor(int color_index) {
     }
 }
 
-void cursor_inc(void) {
+static inline void cursor_inc(void) {
 	cursor.coulmn++;
 	if (cursor.coulmn >= (p_scanln >> 3)) {
         cursor.coulmn = 0;
@@ -592,9 +594,19 @@ void print_qword_hex(u64 q)
     print_dword_hex((u32)(q & 0xFFFFFFFFULL));
 }
 
-void printf(char str[], ...) {
+typedef struct {
+	int coulmn;
+	int row;
+} text_data;
+
+text_data printf(char str[], ...) {
 	va_list args;
 	va_start (args, str);
+	
+	text_data td;
+
+	td.coulmn = cursor.coulmn;
+	td.row = cursor.row;
 
     char *p_str = str;
     while (*p_str != '\0') {
@@ -658,4 +670,31 @@ void printf(char str[], ...) {
     }
 
 	va_end(args);
+	return td;
+}
+
+void move_cursor(int amt) {
+	int cols = p_scanln >> 3;
+
+	int pos = cursor.row * cols + cursor.coulmn;
+
+	pos += amt;
+
+	if (pos < 0)
+        pos = 0;
+
+    cursor.row = pos / cols;
+    cursor.coulmn = pos % cols;
+}
+
+void cursor_Setpos(int coulmn, int row) {
+	int cols = p_scanln >> 3;
+
+	int pos = row * cols + coulmn;
+	
+	if (pos < 0)
+		pos = 0;
+	
+	cursor.coulmn = pos % cols;
+	cursor.row = pos / cols;
 }

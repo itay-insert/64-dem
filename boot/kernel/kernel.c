@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "vga.h"
+#include "rtc.h"
 
 #define u8 uint8_t
 #define u16 uint16_t
@@ -39,9 +40,21 @@
 
 void main(u64 *info_buffer64, int *info_buffer) {
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
-    printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx ",
+    printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
+    printf("\n");
+    rtc_data rtc = get_DateAndTime();
+    text_data td = printf("%b/%b/20%b  %b:%b:%b\n   date       time",
+         rtc.day, rtc.month, rtc.year, rtc.hour, rtc.min, rtc.sec);
+    cursor_Setpos(td.coulmn, td.row);
+    int old_sec = rtc.sec;
     while (1) { 
-        draw_cursor(LightGray);
+        rtc = get_DateAndTime();
+        if (rtc.sec != old_sec) {
+            td = printf("%b/%b/20%b  %b:%b:%b\n   date       time",
+         rtc.day, rtc.month, rtc.year, rtc.hour, rtc.min, rtc.sec);
+                cursor_Setpos(td.coulmn, td.row);
+        }
+        old_sec = rtc.sec;
     }
 }

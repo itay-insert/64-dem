@@ -19,7 +19,15 @@ void draw_16color(int x, int y, int color_index);
 void Set_GlobalTextColor(int color_index);
 void draw_char(char ch, int coulmn, int row);
 void draw_cursor(int color_index);
-void printf(char str[], ...);
+
+typedef struct {
+	int coulmn;
+	int row;
+} text_data;
+
+text_data printf(char str[], ...);
+void move_cursor(int amt);
+void cursor_Setpos(int coulmn, int row);
 
 
 #endif
