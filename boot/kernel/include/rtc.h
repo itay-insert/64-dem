@@ -13,13 +13,6 @@
 #ifndef RTC_H
 #define RTC_H
 
-void rtc_wait_ready(void);
-
-typedef struct {
-    u8 sec, min, hour;
-    u8 day, month, year;
-} rtc_data;
-
-rtc_data get_DateAndTime(void);
-
+u8 rtc_read(u8 rtc_reg);
+void print_date(void);
 #endif
