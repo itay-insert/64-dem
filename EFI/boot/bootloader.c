@@ -257,7 +257,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (status != EFI_BUFFER_TOO_SMALL)
     return status;
 
-    UINTN mpc = descriptor_size;
 
 /* Add some extra room */
     memory_map_size += 2 * descriptor_size;
@@ -284,7 +283,31 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         &descriptor_version
     );
 
+    UINTN mpc = descriptor_size;
     UINTN mmpsz = memory_map_size;
+
+    
+    UINT8 *ptr = (UINT8 *)memory_map;
+UINTN count = memory_map_size / descriptor_size;
+
+EFI_PHYSICAL_ADDRESS highest_end = 0;
+
+for (UINTN i = 0; i < count; i++) {
+    EFI_MEMORY_DESCRIPTOR *desc =
+        (EFI_MEMORY_DESCRIPTOR *)(ptr + i * descriptor_size);
+
+    EFI_PHYSICAL_ADDRESS end =
+        desc->PhysicalStart + desc->NumberOfPages * 4096;
+
+    if (end > highest_end)
+        highest_end = end;
+}
+
+// Number of pages needed to cover physical address space.
+UINTN total_pages = (highest_end + 4095) / 4096;
+
+// 1 bit per page.
+UINTN bitmap_size = (total_pages + 7) / 8;
 
     if (EFI_ERROR(status))
     return status;
@@ -363,7 +386,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     u64 file_base = (u64)file_buffer;
     
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = (kernel_end >> 12) + 65;
+    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096);
 
     EFI_PHYSICAL_ADDRESS addr = 0;
 
@@ -412,7 +435,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     i_buff[2] = (int)final_info->VerticalResolution;
     i_buff[3] = (int)final_info->PixelsPerScanLine;
 
-    u64 i_buff64[6] = {0};
+    u64 i_buff64[7] = {0};
 
     i_buff64[0] = ad.entry;
     i_buff64[1] = ad.start;
@@ -420,6 +443,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     i_buff64[3] = fb;
     i_buff64[4] = (u64)mmpsz;
     i_buff64[5] = (u64)mpc;
+    i_buff64[6] = (u64)bitmap_size;
 
     int *p_buff = i_buff;
     u64 *p_buff64 = i_buff64;

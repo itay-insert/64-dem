@@ -21,6 +21,7 @@
 #define Framebuffer_base info_buffer64[3]
 #define MemoryMapSize info_buffer64[4]
 #define DescriptorSize info_buffer64[5]
+#define BitmapSize info_buffer64[6]
 #define PixelMode info_buffer[0]
 #define Horizontal_res info_buffer[1]
 #define Vertical_res info_buffer[2]
@@ -62,6 +63,8 @@ typedef struct {
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    printf("bitmapSize= %lx\n", BitmapSize);
+    printf("kernel_AreaEND= %lx\n", (stack + BitmapSize));
     printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
