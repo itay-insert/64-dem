@@ -271,6 +271,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (EFI_ERROR(status))
     return status;
 
+    UINTN mmpsz = memory_map_size;
 /* Second call gets the actual map */
     status = uefi_call_wrapper(
         ST->BootServices->GetMemoryMap,
@@ -408,12 +409,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     i_buff[2] = (int)final_info->VerticalResolution;
     i_buff[3] = (int)final_info->PixelsPerScanLine;
 
-    u64 i_buff64[4] = {0};
+    u64 i_buff64[5] = {0};
 
     i_buff64[0] = ad.entry;
     i_buff64[1] = ad.start;
     i_buff64[2] = ad.end;
     i_buff64[3] = fb;
+    i_buff64[4] = (u64)mmpsz;
 
     int *p_buff = i_buff;
     u64 *p_buff64 = i_buff64;

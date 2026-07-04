@@ -527,9 +527,10 @@ void print_unsigned_long(unsigned long x)
         x /= 10;
     } while (x != 0);
 
-    while (i > 0)
+    while (i > 0) {
         draw_char(buffer[--i], cursor.coulmn, cursor.row);
 		cursor_inc();
+	}
 }
 
 void print_int(int x)
