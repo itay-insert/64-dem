@@ -13,6 +13,51 @@
 #define i32 int32_t
 #define i64 int64_t 
 
+#define PAGE_SIZE 4096
+#define MIN_KERNEL_PHYS  0x100000ULL   // 1 MiB
+
+static EFI_PHYSICAL_ADDRESS align_up(EFI_PHYSICAL_ADDRESS value, UINTN align)
+{
+    return (value + align - 1) & ~((EFI_PHYSICAL_ADDRESS)align - 1);
+}
+
+EFI_PHYSICAL_ADDRESS
+FindFreeRegion(
+    EFI_MEMORY_DESCRIPTOR *map,
+    UINTN map_size,
+    UINTN desc_size,
+    UINTN pages_needed
+)
+{
+    UINTN entries = map_size / desc_size;
+
+    for (UINTN i = 0; i < entries; i++) {
+        EFI_MEMORY_DESCRIPTOR *d =
+            (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
+
+        if (d->Type != EfiConventionalMemory)
+            continue;
+
+        EFI_PHYSICAL_ADDRESS region_start = d->PhysicalStart;
+        EFI_PHYSICAL_ADDRESS region_end = d->PhysicalStart +
+                                          (d->NumberOfPages * PAGE_SIZE);
+
+        if (region_end <= MIN_KERNEL_PHYS)
+            continue;
+
+        if (region_start < MIN_KERNEL_PHYS)
+            region_start = MIN_KERNEL_PHYS;
+
+        region_start = align_up(region_start, PAGE_SIZE);
+
+        if (region_start + (pages_needed * PAGE_SIZE) <= region_end)
+            return region_start;
+    }
+
+    return 0; // no suitable region found
+}
+
+
 #define PT_LOAD 1
 
 UINTN size = 4096;
@@ -385,20 +430,27 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
     
+    u64 buf_sz = 16;
+    u64 buf_sz64 = 56;
+
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096);
+    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096) + ((mmpsz + 4095) / 4096) + (((buf_sz+buf_sz64) + 4095) / 4096);
 
-    EFI_PHYSICAL_ADDRESS addr = 0;
-
-    uefi_call_wrapper(
-        gBS->AllocatePages,
-        4,
-        AllocateAnyPages,
-        pages,
-        &addr
-    );
+    EFI_PHYSICAL_ADDRESS addr = FindFreeRegion(memory_map, memory_map_size, descriptor_size, pages);
 
     EFI_PHYSICAL_ADDRESS stack = addr + kernel_end + 0x41000; 
+
+    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
+
+    u64 *p_buff64 = (u64 *)(MMP+memory_map_size);
+    int *p_buff =  (int *)(p_buff64+buf_sz64);
+
+    UINT8 *src = (UINT8 *)memory_map;
+    UINT8 *dst = (UINT8 *)MMP;
+
+    for (UINTN i = 0; i < memory_map_size; i++) {
+        dst[i] = src[i];
+    }
 
     aloc_data ad = elf_loader(file_base, (u64)addr, file);
 
@@ -414,39 +466,36 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer, u64 stack_top, EFI_MEMORY_DESCRIPTOR *mmap);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
-    int i_buff[4] = {0};
 
     switch (gop->Mode->Info->PixelFormat) {
         case PixelRedGreenBlueReserved8BitPerColor:
-            i_buff[0] = 0;
+            p_buff[0] = 0;
             break;
 
         case PixelBlueGreenRedReserved8BitPerColor:
-            i_buff[0] = 1;
+            p_buff[0] = 1;
             break;
 
         default:
-            i_buff[0] = 0;
+            p_buff[0] = 0;
             break;
     }
 
 
-    i_buff[1] = (int)final_info->HorizontalResolution;
-    i_buff[2] = (int)final_info->VerticalResolution;
-    i_buff[3] = (int)final_info->PixelsPerScanLine;
+    p_buff[1] = (int)final_info->HorizontalResolution;
+    p_buff[2] = (int)final_info->VerticalResolution;
+    p_buff[3] = (int)final_info->PixelsPerScanLine;
 
-    u64 i_buff64[7] = {0};
 
-    i_buff64[0] = ad.entry;
-    i_buff64[1] = ad.start;
-    i_buff64[2] = ad.end;
-    i_buff64[3] = fb;
-    i_buff64[4] = (u64)mmpsz;
-    i_buff64[5] = (u64)mpc;
-    i_buff64[6] = (u64)bitmap_size;
+    p_buff64[0] = ad.entry;
+    p_buff64[1] = ad.start;
+    p_buff64[2] = (u64)p_buff+16;
+    p_buff64[3] = fb;
+    p_buff64[4] = (u64)mmpsz;
+    p_buff64[5] = (u64)mpc;
+    p_buff64[6] = (u64)bitmap_size;
 
-    int *p_buff = i_buff;
-    u64 *p_buff64 = i_buff64;
+
 
     while (1) {
         uefi_call_wrapper(
@@ -473,7 +522,7 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(p_buff64, p_buff, (u64)stack, memory_map);
+    kernel_entry(p_buff64, p_buff, (u64)stack, MMP);
     
     while (1) {
         __asm__ __volatile__("hlt");
