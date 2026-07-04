@@ -29,32 +29,23 @@ FindFreeRegion(
     UINTN pages_needed
 )
 {
-    UINTN entries = map_size / desc_size;
+     UINTN entries = map_size / desc_size;
 
-    for (UINTN i = 0; i < entries; i++) {
-        EFI_MEMORY_DESCRIPTOR *d =
+    for (UINTN i = 0; i < entries; i++)
+    {
+        EFI_MEMORY_DESCRIPTOR *desc =
             (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
 
-        if (d->Type != EfiConventionalMemory)
+        if (desc->Type != EfiConventionalMemory)
             continue;
 
-        EFI_PHYSICAL_ADDRESS region_start = d->PhysicalStart;
-        EFI_PHYSICAL_ADDRESS region_end = d->PhysicalStart +
-                                          (d->NumberOfPages * PAGE_SIZE);
-
-        if (region_end <= MIN_KERNEL_PHYS)
-            continue;
-
-        if (region_start < MIN_KERNEL_PHYS)
-            region_start = MIN_KERNEL_PHYS;
-
-        region_start = align_up(region_start, PAGE_SIZE);
-
-        if (region_start + (pages_needed * PAGE_SIZE) <= region_end)
-            return region_start;
+        if (desc->NumberOfPages >= pages_needed)
+        {
+            return desc->PhysicalStart;
+        }
     }
 
-    return 0; // no suitable region found
+    return 1; // no space 
 }
 
 
@@ -434,7 +425,7 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     u64 buf_sz64 = 56;
 
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096) + ((mmpsz + 4095) / 4096) + (((buf_sz+buf_sz64) + 4095) / 4096);
+    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size+mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
 
     EFI_PHYSICAL_ADDRESS addr = FindFreeRegion(memory_map, memory_map_size, descriptor_size, pages);
 
@@ -442,8 +433,8 @@ UINTN bitmap_size = (total_pages + 7) / 8;
 
     EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
 
-    u64 *p_buff64 = (u64 *)(MMP+memory_map_size);
-    int *p_buff =  (int *)(p_buff64+buf_sz64);
+    u64 *p_buff64 = (u64 *)((u64)MMP + memory_map_size);
+    int *p_buff =  (int *)((u64)p_buff64 + buf_sz64);
 
     UINT8 *src = (UINT8 *)memory_map;
     UINT8 *dst = (UINT8 *)MMP;
