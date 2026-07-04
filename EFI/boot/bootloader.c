@@ -384,7 +384,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     
     u64 fb = (u64)gop->Mode->FrameBufferBase;
     
-    typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer, u64 stack_top);
+    typedef void (*kernel_entry_t)(u64 *info_buffer64, int *info_buffer, u64 stack_top, EFI_MEMORY_DESCRIPTOR *mmap);
     kernel_entry_t kernel_entry = (kernel_entry_t)(uintptr_t)ad.entry;
 
     int i_buff[4] = {0};
@@ -443,7 +443,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     __asm__ __volatile__("cli");
 
 
-    kernel_entry(p_buff64, p_buff, (u64)stack);
+    kernel_entry(p_buff64, p_buff, (u64)stack, memory_map);
     
     while (1) {
         __asm__ __volatile__("hlt");

@@ -41,10 +41,25 @@
 #define Yellow 14
 #define White 15
 
-void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack) {
+typedef unsigned int UINT32;
+typedef unsigned long long UINT64; 
+
+
+typedef UINT64 EFI_PHYSICAL_ADDRESS;
+typedef UINT64 EFI_VIRTUAL_ADDRESS;
+
+typedef struct {
+    UINT32 Type;
+    EFI_PHYSICAL_ADDRESS PhysicalStart;
+    EFI_VIRTUAL_ADDRESS VirtualStart;
+    UINT64 NumberOfPages;
+    UINT64 Attribute;
+} EFI_MEMORY_DESCRIPTOR;
+
+void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
-    printf("stack_top = %lx\n", stack);
+    printf("stack_top = %lx  memory_mapStart = %lx\n", stack, memory_map);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
     printf("\n");
