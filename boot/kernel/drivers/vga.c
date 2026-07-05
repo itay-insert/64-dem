@@ -1,19 +1,11 @@
 #include <stdint.h>
 #include <stdarg.h>
+#include "uint_definitions.h"
+#include "memory.h"
 
-#define u8 uint8_t
-#define u16 uint16_t
-#define u32 uint32_t
-#define u64 uint64_t
-
-#define i8 int8_t
-#define i16 int16_t
-#define i32 int32_t
-#define i64 int64_t 
 
 #define RGB 0
 #define BGR 1
-
 #define Black 0
 #define Blue 1
 #define Green 2
@@ -97,15 +89,6 @@ int global_textcolor = LightGray;
 
 void Set_GlobalTextColor(int color_index) {
     global_textcolor = color_index;
-}
-
-u8 check_byte(u8 byte, u8 bit, u8 dir) {
-    if (dir == 1) {
-        byte = byte >> (7 - bit);
-    }  else {
-        byte = byte >> bit;
-    }
-    return (byte & 0x01);
 }
 
 

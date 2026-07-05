@@ -1,17 +1,27 @@
 #include <stdint.h>
 #include <stdarg.h>
-#define u8 uint8_t
-#define u16 uint16_t
-#define u32 uint32_t
-#define u64 uint64_t
-
-#define i8 int8_t
-#define i16 int16_t
-#define i32 int32_t
-#define i64 int64_t 
+#include "uint_definitions.h"
 
 #ifndef VGA_H
 #define VGA_H
+
+#define Black 0
+#define Blue 1
+#define Green 2
+#define Cyan 3
+#define Red 4
+#define Purple 5
+#define Brown 6
+#define LightGray 7
+#define DarkGray 8
+#define LightBlue 9
+#define LightGreen 10
+#define LightCyan 11
+#define LightRed 12
+#define Pink 13
+#define Yellow 14
+#define White 15
+
 
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode);
 void draw_pixel(int x, int y, u32 color);

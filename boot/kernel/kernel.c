@@ -3,17 +3,10 @@
 #include "vga.h"
 #include "rtc.h"
 #include "ports.h"
+#include "memory.h"
+#include "uint_definitions.h"
 
 
-#define u8 uint8_t
-#define u16 uint16_t
-#define u32 uint32_t
-#define u64 uint64_t
-
-#define i8 int8_t
-#define i16 int16_t
-#define i32 int32_t
-#define i64 int64_t 
 
 #define KernelEntry info_buffer64[0]
 #define KernelStart info_buffer64[1]
@@ -28,42 +21,15 @@
 #define PixelsPerScanline info_buffer[3]
 
 
-#define Black 0
-#define Blue 1
-#define Green 2
-#define Cyan 3
-#define Red 4
-#define Purple 5
-#define Brown 6
-#define LightGray 7
-#define DarkGray 8
-#define LightBlue 9
-#define LightGreen 10
-#define LightCyan 11
-#define LightRed 12
-#define Pink 13
-#define Yellow 14
-#define White 15
-
-typedef unsigned int UINT32;
-typedef unsigned long long UINT64; 
-
-
-typedef UINT64 EFI_PHYSICAL_ADDRESS;
-typedef UINT64 EFI_VIRTUAL_ADDRESS;
-
-typedef struct {
-    UINT32 Type;
-    EFI_PHYSICAL_ADDRESS PhysicalStart;
-    EFI_VIRTUAL_ADDRESS VirtualStart;
-    UINT64 NumberOfPages;
-    UINT64 Attribute;
-} EFI_MEMORY_DESCRIPTOR;
-
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
     printf("bitmapSize= %lx\n", BitmapSize);
+    u8 *bitmap = (u8 *)(stack+4096);
+    u64 bitmap_code = allocator_init(bitmap, memory_map, MemoryMapSize, DescriptorSize, KernelStart, KernelEnd, BitmapSize);
+    if (bitmap_code != 0) {
+        printf("bitmap fault at address 0x%lx\n", bitmap_code);
+    }
     printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
