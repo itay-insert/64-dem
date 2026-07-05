@@ -56,8 +56,10 @@ typedef struct {
 } alloc_debug;
 
 
-alloc_debug allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size) {
-    alloc_debug alc = {0, DescriptorSize, memory_map, 0, 0, 0, 0};
+void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size) {
+    for (u64 i = 0; i < bitmap_size; i++) {
+        bitmap[i] = 0xff;
+    }
     u64 count;
     for (u64 i = 0; i < (memory_map_size / DescriptorSize); i++) {
         u8 *ptr = (u8 *)memory_map;
@@ -81,16 +83,6 @@ alloc_debug allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 me
             u64 eightPage_count = PageCount >> 3;
             u64 onePage_count = PageCount & 7;
             for (u64 j = 0; j < eightPage_count; j++) {
-                if ((count >> 3) >= bitmap_size) {
-                    alc.code = ((u64)bitmap + (count >> 3));
-                    alc.descriptorEntry = ((u64)desc - (u64)memory_map) / DescriptorSize;
-                    alc.memory_map = desc;
-                    alc.Type = desc->Type;
-                    alc.Pagenum = desc->NumberOfPages;
-                    alc.physical_start = desc->PhysicalStart;
-                    alc.count = count;
-                    return alc;
-                }
                 bitmap[count>>3] = 0;
                 count += 8;
             }
@@ -113,16 +105,6 @@ alloc_debug allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 me
             u64 eightPage_count = PageCount >> 3;
             u64 onePage_count = PageCount & 7;
             for (u64 j = 0; j < eightPage_count; j++) {
-                if ((count >> 3) >= bitmap_size) {
-                    alc.code = ((u64)bitmap + (count >> 3));
-                    alc.descriptorEntry = ((u64)desc - (u64)memory_map) / DescriptorSize;
-                    alc.memory_map = desc;
-                    alc.Type = desc->Type;
-                    alc.Pagenum = desc->NumberOfPages;
-                    alc.physical_start = desc->PhysicalStart;
-                    alc.count = count;
-                    return alc;
-                }
                 bitmap[count>>3] = 0xff;
                 count += 8;
             }
@@ -148,20 +130,10 @@ alloc_debug allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 me
     u64 eightPage_count = PageCount >> 3;
     u64 onePage_count = PageCount & 7;
     for (u64 j = 0; j < eightPage_count; j++) {
-        if ((count >> 3) >= bitmap_size) {
-            alc.code = ((u64)bitmap + (count >> 3));
-            alc.descriptorEntry = 0;
-            alc.memory_map = 0;
-            alc.Type = 0;
-            alc.Pagenum = 0;
-            alc.physical_start = 0;
-            alc.count = count;
-            return alc;
-        }
         bitmap[count>>3] = 0xff;
         count += 8;
     }
     bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
 
-    return alc;
+
 }
