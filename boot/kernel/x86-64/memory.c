@@ -45,18 +45,11 @@ u8 set_bit(u8 byte, u8 bit, u8 value, u8 dir) {
     return byte;    
 }
 
-typedef struct {
-    u64 code;
-    u64 descriptorEntry;
-    EFI_MEMORY_DESCRIPTOR *memory_map;
-    EFI_PHYSICAL_ADDRESS physical_start;
-    u32 Type;
-    u64 Pagenum;
-    u64 count;
-} alloc_debug;
+u64 bitmap_base = 0;
 
 
 void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size) {
+    bitmap_base = (u64)bitmap;
     for (u64 i = 0; i < bitmap_size; i++) {
         bitmap[i] = 0xff;
     }
@@ -68,10 +61,11 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
         u64 PageCount = desc->NumberOfPages;
         if (desc->Type == EfiConventionalMemory) {
             if ((count & 7) > 0) {
-                if ((count & 7) <= PageCount) {
-                    bitmap[count>>3] &= (u8)~(0xff >> (8 - (count & 7)));
-                    PageCount -= count & 7;
-                    count += count & 7;
+                u64 bits_left = 8 - (count & 7);
+                if (bits_left <= PageCount) {
+                    bitmap[count>>3] &= (u8)~(0xff >> bits_left);
+                    PageCount -= bits_left;
+                    count += bits_left;
                 } else {
                     for (u64 i = 0; i < PageCount; i++) {
                         bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 0x7, 0, 1);
@@ -89,10 +83,11 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
             bitmap[count>>3] &= (u8)~(0xff << (8 - onePage_count));
         } else {
             if ((count & 7) > 0) {
-               if ((count & 7) <= PageCount) {
-                    bitmap[count>>3] |= (u8)(0xff >> (8 - (count & 7)));
-                    PageCount -= count & 7;
-                    count += count & 7;
+                u64 bits_left = 8 - (count & 7);
+               if (bits_left <= PageCount) {
+                    bitmap[count>>3] |= (u8)(0xff >> bits_left);
+                    PageCount -= bits_left;
+                    count += bits_left;
                 } else {
                     for (u64 i = 0; i < PageCount; i++) {
                         bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 0x7, 1, 1);
@@ -114,10 +109,11 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
     u64 PageCount = (kernel_end - kernel_start + 4095) >> 12;
     count = kernel_start >> 12;
     if ((count & 7) > 0) {
-        if ((count & 7) <= PageCount) {
-            bitmap[count>>3] |= (u8)(0xff >> (8 - (count & 7)));
-            PageCount -= count & 7;
-            count += count & 7;
+        u64 bits_left = 8 - (count & 7);
+        if (bits_left <= PageCount) {
+            bitmap[count>>3] |= (u8)(0xff >> bits_left);
+            PageCount -= bits_left;
+            count += bits_left;
         } else {
             for (u64 i = 0; i < PageCount; i++) {
                 bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 0x7, 1, 1);
@@ -136,4 +132,49 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
     bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
 
 
+}
+
+
+EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
+    u8 *bitmap = (u8 *)bitmap_base;
+    u64 count = 0;
+    u64 count_tar = 0;
+    u64 match_count = 0;
+    while (match_count < PageCount) {
+        if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
+            match_count++;
+            count++;
+        } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
+            match_count = 0;
+            while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) 
+                count++;
+            count_tar = count;
+        } 
+    }
+    EFI_MEMORY_DESCRIPTOR ret = {0, count_tar<<12, count_tar<<12, PageCount, 0};
+    count = count_tar;
+    if ((count & 7) > 0) {
+        u64 bits_left = 8 - (count & 7);
+        if (bits_left <= PageCount) {
+            bitmap[count>>3] |= (u8)(0xff >> bits_left);
+            PageCount -= bits_left;
+            count += bits_left;
+        } else {
+            for (u64 i = 0; i < PageCount; i++) {
+                bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 7, 1, 1);
+                count++;
+            }
+            PageCount = 0;
+        }
+        
+    }
+    u64 eightPage_count = PageCount >> 3;
+    u64 onePage_count = PageCount & 7;
+    for (u64 j = 0; j < eightPage_count; j++) {
+        bitmap[count>>3] = 0xff;
+        count += 8;
+    }
+    bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
+
+    return ret;
 }
