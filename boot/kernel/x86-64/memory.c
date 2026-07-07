@@ -63,7 +63,7 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
             if ((count & 7) > 0) {
                 u64 bits_left = 8 - (count & 7);
                 if (bits_left <= PageCount) {
-                    bitmap[count>>3] &= (u8)~(0xff >> bits_left);
+                    bitmap[count>>3] &= (u8)~(0xff >> (count & 7));
                     PageCount -= bits_left;
                     count += bits_left;
                 } else {
@@ -85,7 +85,7 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
             if ((count & 7) > 0) {
                 u64 bits_left = 8 - (count & 7);
                if (bits_left <= PageCount) {
-                    bitmap[count>>3] |= (u8)(0xff >> bits_left);
+                    bitmap[count>>3] |= (u8)(0xff >> (count & 7));
                     PageCount -= bits_left;
                     count += bits_left;
                 } else {
@@ -111,7 +111,7 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
     if ((count & 7) > 0) {
         u64 bits_left = 8 - (count & 7);
         if (bits_left <= PageCount) {
-            bitmap[count>>3] |= (u8)(0xff >> bits_left);
+            bitmap[count>>3] |= (u8)(0xff >> (count & 7));
             PageCount -= bits_left;
             count += bits_left;
         } else {
@@ -156,7 +156,7 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     if ((count & 7) > 0) {
         u64 bits_left = 8 - (count & 7);
         if (bits_left <= PageCount) {
-            bitmap[count>>3] |= (u8)(0xff >> bits_left);
+            bitmap[count>>3] |= (u8)(0xff >> (count & 7));
             PageCount -= bits_left;
             count += bits_left;
         } else {
@@ -177,4 +177,34 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
 
     return ret;
+}
+
+
+
+void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
+    u8 *bitmap = (u8 *)bitmap_base;
+    u64 count = frame.PhysicalStart >> 12;
+    u64 PageCount = frame.NumberOfPages;
+    if ((count & 7) > 0) {
+        u64 bits_left = 8 - (count & 7);
+        if (bits_left <= PageCount) {
+            bitmap[count>>3] &= (u8)~(0xff >> (count & 7));
+            PageCount -= bits_left;
+            count += bits_left;
+        } else {
+            for (u64 i = 0; i < PageCount; i++) {
+                bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 0x7, 0, 1);
+                count++;
+            }
+            PageCount = 0;
+        }
+    }
+    u64 eightPage_count = PageCount >> 3;
+    u64 onePage_count = PageCount & 7;
+    for (u64 j = 0; j < eightPage_count; j++) {
+        bitmap[count>>3] = 0;
+        count += 8;
+    }
+    bitmap[count>>3] &= (u8)~(0xff << (8 - onePage_count));
+
 }
