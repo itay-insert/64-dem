@@ -6,4 +6,5 @@ section .text
 
 _start:
 mov rsp, rdx
+sub rsp, 8
 jmp kernel_main
