@@ -26,10 +26,10 @@ int paging_enabled = 0;
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     if (paging_enabled == 0) {
+        paging_enabled = 1;
         u8 *bitmap = (u8 *)stack;
         PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
         SetupPaging(ps);
-        paging_enabled = 1;
     }
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);

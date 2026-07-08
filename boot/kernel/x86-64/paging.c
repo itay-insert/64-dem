@@ -17,37 +17,16 @@
 #define PixelsPerScanline ps.info_buffer[3]
 
 
-typedef struct {
-    u64 *info_buffer64;
-    int *info_buffer;
-    u8 *bitmap;
-    EFI_MEMORY_DESCRIPTOR *memory_map;
-} PAGING_SETUP_DESCRIPTOR;
-
-typedef struct {
-    u16 attributes;
-    u64 AddressOfPdpt;
-} PML4;
-
-typedef struct {
-    u16 attributes;
-    u64 AddressOfPd;
-} PDPT;
-
-typedef struct {
-    u16 attributes;
-    u64 AddressOfPt;
-} PD;
-
-typedef struct {
-    u16 attributes;
-    u64 AddressOfPage;
-} PT;
-
 int GbPageSupport = 0;
+
+u64 PML4_base = 0;
+
 
 
 u64 alloc_pages(u64 pages) {
+    if (pages == 0) {
+        return 0;
+    }
     EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
     u8 *region = (u8 *)alloc.PhysicalStart;
     for (u64 i = 0; i < (pages << 12); i++) {
@@ -57,17 +36,62 @@ u64 alloc_pages(u64 pages) {
 }
 
 
-u64 create_mapping(u64 address, u64 pages, u16 attributes) {
-    u64 PML4_base = alloc_pages(1); // alloc pages zero-intiallizes
-    int PT_entries = (int)(pages & 511);
-    int PD_entries =  (int)((pages >> 9) & 511);
-    int PDPT_entries = (int)((pages >> 18) & 511);
-    int PML4_entries = (int)((pages >> 27) & 511);
-
+void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
+    u64 virtual_end = virtual_address + (4096 * pages);
+    while (virtual_address < virtual_end) {
+        u64 size = virtual_end - virtual_address;
+        int mb_enable = virtual_address & 0x1fffff;
+        int gb_enable = virtual_address & 0x3fffffff;
+        u64 gb_count = size / 0x40000000;
+        u64 mb_count = size / 0x200000;
+        u64 kb_count = pages;
+        int pt_index = (virtual_address >> 12) & 511;
+        int pd_index = (virtual_address >> 21) & 511;
+        int pdpt_index = (virtual_address >> 30) & 511;
+        int pml4_index = (virtual_address >> 39) & 511;
+        if (PML4[pml4_index] == 0) {
+            PML4[pml4_index] = alloc_pages(1) | attributes; // alloc pages zero intiallizes
+        }
+        u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
+        if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
+            for (u64 i = 0; i < gb_count; i++) {
+                PDPT[pdpt_index+i] = physical_address | (attributes + 0x80);
+                physical_address += 0x40000000;
+                virtual_address += 0x40000000;
+                pages -= 262144;
+            }
+        } else {
+            if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) == 1) {
+                PDPT[pdpt_index] = alloc_pages(1) | attributes;
+            }
+            u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
+            if (mb_enable == 0 && mb_count > 0) {
+                for (u64 i = 0; i < mb_count; i++) {
+                    PD[pd_index+i] = physical_address | (attributes + 0x80);
+                    physical_address += 0x200000;
+                    virtual_address += 0x200000;
+                    pages -= 512;
+                }
+            } else {
+                if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) == 1) {
+                    PD[pd_index] = alloc_pages(1) | attributes;
+                }
+                u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
+                for (u64 i = 0; i < kb_count; i++) {
+                    PT[pt_index+i] = physical_address | attributes;
+                    physical_address += 4096;
+                    virtual_address += 4096;
+                    pages--;
+                }
+            }
+        }
+    }
 }
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
     allocator_init(ps.bitmap, ps.memory_map, MemoryMapSize, DescriptorSize, 
     KernelStart, KernelEnd, BitmapSize);
+    PML4_base = alloc_pages(1);
+    u64 *PML4 = (u64 *)PML4_base;
 }
