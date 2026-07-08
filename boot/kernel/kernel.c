@@ -34,17 +34,6 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
     printf("bitmapSize= %lx\n", BitmapSize);
-    EFI_MEMORY_DESCRIPTOR aloc_test = alloc_frame(7);
-    printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test.PhysicalStart, aloc_test.NumberOfPages);
-    EFI_MEMORY_DESCRIPTOR aloc_test1 = alloc_frame(1);
-    printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test1.PhysicalStart, aloc_test1.NumberOfPages);
-    EFI_MEMORY_DESCRIPTOR aloc_test2 = alloc_frame(10);
-    printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test2.PhysicalStart, aloc_test2.NumberOfPages);
-    free_frame(aloc_test);
-    aloc_test = alloc_frame(3);
-    printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test.PhysicalStart, aloc_test.NumberOfPages);
-    EFI_MEMORY_DESCRIPTOR aloc_test3 = alloc_frame(2);
-    printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test3.PhysicalStart, aloc_test3.NumberOfPages);
     printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
          KernelEntry, KernelStart, KernelEnd, Framebuffer_base);

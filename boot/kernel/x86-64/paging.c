@@ -2,6 +2,7 @@
 #include "uint_definitions.h"
 #include "efi_memory_types.h"
 #include "memory.h"
+#include "lowlevel.h"
 
 #define KernelEntry ps.info_buffer64[0]
 #define KernelStart ps.info_buffer64[1]
@@ -23,10 +24,50 @@ typedef struct {
     EFI_MEMORY_DESCRIPTOR *memory_map;
 } PAGING_SETUP_DESCRIPTOR;
 
+typedef struct {
+    u16 attributes;
+    u64 AddressOfPdpt;
+} PML4;
 
+typedef struct {
+    u16 attributes;
+    u64 AddressOfPd;
+} PDPT;
+
+typedef struct {
+    u16 attributes;
+    u64 AddressOfPt;
+} PD;
+
+typedef struct {
+    u16 attributes;
+    u64 AddressOfPage;
+} PT;
+
+int GbPageSupport = 0;
+
+
+u64 alloc_pages(u64 pages) {
+    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
+    u8 *region = (u8 *)alloc.PhysicalStart;
+    for (u64 i = 0; i < (pages << 12); i++) {
+        region[i] = 0;
+    }
+    return alloc.PhysicalStart;
+}
+
+
+u64 create_mapping(u64 address, u64 pages, u16 attributes) {
+    u64 PML4_base = alloc_pages(1); // alloc pages zero-intiallizes
+    int PT_entries = (int)(pages & 511);
+    int PD_entries =  (int)((pages >> 9) & 511);
+    int PDPT_entries = (int)((pages >> 18) & 511);
+    int PML4_entries = (int)((pages >> 27) & 511);
+
+}
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
+    GbPageSupport = check_1gb_PageSupport();
     allocator_init(ps.bitmap, ps.memory_map, MemoryMapSize, DescriptorSize, 
     KernelStart, KernelEnd, BitmapSize);
-
 }

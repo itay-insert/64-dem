@@ -6,4 +6,6 @@
 
 
 u64 stack_get(void);
+int check_1gb_PageSupport(void);
+
 #endif
