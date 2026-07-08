@@ -208,3 +208,8 @@ void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
     bitmap[count>>3] &= (u8)~(0xff << (8 - onePage_count));
 
 }
+
+
+void SetBitmapBase(u8 *bitmap) {
+    bitmap_base = (u64)bitmap;
+}

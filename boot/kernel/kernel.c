@@ -5,6 +5,7 @@
 #include "ports.h"
 #include "memory.h"
 #include "uint_definitions.h"
+#include "paging.h"
 
 
 
@@ -20,13 +21,19 @@
 #define Vertical_res info_buffer[2]
 #define PixelsPerScanline info_buffer[3]
 
+int paging_enabled = 0;
+
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
+    if (paging_enabled == 0) {
+        u8 *bitmap = (u8 *)stack;
+        PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
+        SetupPaging(ps);
+        paging_enabled = 1;
+    }
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
     printf("bitmapSize= %lx\n", BitmapSize);
-    u8 *bitmap = (u8 *)stack;
-    allocator_init(bitmap, memory_map, MemoryMapSize, DescriptorSize, KernelStart, KernelEnd, BitmapSize);
     EFI_MEMORY_DESCRIPTOR aloc_test = alloc_frame(7);
     printf("allocated address is: 0x%lx  pages_allocated=%lu\n", aloc_test.PhysicalStart, aloc_test.NumberOfPages);
     EFI_MEMORY_DESCRIPTOR aloc_test1 = alloc_frame(1);
