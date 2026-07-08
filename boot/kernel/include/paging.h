@@ -13,7 +13,7 @@ typedef struct {
     EFI_MEMORY_DESCRIPTOR *memory_map;
 } PAGING_SETUP_DESCRIPTOR;
 
-
+extern int GbPageSupport;
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps);
 
