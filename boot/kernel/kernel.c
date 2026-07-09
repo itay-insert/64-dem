@@ -33,6 +33,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     }
     rtc_data rt = get_dateAndTime();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    u64 ram_size = (BitmapSize * 8) / 0x40000;
+    printf("%lu Gigabytes of ram\n", ram_size);
     printf("%d\n", GbPageSupport);
     printf("bitmapSize= %lx\n", BitmapSize);
     printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);

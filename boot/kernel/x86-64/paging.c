@@ -62,6 +62,9 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
             if ((PDPT[pdpt_index] & 0x80) == 0 && (PDPT[pdpt_index] & 1) == 1) {
                 free_pages(((PDPT[pdpt_index] >> 12) << 12), 1);
             }
+            if ((gb_count + pdpt_index) >= 512) {
+                gb_count = 512 - pdpt_index;
+            }
             for (u64 i = 0; i < gb_count; i++) {
                 PDPT[pdpt_index+i] = physical_address | (attributes | 0x80);
                 physical_address += 0x40000000;
@@ -77,6 +80,9 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                 if ((PD[pd_index] & 0x80) == 0 && (PD[pd_index] & 1) == 1) {
                     free_pages(((PD[pd_index] >> 12) << 12), 1);
                 }
+                if ((mb_count + pd_index) >= 512) {
+                    mb_count = 512 - pd_index;
+                }
                 for (u64 i = 0; i < mb_count; i++) {
                     PD[pd_index+i] = physical_address | (attributes | 0x80);
                     physical_address += 0x200000;
@@ -88,10 +94,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                     PD[pd_index] = alloc_pages(1) | attributes;
                 }
                 u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
-                if ((kb_count & 511) == 0 && kb_count > 0) {
-                    kb_count = 511 - pt_index;
-                } else {
-                    kb_count = kb_count & 511;
+                if ((kb_count + pt_index) >= 512) {
+                    kb_count = 512 - pt_index;
                 }
                 for (u64 i = 0; i < kb_count; i++) {
                     PT[pt_index+i] = physical_address | attributes;
@@ -104,10 +108,20 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
     }
 }
 
+typedef struct {
+    u64 *info_buffer64;
+    int *info_buffer;
+    u8 *bitmap;
+    EFI_MEMORY_DESCRIPTOR *memory_map;
+} PAGING_SETUP_DESCRIPTOR;
+
+
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
     allocator_init(ps.bitmap, ps.memory_map, MemoryMapSize, DescriptorSize, 
     KernelStart, KernelEnd, BitmapSize);
     PML4_base = alloc_pages(1);
     u64 *PML4 = (u64 *)PML4_base;
+    u64 ram_pages = BitmapSize * 8;
+    create_mapping(0, 0, ram_pages, 0x03, PML4);
 }
