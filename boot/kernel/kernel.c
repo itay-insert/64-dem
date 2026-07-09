@@ -21,7 +21,38 @@
 #define Vertical_res info_buffer[2]
 #define PixelsPerScanline info_buffer[3]
 
+#define RGB 0
+#define BGR 1
+
 int paging_enabled = 0;
+
+char buffer_vendor[30] = {0};
+char buffer_brand[50] = {0};
+u32 buffer_speed[4] = {0};
+
+void cpu_info() {
+    printf("cpu vendor: ");
+    cpu_vendor((u64)&buffer_vendor);
+    printf(buffer_vendor);
+    printf("\n");
+    printf("cpu brand: ");
+    cpu_brand((u64)&buffer_brand);
+    printf(buffer_brand);
+    printf("\n");
+    int ret = cpu_speed((u64)&buffer_speed);
+    if (ret == 0) {
+        printf("Base frequency: %u MHz\n", buffer_speed[0]);
+        printf("Max frequency: %u MHz\n", buffer_speed[1]);
+        printf("Bus frequency: %u MHz\n", buffer_speed[2]);
+    } else if (ret == 1) {
+        Set_GlobalTextColor(Red);
+        printf("error: ");
+        Set_GlobalTextColor(LightGray);
+        printf("leaf not supported\n");
+    }
+
+}
+
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     if (paging_enabled == 0) {
@@ -31,22 +62,55 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         SetupPaging(ps);
     }
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
-    printf("Paging enabled!\n");
-    printf("PML4 = %lx\n", KernelPML4);
+    if (PixelMode == RGB) {
+        printf("Pixel format: RGB\n");
+    } else if (PixelMode == BGR) {
+        printf("Pixel format: BGR\n");
+    }
+    printf("Paging: [");
+    Set_GlobalTextColor(Green);
+    printf("OK");
+    Set_GlobalTextColor(LightGray);
+    printf("]\n");
     u64 ram_size = (BitmapSize * 8) / 0x40000;
-    printf("%lu Gigabytes of ram\n", ram_size);
-    printf("%d\n", GbPageSupport);
+    printf("an estimate of %lu Gigabytes of ram detected\n", ram_size);
+    cpu_info();
+    if (GbPageSupport == 1) {
+        printf("1 Gb Page support: [");
+        Set_GlobalTextColor(Green);
+        printf("OK");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+    } else if (GbPageSupport != 1) {
+        printf("1 Gb Page support: [");
+        Set_GlobalTextColor(Red);
+        printf("ERR");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+    }
     EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(5);
-    printf("allocated address= 0x%lx  pages= %lu\n", alloc.PhysicalStart, alloc.NumberOfPages);
+    u64 addr = alloc.PhysicalStart;
     free_frame(alloc);
     alloc = alloc_frame(1);
-    printf("allocated address= 0x%lx  pages= %lu\n", alloc.PhysicalStart, alloc.NumberOfPages);
+    if (alloc.PhysicalStart == addr) {
+        printf("bitmap allocator: [");
+        Set_GlobalTextColor(Green);
+        printf("OK");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+    } else {
+        printf("bitmap allocator: [");
+        Set_GlobalTextColor(Red);
+        printf("ERR");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+    }
     free_frame(alloc);
-    printf("bitmapSize= %lx\n", BitmapSize);
-    printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);
-    printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
-         KernelEntry, KernelStart, KernelEnd, Framebuffer_base);
-    printf("\n");
+    printf("stack_top= 0x%lx\n", stack);
+    printf("KernelEntry = 0x%lx\nFramebuffer_base = 0x%lx \n",
+         KernelEntry, Framebuffer_base);
+    printf("the clock:");
+    draw_cursor(LightGray);
     printf("\n");
     clock();
     while (1) {   }

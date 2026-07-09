@@ -460,11 +460,11 @@ UINTN bitmap_size = (total_pages + 7) / 8;
 
     switch (gop->Mode->Info->PixelFormat) {
         case PixelRedGreenBlueReserved8BitPerColor:
-            p_buff[0] = 0;
+            p_buff[0] = 1;
             break;
 
         case PixelBlueGreenRedReserved8BitPerColor:
-            p_buff[0] = 1;
+            p_buff[0] = 0;
             break;
 
         default:
