@@ -14,6 +14,7 @@ typedef struct {
 } PAGING_SETUP_DESCRIPTOR;
 
 extern int GbPageSupport;
+extern u64 KernelPML4;
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps);
 

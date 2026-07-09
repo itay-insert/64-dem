@@ -12,4 +12,5 @@ typedef struct {
 } rtc_data;
 
 rtc_data get_dateAndTime(void);
+void clock(void);
 #endif

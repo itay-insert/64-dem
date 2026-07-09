@@ -55,7 +55,7 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
         int pdpt_index = (virtual_address >> 30) & 511;
         int pml4_index = (virtual_address >> 39) & 511;
         if (PML4[pml4_index] == 0) {
-            PML4[pml4_index] = alloc_pages(1) | attributes; // alloc pages zero intiallizes
+            PML4[pml4_index] = alloc_pages(1) | (attributes & 0x07); // alloc pages zero intiallizes
         }
         u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
         if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
@@ -73,7 +73,7 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
             }
         } else {
             if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) != 0) {
-                PDPT[pdpt_index] = alloc_pages(1) | attributes;
+                PDPT[pdpt_index] = alloc_pages(1) | (attributes & 0x07);
             }
             u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
             if (mb_enable == 0 && mb_count > 0) {
@@ -91,7 +91,7 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                 }
             } else {
                 if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) != 0) {
-                    PD[pd_index] = alloc_pages(1) | attributes;
+                    PD[pd_index] = alloc_pages(1) | (attributes & 0x07);
                 }
                 u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
                 if ((kb_count + pt_index) >= 512) {
@@ -115,6 +115,7 @@ typedef struct {
     EFI_MEMORY_DESCRIPTOR *memory_map;
 } PAGING_SETUP_DESCRIPTOR;
 
+u64 KernelPML4 = 0;
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
@@ -122,6 +123,30 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     KernelStart, KernelEnd, BitmapSize);
     PML4_base = alloc_pages(1);
     u64 *PML4 = (u64 *)PML4_base;
-    u64 ram_pages = BitmapSize * 8;
-    create_mapping(0, 0, ram_pages, 0x03, PML4);
+    for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
+        u8 *ptr = (u8 *)ps.memory_map;
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
+        if (desc->Type == EfiConventionalMemory) {
+            create_mapping(
+            desc->PhysicalStart,
+            desc->PhysicalStart,
+            desc->NumberOfPages,
+            0x03,
+            PML4
+            );
+        }
+    }
+    for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
+        u8 *ptr = (u8 *)ps.memory_map;
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
+        if (desc->Type == EfiMemoryMappedIO || desc->Type == EfiMemoryMappedIOPortSpace) {
+            create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
+        }
+    }
+
+    create_mapping(Framebuffer_base, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);
+    KernelPML4 = PML4_base;
+
+    enable_paging(KernelPML4);
+
 }

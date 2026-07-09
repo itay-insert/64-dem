@@ -2,6 +2,7 @@ BITS 64
 
 global stack_get
 global check_1gb_PageSupport
+global enable_paging
 
 section .text
 
@@ -22,4 +23,9 @@ setnz al
 movzx eax, al
 
 pop rbx
+ret
+
+enable_paging:
+mov rax, rdi
+mov cr3, rax
 ret
