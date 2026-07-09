@@ -144,9 +144,33 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
         }
     }
 
-    create_mapping(Framebuffer_base, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);
-    KernelPML4 = PML4_base;
+    create_mapping(0xffffffffa0000000, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);
+    Framebuffer_base = 0xffffffffa0000000;
 
+    create_mapping(0xffffffff80000000, KernelStart, (((KernelEnd-KernelStart)+4095)>>12), 0x03, PML4);
+
+    KernelEnd = 0xffffffff80000000 + (KernelEnd - KernelStart);
+    KernelEntry = 0xffffffff80000000 + (KernelEntry - KernelStart);
+    u64 stack = (u64)ps.bitmap;
+    u64 mmp = (u64)ps.memory_map;
+    u64 ib_addr = (u64)ps.info_buffer;
+    u64 ib64_addr = (u64)ps.info_buffer64;
+    stack = 0xffffffff80000000 + (stack - KernelStart);
+    mmp = 0xffffffff80000000 + (mmp - KernelStart);
+    ib_addr = 0xffffffff80000000 + (ib_addr - KernelStart);
+    ib64_addr = 0xffffffff80000000 + (ib64_addr - KernelStart);
+    u8 *virtual_bitmap = (u8 *)stack;
+    SetBitmapBase(virtual_bitmap);
+    KernelStart = 0xffffffff80000000;
+    EFI_MEMORY_DESCRIPTOR *virtual_mmp = (EFI_MEMORY_DESCRIPTOR *)mmp;
+    int *ib = (int *)ib_addr;
+    u64 *ib64 = (u64 *)ib64_addr;
+
+
+    KernelPML4 = PML4_base;
     enable_paging(KernelPML4);
+
+    kernel_trampoline(ib64, ib, stack, virtual_mmp, KernelEntry);
+    
 
 }

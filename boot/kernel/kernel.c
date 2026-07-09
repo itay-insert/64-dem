@@ -36,6 +36,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     u64 ram_size = (BitmapSize * 8) / 0x40000;
     printf("%lu Gigabytes of ram\n", ram_size);
     printf("%d\n", GbPageSupport);
+    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(5);
+    printf("allocated address= 0x%lx  pages= %lu\n", alloc.PhysicalStart, alloc.NumberOfPages);
+    free_frame(alloc);
+    alloc = alloc_frame(1);
+    printf("allocated address= 0x%lx  pages= %lu\n", alloc.PhysicalStart, alloc.NumberOfPages);
+    free_frame(alloc);
     printf("bitmapSize= %lx\n", BitmapSize);
     printf("stack_top= %lx  memory_mapStart=%lx  info_buffer=%lx  info_buffer64=%lx  MemMapsz=%lu  dsz=%lu\n", stack, memory_map, info_buffer, info_buffer64, MemoryMapSize, DescriptorSize);
     printf("KernelEntry = 0x%lx\nKernelStart = 0x%lx\nKernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",

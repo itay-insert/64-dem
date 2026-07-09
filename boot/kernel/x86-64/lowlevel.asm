@@ -3,6 +3,7 @@ BITS 64
 global stack_get
 global check_1gb_PageSupport
 global enable_paging
+global kernel_trampoline
 
 section .text
 
@@ -29,3 +30,7 @@ enable_paging:
 mov rax, rdi
 mov cr3, rax
 ret
+
+kernel_trampoline:
+mov rax, r8
+jmp rax
