@@ -35,13 +35,18 @@ u64 alloc_pages(u64 pages) {
     return alloc.PhysicalStart;
 }
 
+void free_pages(u64 address, u64 pages) {
+    EFI_MEMORY_DESCRIPTOR free = {0, address, address, pages, 0};
+    free_frame(free);
+}
+
 
 void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
     u64 virtual_end = virtual_address + (4096 * pages);
     while (virtual_address < virtual_end) {
         u64 size = virtual_end - virtual_address;
-        int mb_enable = virtual_address & 0x1fffff;
-        int gb_enable = virtual_address & 0x3fffffff;
+        int mb_enable = (virtual_address & 0x1fffff) | (physical_address & 0x1fffff);
+        int gb_enable = (virtual_address & 0x3fffffff) | (physical_address & 0x3fffffff);
         u64 gb_count = size / 0x40000000;
         u64 mb_count = size / 0x200000;
         u64 kb_count = pages;
@@ -54,29 +59,40 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
         }
         u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
         if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
+            if ((PDPT[pdpt_index] & 0x80) == 0 && (PDPT[pdpt_index] & 1) == 1) {
+                free_pages(((PDPT[pdpt_index] >> 12) << 12), 1);
+            }
             for (u64 i = 0; i < gb_count; i++) {
-                PDPT[pdpt_index+i] = physical_address | (attributes + 0x80);
+                PDPT[pdpt_index+i] = physical_address | (attributes | 0x80);
                 physical_address += 0x40000000;
                 virtual_address += 0x40000000;
                 pages -= 262144;
             }
         } else {
-            if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) == 1) {
+            if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) != 0) {
                 PDPT[pdpt_index] = alloc_pages(1) | attributes;
             }
             u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
             if (mb_enable == 0 && mb_count > 0) {
+                if ((PD[pd_index] & 0x80) == 0 && (PD[pd_index] & 1) == 1) {
+                    free_pages(((PD[pd_index] >> 12) << 12), 1);
+                }
                 for (u64 i = 0; i < mb_count; i++) {
-                    PD[pd_index+i] = physical_address | (attributes + 0x80);
+                    PD[pd_index+i] = physical_address | (attributes | 0x80);
                     physical_address += 0x200000;
                     virtual_address += 0x200000;
                     pages -= 512;
                 }
             } else {
-                if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) == 1) {
+                if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) != 0) {
                     PD[pd_index] = alloc_pages(1) | attributes;
                 }
                 u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
+                if ((kb_count & 511) == 0 && kb_count > 0) {
+                    kb_count = 511 - pt_index;
+                } else {
+                    kb_count = kb_count & 511;
+                }
                 for (u64 i = 0; i < kb_count; i++) {
                     PT[pt_index+i] = physical_address | attributes;
                     physical_address += 4096;
