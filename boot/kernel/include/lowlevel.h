@@ -13,5 +13,6 @@ void kernel_trampoline(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMO
 void cpu_vendor(u64 string_base);
 void cpu_brand(u64 string_base);
 int cpu_speed(u64 addr_base);
+u32 cpu_model(u64 addr_base);
 
 #endif

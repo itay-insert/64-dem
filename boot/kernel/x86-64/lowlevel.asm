@@ -7,6 +7,7 @@ global kernel_trampoline
 global cpu_vendor
 global cpu_brand
 global cpu_speed
+global cpu_model
 
 section .text
 
@@ -112,5 +113,16 @@ pop rbx
 ret
 leaf_not_supported:
 mov eax, 1 ; 1 for error
+pop rbx
+ret
+
+
+cpu_model:
+push rbx
+mov eax, 1
+cpuid
+mov [rdi], ecx
+add rdi, 4
+mov [rdi], edx
 pop rbx
 ret

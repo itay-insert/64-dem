@@ -29,16 +29,41 @@ int paging_enabled = 0;
 char buffer_vendor[30] = {0};
 char buffer_brand[50] = {0};
 u32 buffer_speed[4] = {0};
+u32 buffer_model[3] = {0};
 
 void cpu_info() {
-    printf("cpu vendor: ");
+    printf("\n");
+    printf("cpu_info: \n");
+    printf("\n");
+    printf("\n");
+    printf("Vendor: ");
     cpu_vendor((u64)&buffer_vendor);
     printf(buffer_vendor);
     printf("\n");
-    printf("cpu brand: ");
+    printf("Brand: ");
     cpu_brand((u64)&buffer_brand);
     printf(buffer_brand);
     printf("\n");
+
+    u32 eax = cpu_model((u64)&buffer_model);
+    u32 stepping = eax & 0xF;
+    u32 model = (eax >> 4) & 0xF;
+    u32 family = (eax >> 8) & 0xF;
+
+    if (family == 0xF)
+    {
+        family += (eax >> 20) & 0xFF;
+    }
+
+    if (family == 0x6 || family == 0xf)
+    model += ((eax >> 16) & 0xf) << 4;
+
+    printf("Family: %u\n", family);
+    printf("Model: %u\n", model);
+    printf("Stepping: %u\n", stepping);
+    printf("\n");
+    printf("\n");
+
     int ret = cpu_speed((u64)&buffer_speed);
     if (ret == 0) {
         printf("Base frequency: %u MHz\n", buffer_speed[0]);
