@@ -1,6 +1,9 @@
 # My operating system
 64-dem is a 64-bit UEFI operating system booting from a USB flash drive, made for the x86-64/amd64 architecture.
 
+## License
+64-dem is licensed under the GNU General Public License version 2 only (GPL-2.0-only). 
+
 ## The bootloader 
 At boot the UEFI bootloader gets the memory map from UEFI using a UEFI call, it also sets up the GOP picking the highest resolution it can find, after the GOP is setup the bootloader uses UEFI calls to read the file stored in path "/boot/kernel.elf", it uses a custom elf parser to parse the elf file, at first it calculates the size of all the segments in pages then allocates memory using it's own custom memory allocator, after allocating enough memory it parses the elf file, copies the segments to the right memory regions, exits UEFI services, disables interrupts and jumps to the kernel entry passing some parameters along the way.
 

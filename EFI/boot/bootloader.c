@@ -14,7 +14,38 @@
 #define i64 int64_t 
 
 #define PAGE_SIZE 4096
-#define MIN_KERNEL_PHYS  0x100000ULL   // 1 MiB
+
+EFI_PHYSICAL_ADDRESS find_rsdp(EFI_SYSTEM_TABLE *SystemTable)
+{
+    EFI_CONFIGURATION_TABLE *config_table;
+    UINTN entries;
+
+    config_table = SystemTable->ConfigurationTable;
+    entries = SystemTable->NumberOfTableEntries;
+
+    for (UINTN i = 0; i < entries; i++)
+    {
+        EFI_GUID *guid = &config_table[i].VendorGuid;
+
+        if (CompareGuid(guid, &AcpiTableGuid))
+        {
+            return (EFI_PHYSICAL_ADDRESS)config_table[i].VendorTable;
+        }
+    }
+
+    // fallback to ACPI 1.0
+    for (UINTN i = 0; i < entries; i++)
+    {
+        EFI_GUID *guid = &config_table[i].VendorGuid;
+
+        if (CompareGuid(guid, &AcpiTableGuid))
+        {
+            return (EFI_PHYSICAL_ADDRESS)config_table[i].VendorTable;
+        }
+    }
+
+    return 0;
+}
 
 static EFI_PHYSICAL_ADDRESS align_up(EFI_PHYSICAL_ADDRESS value, UINTN align)
 {
@@ -417,12 +448,13 @@ UINTN bitmap_size = (total_pages + 7) / 8;
         file_buffer
     );
 
+    EFI_PHYSICAL_ADDRESS rsdp = find_rsdp(SystemTable);
     
     u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
     
     u64 buf_sz = 16;
-    u64 buf_sz64 = 56;
+    u64 buf_sz64 = 64;
 
     u64 kernel_end = find_end(file_base, kernel_start);
     UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size+mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
@@ -485,7 +517,7 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     p_buff64[4] = (u64)mmpsz;
     p_buff64[5] = (u64)mpc;
     p_buff64[6] = (u64)bitmap_size;
-
+    p_buff64[7] = (u64)rsdp;
 
 
     while (1) {

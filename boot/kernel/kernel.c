@@ -11,6 +11,7 @@
 
 
 
+
 #define KernelEntry info_buffer64[0]
 #define KernelStart info_buffer64[1]
 #define KernelEnd info_buffer64[2]
@@ -18,6 +19,7 @@
 #define MemoryMapSize info_buffer64[4]
 #define DescriptorSize info_buffer64[5]
 #define BitmapSize info_buffer64[6]
+#define RSDP info_buffer64[7]
 #define PixelMode info_buffer[0]
 #define Horizontal_res info_buffer[1]
 #define Vertical_res info_buffer[2]
@@ -46,6 +48,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     } else if (PixelMode == BGR) {
         printf("Pixel format: BGR\n");
     }
+
+    
 
     printf("Paging: [");
     Set_GlobalTextColor(Green);
@@ -94,8 +98,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     }
     free_frame(alloc);
     printf("stack_top= 0x%lx\n", stack);
-    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx\n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base);
+    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  RSDP = 0x%lx\n",
+         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
