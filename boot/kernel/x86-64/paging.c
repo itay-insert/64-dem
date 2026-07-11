@@ -144,6 +144,8 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
         if (desc->Type == EfiMemoryMappedIO || desc->Type == EfiMemoryMappedIOPortSpace) {
             create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
+        } else if (desc->Type == EfiACPIMemoryNVS || desc->Type == EfiACPIReclaimMemory) {
+            create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
         }
     }
 

@@ -5,6 +5,7 @@ global check_1gb_PageSupport
 global enable_paging
 global kernel_trampoline
 global load_gdt
+global discover_APIC
 
 section .text
 
@@ -56,4 +57,14 @@ mov ss, ax
 
 mov ax, 0x28
 ltr ax
+ret
+
+
+
+discover_APIC:
+mov ecx, 0x1B
+rdmsr
+shl rdx, 32
+or rax, rdx
+and rax, 0xfffffffffffff000
 ret

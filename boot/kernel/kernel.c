@@ -29,7 +29,7 @@
 int paging_enabled = 0;
 
 
-
+u64 APIC_base = 0;
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     if (paging_enabled == 0) {
@@ -39,6 +39,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         SetupPaging(ps);
     }
     setup_gdt();
+    APIC_base = discover_APIC();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
     if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");
@@ -93,8 +94,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     }
     free_frame(alloc);
     printf("stack_top= 0x%lx\n", stack);
-    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx \n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base);
+    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx\n",
+         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");

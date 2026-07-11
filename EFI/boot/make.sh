@@ -1,4 +1,4 @@
-gcc \
+gcc -march=x86-64 \
   -I/usr/include/efi \
   -I/usr/include/efi/x86_64 \
   -ffreestanding -fshort-wchar -mno-red-zone \
