@@ -7,6 +7,7 @@
 #include "uint_definitions.h"
 #include "paging.h"
 #include "cpudir.h"
+#include "gdt.h"
 
 
 
@@ -37,17 +38,26 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
         SetupPaging(ps);
     }
+    setup_gdt();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
     if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");
     } else if (PixelMode == BGR) {
         printf("Pixel format: BGR\n");
     }
+
     printf("Paging: [");
     Set_GlobalTextColor(Green);
     printf("OK");
     Set_GlobalTextColor(LightGray);
     printf("]\n");
+
+    printf("GDT reload: [");
+    Set_GlobalTextColor(Green);
+    printf("OK");
+    Set_GlobalTextColor(LightGray);
+    printf("]\n");
+    
     u64 ram_size = (BitmapSize * 8) / 0x40000;
     printf("an estimate of %lu Gigabytes of ram detected\n", ram_size);
     cpu_info();

@@ -19,6 +19,8 @@ gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/
 gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/memory.c -o memory.o
 gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/paging.c -o paging.o
 gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/cpudir.c -o cpudir.o
+gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/tss.c -o tss.o
+gcc -O2 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/gdt.c -o gdt.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o

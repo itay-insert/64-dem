@@ -4,6 +4,7 @@ global stack_get
 global check_1gb_PageSupport
 global enable_paging
 global kernel_trampoline
+global load_gdt
 
 section .text
 
@@ -39,3 +40,20 @@ mov rax, r8
 jmp rax
 
 
+load_gdt:
+lgdt [rdi]
+
+push qword 0x08
+lea rax, [rel reload]
+push rax
+retfq
+
+reload:
+mov ax, 0x10
+mov ds, ax
+mov es, ax
+mov ss, ax
+
+mov ax, 0x28
+ltr ax
+ret
