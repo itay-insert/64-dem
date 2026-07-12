@@ -142,9 +142,17 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
+        if (desc->NumberOfPages == 0 || desc->Type == EfiConventionalMemory ||
+            desc->Type == EfiUnusableMemory)
+            continue;
+
         if (desc->Type == EfiMemoryMappedIO || desc->Type == EfiMemoryMappedIOPortSpace) {
             create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
-        } else if (desc->Type == EfiACPIMemoryNVS || desc->Type == EfiACPIReclaimMemory) {
+        } else {
+            /* Firmware configuration tables are allowed to reside in loader,
+               boot-service, runtime, reserved, or ACPI memory.  Keep those
+               physical ranges identity-mapped while early firmware discovery
+               still uses their physical addresses. */
             create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
         }
     }

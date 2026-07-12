@@ -34,6 +34,7 @@ u8 gdt[56];
 
 
 void setup_gdt(void) {
+    tss_init();
     gdt_entry *gdt_ptr = (gdt_entry *)gdt;
 
     // null descriptor 
@@ -102,4 +103,3 @@ void setup_gdt(void) {
     load_gdt((u64)&gdtr);
 
 }
-

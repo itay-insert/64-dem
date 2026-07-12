@@ -15,6 +15,8 @@
 
 #define PAGE_SIZE 4096
 
+static EFI_GUID Acpi10TableGuid = ACPI_TABLE_GUID;
+
 EFI_PHYSICAL_ADDRESS find_rsdp(EFI_SYSTEM_TABLE *SystemTable)
 {
     EFI_CONFIGURATION_TABLE *config_table;
@@ -38,7 +40,7 @@ EFI_PHYSICAL_ADDRESS find_rsdp(EFI_SYSTEM_TABLE *SystemTable)
     {
         EFI_GUID *guid = &config_table[i].VendorGuid;
 
-        if (CompareGuid(guid, &AcpiTableGuid))
+        if (CompareGuid(guid, &Acpi10TableGuid))
         {
             return (EFI_PHYSICAL_ADDRESS)config_table[i].VendorTable;
         }

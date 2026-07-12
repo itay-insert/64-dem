@@ -7,6 +7,7 @@
 #include "memory.h"
 #include "paging.h"
 #include "cpudir.h"
+#include "tss.h"
 #include "gdt.h"
 #include "acpi.h"
 #include "idt.h"
@@ -30,6 +31,9 @@
 #define RGB 0
 #define BGR 1
 
+/* Set to 0 after verifying exception delivery on the target machines. */
+#define TEST_EXCEPTION_AFTER_ACPI 1
+
 int paging_enabled = 0;
 
 
@@ -43,12 +47,17 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         SetupPaging(ps);
     }
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    tss_init();
     setup_gdt();
     setup_execptions();
     APIC_base = discover_APIC();
     rsdp_init(RSDP);
 
+    printf("Starting ACPI discovery: RSDP = 0x%lx\n", RSDP);
     u64 APICIO = discover_APICIO();
+
+    printf("ACPI discovery complete: IOAPIC = 0x%lx\n", APICIO);
+
 
     if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");

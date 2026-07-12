@@ -30,6 +30,7 @@ struct tss64 {
 
 
 extern struct tss64 tss;
+void tss_init(void);
 
 
 #endif
