@@ -34,11 +34,16 @@ static void idt_set_gate(u8 entry, u64 address, u8 ist, u8 type) {
 }
 
 void setup_execptions(void) {
-    for (u8 vector = 0; vector < 32; vector++)
-        idt_set_gate(vector, (u64)exception_stub_table[vector], 0, INTERRUPT_GATE);
+    u64 stub_table_base = (u64)exception_stub_table;
+
+    for (u8 vector = 0; vector < 32; vector++) {
+        u64 stub = stub_table_base + exception_stub_table[vector];
+        idt_set_gate(vector, stub, 0, INTERRUPT_GATE);
+    }
 
     /* Double fault switches to TSS.IST1 even if the current stack is broken. */
-    idt_set_gate(8, (u64)exception_stub_table[8], 1, INTERRUPT_GATE);
+    u64 double_fault_stub = stub_table_base + exception_stub_table[8];
+    idt_set_gate(8, double_fault_stub, 1, INTERRUPT_GATE);
 
     idtr_t idtr = {
         .limit = sizeof(idt) - 1,

@@ -95,20 +95,53 @@ common_exception:
     mov r8,  [rsp + 152]       ; saved RFLAGS
     mov r9, cr2                ; meaningful for #PF, harmless otherwise
 
-    ; An interrupt can occur at either stack alignment.  Satisfy the SysV ABI
-    ; explicitly before entering compiler-generated C code.
+    
     and rsp, -16
+
+    
+    push rcx
+    call exception_beep
+    pop rcx
     call exception_handler
 
 .halt:
     hlt
     jmp .halt
 
+exception_beep:
+   
+    mov al, 0xb6
+    out 0x43, al
+
+   
+    mov ax, 1356
+    out 0x42, al
+    mov al, ah
+    out 0x42, al
+
+   
+    in al, 0x61
+    mov ah, al
+    or al, 0x03
+    out 0x61, al
+
+    
+    mov ecx, 10000000
+.delay:
+    pause
+    loop .delay
+
+   
+    out 0x61, al
+    ret
+
 section .rodata
 align 8
 exception_stub_table:
 %assign i 0
 %rep 32
-    dq exception_stub_%+i
+    ; Store a link/load-address-independent signed offset.  idt.c adds the
+    ; runtime address of this table before installing the gate.
+    dq exception_stub_%+i - exception_stub_table
 %assign i i+1
 %endrep
