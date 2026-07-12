@@ -1,5 +1,6 @@
 #include "uint_definitions.h"
 #include "memory.h"
+#include "vga.h"
 
 typedef struct {
     char signature[8];
@@ -57,6 +58,62 @@ typedef struct {
 
 u64 rsdp_address = 0;
 
+u64 find_rsdp_legacy(void)
+{
+    const char signature[8] = "RSD PTR ";
+
+    // 1. Search EBDA
+    u16 ebda_segment = *(u16 *)0x40E;
+    u64 ebda_address = ((u64)ebda_segment) << 4;
+
+    for (u64 addr = ebda_address;
+         addr < ebda_address + 1024;
+         addr += 16)
+    {
+        char *ptr = (char *)addr;
+
+        int match = 1;
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (ptr[i] != signature[i])
+            {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match)
+            return addr;
+    }
+
+
+    // 2. Search BIOS area
+    for (u64 addr = 0xE0000;
+         addr < 0x100000;
+         addr += 16)
+    {
+        char *ptr = (char *)addr;
+
+        int match = 1;
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (ptr[i] != signature[i])
+            {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match)
+            return addr;
+    }
+
+    return 0;
+}
+
+
 
 
 void rsdp_init(u64 rsdp_base) {
@@ -64,47 +121,107 @@ void rsdp_init(u64 rsdp_base) {
 }
 
 
-u64 discover_APICIO(void) {
+u64 discover_APICIO(void)
+{
+    if (!rsdp_address)
+        return 0;
+
     RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
 
-    u64 xsdt_address = rsdp->xsdt_address;
+    printf("rsdp revision = %b  rsdt_address = 0%lx  xsdt_address = 0x%lx\n", rsdp->revision, rsdp->rsdt_address, rsdp->xsdt_address);
 
-    ACPISDTHeader *xsdt = (ACPISDTHeader*)xsdt_address;
+    if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0)
+        return 0;
 
-    u32 entries =
-        (xsdt->length - sizeof(ACPISDTHeader)) / 8;
+    if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
+        ACPISDTHeader *rsdt = (ACPISDTHeader *)(u64)rsdp->rsdt_address;
+        u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
+        u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
 
-    u64 *table_addresses =
-        (u64*)((u8*)xsdt + sizeof(ACPISDTHeader));
+        for (u32 i = 0; i < entries; i++) {
+            ACPISDTHeader *table = (ACPISDTHeader *)(u64)tables[i];
 
-    for (u32 i = 0; i < entries; i++) {
-        ACPISDTHeader *table =
-            (ACPISDTHeader*)table_addresses[i];
+            if (memcmp(table->signature, "APIC", 4) == 0) {
+                MADT *madt = (MADT *)table;
 
-        if (memcmp(table->signature, "APIC", 4) == 0) {
-            MADT *madt = (MADT*)table;
+                u8 *madt_ptr = madt->entries;
+                u8 *madt_end = (u8*)madt + madt->header.length;
 
-            uint8_t *ptr = madt->entries;
+                while (madt_ptr + 2 <= madt_end) {
+                    MADTEntryHeader *entry = (MADTEntryHeader*)madt_ptr;
 
-        while (ptr < ((u8*)madt + madt->header.length))
-        {
-            MADTEntryHeader *entry = (MADTEntryHeader*)ptr;
+                    if (entry->length < 2)
+                        break;
 
-            if (entry->type == 1)
-            {
-                MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
+                    if (madt_ptr + entry->length > madt_end)
+                        break;
 
-                return (u64)ioapic->address;
+                    if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC)) {
+                        MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
+                        return (u64)ioapic->address;
+                    }
+
+                    madt_ptr += entry->length;
+                }
+
+                return 0;
+
             }
 
-            ptr += entry->length;
         }
 
-        return 1;
-
-        }
+        return 0;
     }
 
-    return 1;
 
+   
+    ACPISDTHeader *xsdt = (ACPISDTHeader*)rsdp->xsdt_address;
+
+    if (memcmp(xsdt->signature, "XSDT", 4) != 0)
+        return 0;
+
+    if (xsdt->length < sizeof(ACPISDTHeader))
+        return 0;
+
+    u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
+    u8 *end = (u8*)xsdt + xsdt->length;
+
+    while (ptr + 8 <= end)
+    {
+        u64 table_phys = *(u64*)ptr;
+        ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
+
+        if (memcmp(table->signature, "APIC", 4) == 0)
+        {
+            MADT *madt = (MADT*)table;
+
+            u8 *madt_ptr = madt->entries;
+            u8 *madt_end = (u8*)madt + madt->header.length;
+
+            while (madt_ptr + 2 <= madt_end)
+            {
+                MADTEntryHeader *entry = (MADTEntryHeader*)madt_ptr;
+
+                if (entry->length < 2)
+                    break;
+
+                if (madt_ptr + entry->length > madt_end)
+                    break;
+
+                if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC))
+                {
+                    MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
+                    return (u64)ioapic->address;
+                }
+
+                madt_ptr += entry->length;
+            }
+
+            return 0;
+        }
+
+        ptr += 8;
+    }
+
+    return 0;
 }

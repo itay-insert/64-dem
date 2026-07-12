@@ -99,9 +99,6 @@ common_exception:
     and rsp, -16
 
     
-    push rcx
-    call exception_beep
-    pop rcx
     call exception_handler
 
 .halt:

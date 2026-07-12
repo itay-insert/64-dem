@@ -22,7 +22,6 @@
 #define MemoryMapSize info_buffer64[4]
 #define DescriptorSize info_buffer64[5]
 #define BitmapSize info_buffer64[6]
-#define RSDP info_buffer64[7]
 #define PixelMode info_buffer[0]
 #define Horizontal_res info_buffer[1]
 #define Vertical_res info_buffer[2]
@@ -47,16 +46,20 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         SetupPaging(ps);
     }
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    u64 RSDP_legacy = find_rsdp_legacy();
+    u64 *ptr = (u64 *)RSDP_legacy;
+    printf("rsdp_legacy = 0x%lx  sign = 0x%lx\n", RSDP_legacy, *ptr);
+
     tss_init();
     setup_gdt();
     setup_execptions();
     APIC_base = discover_APIC();
-    rsdp_init(RSDP);
+    rsdp_init(RSDP_legacy);
 
-    printf("Starting ACPI discovery: RSDP = 0x%lx\n", RSDP);
+    printf("Starting IO_APIC discovery: RSDP = 0x%lx\n", RSDP_legacy);
     u64 APICIO = discover_APICIO();
 
-    printf("ACPI discovery complete: IOAPIC = 0x%lx\n", APICIO);
+    printf("IO_APIC discovery complete: IOAPIC = 0x%lx\n", APICIO);
 
 
     if (PixelMode == RGB) {
@@ -118,7 +121,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     printf("stack_top= 0x%lx\n", stack);
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  RSDP = 0x%lx  APICIO = 0x%lx\n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP, APICIO);
+         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP_legacy, APICIO);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
