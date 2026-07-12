@@ -1,4 +1,6 @@
 #include "uint_definitions.h"
+#include "lowlevel.h"
+#include "interrupts.h"
 
 #define trap 0xF
 #define interrupt 0xE
@@ -13,6 +15,10 @@ typedef struct {
     u32 reserved;
 } __attribute__((packed)) idt_entry;
 
+typedef struct {
+    u16 limit;
+    u64 base;
+} __attribute__((packed)) idtr_t;
 
 idt_entry idt[256];
 
@@ -28,7 +34,17 @@ void idt_set_gate(u8 entry, u64 address, u8 ist, u8 type) {
     };
 }
 
-void setup_idt(void) {
+void setup_execptions(void) {
+    idt_set_gate(0, (u64)isr_no_error, 0, interrupt);
+    idt_set_gate(6, (u64)isr_no_error, 0, interrupt);
+    idt_set_gate(8, (u64)isr_error, 0, interrupt);
+    idt_set_gate(13, (u64)isr_error, 0, interrupt);
+    idt_set_gate(14, (u64)page_fault_handler, 0, interrupt);
 
-    
+    idtr_t idtr = {0, 0};
+    idtr.limit = sizeof(idt_entry) * 256 - 1;
+    idtr.base  = (uint64_t)&idt[0];
+
+    load_idt((u64)&idtr);
+
 }

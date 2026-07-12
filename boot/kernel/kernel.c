@@ -1,13 +1,15 @@
 #include <stdint.h>
+#include "uint_definitions.h"
 #include "lowlevel.h"
 #include "vga.h"
 #include "rtc.h"
 #include "ports.h"
 #include "memory.h"
-#include "uint_definitions.h"
 #include "paging.h"
 #include "cpudir.h"
 #include "gdt.h"
+#include "acpi.h"
+#include "idt.h"
 
 
 
@@ -40,9 +42,14 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
         SetupPaging(ps);
     }
-    setup_gdt();
-    APIC_base = discover_APIC();
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    setup_gdt();
+    setup_execptions();
+    APIC_base = discover_APIC();
+    rsdp_init(RSDP);
+
+    u64 APICIO = discover_APICIO();
+
     if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");
     } else if (PixelMode == BGR) {
@@ -79,10 +86,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     }
+
     EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(5);
     u64 addr = alloc.PhysicalStart;
     free_frame(alloc);
     alloc = alloc_frame(1);
+
     if (alloc.PhysicalStart == addr) {
         printf("bitmap allocator: [");
         Set_GlobalTextColor(Green);
@@ -97,9 +106,10 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         printf("]\n");
     }
     free_frame(alloc);
+
     printf("stack_top= 0x%lx\n", stack);
-    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  RSDP = 0x%lx\n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP);
+    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  RSDP = 0x%lx  APICIO = 0x%lx\n",
+         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP, APICIO);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");

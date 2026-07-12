@@ -10,6 +10,6 @@ void enable_paging(u64 PML4_address);
 void kernel_trampoline(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map, u64 entry);
 void load_gdt(u64 addr);
 u64 discover_APIC(void);
-
+void load_idt(u64 addr);
 
 #endif

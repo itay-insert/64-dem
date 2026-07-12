@@ -6,6 +6,7 @@ global enable_paging
 global kernel_trampoline
 global load_gdt
 global discover_APIC
+global load_idt
 
 section .text
 
@@ -68,3 +69,8 @@ shl rdx, 32
 or rax, rdx
 and rax, 0xfffffffffffff000
 ret
+
+load_idt:
+lidt [rdi]
+ret
+

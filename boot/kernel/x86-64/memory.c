@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 #include "efi_memory_types.h"
 #include "uint_definitions.h"
@@ -18,6 +19,23 @@ typedef struct {
     UINT64 NumberOfPages;
     UINT64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
+
+
+int memcmp(const void *ptr1, const void *ptr2, size_t count) {
+    const uint8_t *a = (const uint8_t*)ptr1;
+    const uint8_t *b = (const uint8_t*)ptr2;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        if (a[i] != b[i])
+        {
+            return a[i] - b[i];
+        }
+    }
+
+    return 0;
+}
+
 
 u8 check_byte(u8 byte, u8 bit, u8 dir) {
     if (dir == 1) {

@@ -1,5 +1,7 @@
 #ifndef MEMORY_H
 #define MEMORY_H
+#include <stddef.h>
+#include "uint_definitions.h"
 
 typedef unsigned int UINT32;
 typedef unsigned long long UINT64; 
@@ -17,6 +19,7 @@ typedef struct {
     UINT64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
+int memcmp(const void *ptr1, const void *ptr2, size_t count);
 u8 check_byte(u8 byte, u8 bit, u8 dir);
 u8 set_bit(u8 byte, u8 bit, u8 value, u8 dir);
 void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size);
