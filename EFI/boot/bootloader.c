@@ -134,6 +134,9 @@ u64 find_end(u64 file_base, u64 p_entry) {
 
 void load_segment(u64 p_offset, u64 p_filesz, u64 p_align, VOID *buf, EFI_FILE_PROTOCOL *file) {
     u64 iterations;
+    if (p_align > 4096 || p_filesz == 0) {
+        return;
+    }
     uefi_call_wrapper(
         file->SetPosition,
         2,
