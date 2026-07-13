@@ -27,6 +27,9 @@ void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode);
 void draw_pixel(int x, int y, u32 color);
 void draw_16color(int x, int y, int color_index);
 void Set_GlobalTextColor(int color_index);
+void qemu_debug_putc(char ch);
+void qemu_debug_print(const char *str);
+void qemu_debug_hex_u64(u64 value);
 void draw_char(char ch, int coulmn, int row);
 void draw_cursor(int color_index);
 

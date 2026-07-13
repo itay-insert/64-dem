@@ -3,6 +3,7 @@
 #include "efi_memory_types.h"
 #include "memory.h"
 #include "lowlevel.h"
+#include "vga.h"
 
 #define KernelEntry ps.info_buffer64[0]
 #define KernelStart ps.info_buffer64[1]
@@ -122,9 +123,21 @@ u64 KernelPML4 = 0;
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
+    qemu_debug_print("[paging] CPUID check complete\n");
+    qemu_debug_print("[paging] bitmap base=");
+    qemu_debug_hex_u64((u64)ps.bitmap);
+    qemu_debug_print(" size=");
+    qemu_debug_hex_u64(BitmapSize);
+    qemu_debug_print(" mmap size=");
+    qemu_debug_hex_u64(MemoryMapSize);
+    qemu_debug_print(" descriptor size=");
+    qemu_debug_hex_u64(DescriptorSize);
+    qemu_debug_print("\n");
     allocator_init(ps.bitmap, ps.memory_map, MemoryMapSize, DescriptorSize, 
     KernelStart, KernelEnd, BitmapSize);
+    qemu_debug_print("[paging] allocator initialized\n");
     PML4_base = alloc_pages(1);
+    qemu_debug_print("[paging] PML4 allocated\n");
     u64 *PML4 = (u64 *)PML4_base;
     for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
@@ -139,6 +152,7 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
             );
         }
     }
+    qemu_debug_print("[paging] conventional memory mapped\n");
     for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
@@ -156,11 +170,17 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
             create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
         }
     }
+    qemu_debug_print("[paging] firmware memory mapped\n");
+
+    create_mapping(0xE0000, 0xE0000, 32, 0x03, PML4);
+    qemu_debug_print("[paging] mapped bios legacy area\n");
 
     create_mapping(fb_virtual, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);
+    qemu_debug_print("[paging] framebuffer mapped\n");
     Framebuffer_base = fb_virtual;
 
     create_mapping(kernel_virtual, KernelStart, (((KernelEnd-KernelStart)+4095)>>12), 0x03, PML4);
+    qemu_debug_print("[paging] kernel mapped\n");
 
     KernelEnd = kernel_virtual + (KernelEnd - KernelStart);
     KernelEntry = kernel_virtual + (KernelEntry - KernelStart);
@@ -181,8 +201,11 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
 
 
     KernelPML4 = PML4_base;
+    qemu_debug_print("[paging] loading CR3\n");
     enable_paging(KernelPML4);
+    qemu_debug_print("[paging] CR3 loaded\n");
 
+    qemu_debug_print("[paging] jumping to virtual kernel\n");
     kernel_trampoline(ib64, ib, stack, virtual_mmp, KernelEntry);
     
 

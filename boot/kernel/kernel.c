@@ -39,14 +39,28 @@ int paging_enabled = 0;
 u64 APIC_base = 0;
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
+    qemu_debug_print("[kernel] entered kernel_main\n");
+
     if (paging_enabled == 0) {
+        qemu_debug_print("[kernel] starting paging setup\n");
         paging_enabled = 1;
         u8 *bitmap = (u8 *)stack;
         PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
         SetupPaging(ps);
     }
+    qemu_debug_print("[kernel] paging setup complete\n");
     vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    qemu_debug_print("[kernel] VGA initialized\n");
+    qemu_debug_print("[kernel] GOP width=");
+    qemu_debug_hex_u64((u64)Horizontal_res);
+    qemu_debug_print(" height=");
+    qemu_debug_hex_u64((u64)Vertical_res);
+    qemu_debug_print(" stride=");
+    qemu_debug_hex_u64((u64)PixelsPerScanline);
+    qemu_debug_print("\n");
+    qemu_debug_print("[kernel] searching for legacy RSDP\n");
     u64 RSDP_legacy = find_rsdp_legacy();
+    qemu_debug_print("[kernel] legacy RSDP search complete\n");
     u64 *ptr = (u64 *)RSDP_legacy;
     printf("rsdp_legacy = 0x%lx  sign = 0x%lx\n", RSDP_legacy, *ptr);
 
@@ -85,8 +99,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     Set_GlobalTextColor(LightGray);
     printf("]\n");
     
-    u64 ram_size = (BitmapSize * 8) / 0x40000;
-    printf("an estimate of %lu Gigabytes of ram detected\n", ram_size);
+    u64 ram_size = (BitmapSize * 8) / 0x100;
+    printf("an estimate of %lu Megabytes of ram detected\n", ram_size);
     cpu_info();
     if (GbPageSupport == 1) {
         printf("1 Gb Page support: [");

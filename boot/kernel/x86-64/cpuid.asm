@@ -5,12 +5,18 @@ global cpu_brand
 global cpu_cores
 global cpu_speed
 global cpu_model
-
+global vm_type
 
 section .text
 
 cpu_vendor:
 push rbx
+mov eax, 1
+cpuid
+bt ecx, 31
+setc al
+cmp al, 1
+je leaf_not_supported
 xor eax, eax
 cpuid
 mov [rdi], ebx
@@ -20,6 +26,7 @@ add rdi, 4
 mov [rdi], ecx
 add rdi, 4
 mov byte [rdi], 0
+xor eax, eax
 pop rbx
 ret
 
@@ -118,6 +125,20 @@ cpuid
 mov [rdi], ecx
 add rdi, 4
 mov [rdi], edx
+pop rbx
+ret
+
+vm_type:
+push rbx
+mov eax, 0x40000000
+cpuid
+mov [rdi], ebx
+add rdi, 4
+mov [rdi], ecx
+add rdi, 4
+mov [rdi], edx
+add rdi, 4
+mov byte [rdi], 0
 pop rbx
 ret
 

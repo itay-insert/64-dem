@@ -20,3 +20,21 @@ upon entering the kernel's virtual entry it checks the paging flag to see that i
 
 ## Verification
 this operating system was tested on at least 6 different modern computers and is confirmed to work on real x86-64 UEFI compatible machines.
+
+## Running in QEMU
+
+Install QEMU and OVMF, then run:
+
+```sh
+./run-qemu.sh
+```
+
+The script builds the bootloader and kernel, then boots copies of them from a
+temporary virtual FAT disk. Kernel text written through `draw_char` is mirrored
+to QEMU's debug port (`0xE9`) and printed in the terminal while the graphical GOP
+framebuffer is shown in a separate window. Pass `--headless` to disable the GOP
+window, or `--no-build` to reuse existing binaries. The virtual VGA memory is
+limited to 2 MB, making the bootloader select QEMU's small 832x624 GOP mode—the
+closest mode QEMU exposes above 800x600. The launcher leaves the CPU model
+unspecified so QEMU supplies its default CPUID configuration. Use `--cpu MODEL`
+only when a particular virtual CPU configuration is needed.

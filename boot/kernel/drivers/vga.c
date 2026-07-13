@@ -3,6 +3,36 @@
 #include "uint_definitions.h"
 #include "memory.h"
 #include "font.h"
+#include "ports.h"
+
+
+#ifndef VGA_MIRROR_TO_QEMU_DEBUGCON
+#define VGA_MIRROR_TO_QEMU_DEBUGCON 1
+#endif
+
+#define QEMU_DEBUGCON_PORT 0xE9
+
+void qemu_debug_putc(char ch) {
+#if VGA_MIRROR_TO_QEMU_DEBUGCON
+    outb(QEMU_DEBUGCON_PORT, (u8)ch);
+#else
+    (void)ch;
+#endif
+}
+
+void qemu_debug_print(const char *str) {
+    while (*str != '\0') {
+        qemu_debug_putc(*str++);
+    }
+}
+
+void qemu_debug_hex_u64(u64 value) {
+    static const char digits[] = "0123456789abcdef";
+    qemu_debug_print("0x");
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        qemu_debug_putc(digits[(value >> shift) & 0x0f]);
+    }
+}
 
 
 #define RGB 0
@@ -94,6 +124,8 @@ void Set_GlobalTextColor(int color_index) {
 
 
 void draw_char(char ch, int coulmn, int row) {
+    qemu_debug_putc(ch);
+
     coulmn = coulmn << 3;
     row = row << 4;
     int font_index = (int)ch << 4;
@@ -283,6 +315,7 @@ text_data printf(char str[], ...) {
     char *p_str = str;
     while (*p_str != '\0') {
         if (*p_str == '\n') {
+            qemu_debug_putc('\n');
             cursor.coulmn = 0;
             cursor.row++;
 			if (cursor.row >= (ver_res >> 4)) {
