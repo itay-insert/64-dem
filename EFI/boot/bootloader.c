@@ -42,7 +42,7 @@ EFI_PHYSICAL_ADDRESS find_rsdp(EFI_SYSTEM_TABLE *SystemTable)
     {
         EFI_GUID *guid = &config_table[i].VendorGuid;
 
-        if (CompareGuid(guid, &Acpi20TableGuid))
+        if (CompareGuid(guid, &Acpi20TableGuid) == 0)
         {
             return (EFI_PHYSICAL_ADDRESS)config_table[i].VendorTable;
         }
@@ -53,7 +53,7 @@ EFI_PHYSICAL_ADDRESS find_rsdp(EFI_SYSTEM_TABLE *SystemTable)
     {
         EFI_GUID *guid = &config_table[i].VendorGuid;
 
-        if (CompareGuid(guid, &Acpi10TableGuid))
+        if (CompareGuid(guid, &Acpi10TableGuid) == 0)
         {
             return (EFI_PHYSICAL_ADDRESS)config_table[i].VendorTable;
         }

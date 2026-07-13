@@ -128,8 +128,6 @@ u64 discover_IOAPIC(void)
 
     RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
 
-    printf("rsdp revision = %b  rsdt_address = 0%lx  xsdt_address = 0x%lx\n", rsdp->revision, rsdp->rsdt_address, rsdp->xsdt_address);
-
     if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0)
         return 1;
 
