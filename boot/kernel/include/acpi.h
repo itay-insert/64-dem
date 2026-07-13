@@ -4,6 +4,6 @@
 
 u64 find_rsdp_legacy(void);
 void rsdp_init(u64 rsdp_base);
-u64 discover_APICIO(void);
+u64 discover_IOAPIC(void);
 
 #endif

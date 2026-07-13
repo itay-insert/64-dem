@@ -121,17 +121,17 @@ void rsdp_init(u64 rsdp_base) {
 }
 
 
-u64 discover_APICIO(void)
+u64 discover_IOAPIC(void)
 {
     if (!rsdp_address)
-        return 0;
+        return 1;
 
     RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
 
     printf("rsdp revision = %b  rsdt_address = 0%lx  xsdt_address = 0x%lx\n", rsdp->revision, rsdp->rsdt_address, rsdp->xsdt_address);
 
     if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0)
-        return 0;
+        return 1;
 
     if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
         ACPISDTHeader *rsdt = (ACPISDTHeader *)(u64)rsdp->rsdt_address;
@@ -164,13 +164,13 @@ u64 discover_APICIO(void)
                     madt_ptr += entry->length;
                 }
 
-                return 0;
+                return 1;
 
             }
 
         }
 
-        return 0;
+        return 1;
     }
 
 
@@ -178,10 +178,10 @@ u64 discover_APICIO(void)
     ACPISDTHeader *xsdt = (ACPISDTHeader*)rsdp->xsdt_address;
 
     if (memcmp(xsdt->signature, "XSDT", 4) != 0)
-        return 0;
+        return 1;
 
     if (xsdt->length < sizeof(ACPISDTHeader))
-        return 0;
+        return 1;
 
     u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
     u8 *end = (u8*)xsdt + xsdt->length;
@@ -217,11 +217,11 @@ u64 discover_APICIO(void)
                 madt_ptr += entry->length;
             }
 
-            return 0;
+            return 1;
         }
 
         ptr += 8;
     }
 
-    return 0;
+    return 1;
 }

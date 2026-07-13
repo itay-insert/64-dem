@@ -463,12 +463,13 @@ UINTN bitmap_size = (total_pages + 7) / 8;
         file_buffer
     );
 
+    EFI_PHYSICAL_ADDRESS rsdp = find_rsdp(SystemTable);
     
     u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
     
     u64 buf_sz = 16;
-    u64 buf_sz64 = 56;
+    u64 buf_sz64 = 64;
 
     u64 kernel_end = find_end(file_base, kernel_start);
     UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size+mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
@@ -531,6 +532,7 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     p_buff64[4] = (u64)mmpsz;
     p_buff64[5] = (u64)mpc;
     p_buff64[6] = (u64)bitmap_size;
+    p_buff64[7] = (u64)rsdp;
 
     while (1) {
         uefi_call_wrapper(

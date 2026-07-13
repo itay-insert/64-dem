@@ -22,6 +22,7 @@
 #define MemoryMapSize info_buffer64[4]
 #define DescriptorSize info_buffer64[5]
 #define BitmapSize info_buffer64[6]
+#define RSDP info_buffer64[7]
 #define PixelMode info_buffer[0]
 #define Horizontal_res info_buffer[1]
 #define Vertical_res info_buffer[2]
@@ -37,6 +38,8 @@ int paging_enabled = 0;
 
 
 u64 APIC_base = 0;
+
+u64 IO_APIC = 0;
 
 void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     qemu_debug_print("[kernel] entered kernel_main\n");
@@ -58,34 +61,9 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     qemu_debug_print(" stride=");
     qemu_debug_hex_u64((u64)PixelsPerScanline);
     qemu_debug_print("\n");
-    qemu_debug_print("[kernel] searching for legacy RSDP\n");
-    u64 RSDP_legacy = find_rsdp_legacy();
-    qemu_debug_print("[kernel] legacy RSDP search complete\n");
-    u64 *ptr = (u64 *)RSDP_legacy;
-    printf("rsdp_legacy = 0x%lx  sign = 0x%lx\n", RSDP_legacy, *ptr);
 
     tss_init();
     setup_gdt();
-    setup_execptions();
-
-    disable_pic();
-
-    APIC_base = discover_APIC();
-    rsdp_init(RSDP_legacy);
-
-    printf("Starting IO_APIC discovery: RSDP = 0x%lx\n", RSDP_legacy);
-    u64 APICIO = discover_APICIO();
-
-    printf("IO_APIC discovery complete: IOAPIC = 0x%lx\n", APICIO);
-
-
-    if (PixelMode == RGB) {
-        printf("Pixel format: RGB\n");
-    } else if (PixelMode == BGR) {
-        printf("Pixel format: BGR\n");
-    }
-
-    
 
     printf("Paging: [");
     Set_GlobalTextColor(Green);
@@ -98,10 +76,9 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     printf("OK");
     Set_GlobalTextColor(LightGray);
     printf("]\n");
-    
+
     u64 ram_size = (BitmapSize * 8) / 0x100;
     printf("an estimate of %lu Megabytes of ram detected\n", ram_size);
-    cpu_info();
     if (GbPageSupport == 1) {
         printf("1 Gb Page support: [");
         Set_GlobalTextColor(Green);
@@ -135,10 +112,76 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         printf("]\n");
     }
     free_frame(alloc);
+     if (PixelMode == RGB) {
+        printf("Pixel format: RGB\n");
+    } else if (PixelMode == BGR) {
+        printf("Pixel format: BGR\n");
+    }
 
+    setup_execptions();
+
+    disable_pic();
+
+    APIC_base = discover_APIC();
+
+    printf("Validating rsdp... ");
+
+    char *sign = (char *)RSDP;
+    if (memcmp(sign, "RSD PTR ", 8) == 0) {
+        printf("rsdp valid, using rsdp... ");
+        rsdp_init(RSDP);
+        IO_APIC = discover_IOAPIC();
+        if (IO_APIC == 1) {
+            printf("IO_APIC discovery failed... trying legacy... ");
+            u64 legacy_rsdp = find_rsdp_legacy();
+            char *legacy_sign = (char *)legacy_rsdp;
+            if (memcmp(legacy_sign, "RSD PTR ", 8) == 0) {
+                printf("legacy rsdp valid, using legacy rsdp... ");
+                rsdp_init(legacy_rsdp);
+                IO_APIC = discover_IOAPIC();
+                if (IO_APIC == 1) {
+                    printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
+                    IO_APIC = 0xFEC00000;
+                } else {
+                    printf("IO_APIC = 0x%lx \n", IO_APIC);
+                }
+            } else {
+                printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
+                IO_APIC = 0xFEC00000;
+            }
+        } else {
+            printf("IO_APIC = 0x%lx \n", IO_APIC);
+        }
+    } else {
+        printf("rsdp is not valid, resulting into rsdp legacy... ");
+        u64 legacy_rsdp = find_rsdp_legacy();
+        char *legacy_sign = (char *)legacy_rsdp;
+        if (memcmp(legacy_sign, "RSD PTR ", 8) == 0) {
+            printf("legacy rsdp valid, using legacy rsdp... ");
+            rsdp_init(legacy_rsdp);
+            IO_APIC = discover_IOAPIC();
+            if (IO_APIC == 1) {
+                printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
+                IO_APIC = 0xFEC00000;
+            } else {
+                printf("IO_APIC = 0x%lx \n", IO_APIC);
+            }
+        } else {
+            printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
+            IO_APIC = 0xFEC00000;
+        }
+    }
+
+
+
+    
+
+  
+    
+    cpu_info();
     printf("stack_top= 0x%lx\n", stack);
-    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  RSDP = 0x%lx  APICIO = 0x%lx\n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, RSDP_legacy, APICIO);
+    printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
+         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, IO_APIC);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
