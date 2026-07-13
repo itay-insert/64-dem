@@ -11,5 +11,6 @@ void kernel_trampoline(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMO
 void load_gdt(u64 addr);
 u64 discover_APIC(void);
 void load_idt(u64 addr);
+void disable_pic(void);
 
 #endif

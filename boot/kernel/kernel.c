@@ -53,6 +53,9 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     tss_init();
     setup_gdt();
     setup_execptions();
+
+    disable_pic();
+
     APIC_base = discover_APIC();
     rsdp_init(RSDP_legacy);
 

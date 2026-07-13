@@ -7,6 +7,7 @@ global kernel_trampoline
 global load_gdt
 global discover_APIC
 global load_idt
+global disable_pic
 
 section .text
 
@@ -73,4 +74,48 @@ ret
 load_idt:
 lidt [rdi]
 ret
+
+
+disable_pic:
+cli ; disable interrupts in case
+
+mov dx, 0x20 ; remap master
+
+mov al, 0x11 
+out dx, al
+
+inc dx
+
+mov al, 0x20
+out dx, al
+
+mov al, 0x4
+out dx, al
+
+mov al, 0x1
+out dx, al
+
+
+mov dx, 0xA0 ; remap slave
+
+mov al, 0x11
+out dx, al
+
+inc dx
+
+mov al, 0x28
+out dx, al
+
+mov al, 0x2
+out dx, al
+
+mov al, 0x1
+out dx, al
+
+mov al, 0xFF ; mask pic
+out 0x21, al
+out 0xA1, al
+
+ret 
+
 
