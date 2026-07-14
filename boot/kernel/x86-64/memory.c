@@ -20,6 +20,18 @@ typedef struct {
     UINT64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
+u64 calculate_pages(EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize) {
+    u64 pages = 0;
+    for (u64 i = 0; i < (memory_map_size / DescriptorSize); i++) {
+        u8 *ptr = (u8 *)memory_map;
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
+        if (desc->Type == EfiConventionalMemory) {
+            pages += desc->NumberOfPages;
+        }
+    }
+    return pages;
+}
+
 
 int memcmp(const void *ptr1, const void *ptr2, size_t count) {
     const uint8_t *a = (const uint8_t*)ptr1;
@@ -231,3 +243,4 @@ void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
 void SetBitmapBase(u8 *bitmap) {
     bitmap_base = (u64)bitmap;
 }
+

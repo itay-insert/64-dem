@@ -77,8 +77,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     Set_GlobalTextColor(LightGray);
     printf("]\n");
 
-    u64 ram_size = (BitmapSize * 8) / 0x100;
-    printf("an estimate of %lu Megabytes of ram detected\n", ram_size);
+    u64 ram_size = calculate_pages(memory_map, MemoryMapSize, DescriptorSize);
+    u64 gib = ram_size >> 18;
+    u64 remainder = ram_size & 0x3ffff;
+    remainder = (remainder * 1000) >> 18;
+    printf("%lu.%lu GiB of ram detected\n", gib, remainder); 
+
     if (GbPageSupport == 1) {
         printf("1 Gb Page support: [");
         Set_GlobalTextColor(Green);
