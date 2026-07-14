@@ -1,5 +1,7 @@
 #include "uint_definitions.h"
 #include "vga.h"
+#include "apic.h"
+#include "lowlevel.h"
 
 static char exception_names[32][24] = {
     "Divide error", "Debug", "NMI", "Breakpoint",
@@ -30,4 +32,17 @@ void exception_handler(u64 vector, u64 error_code, u64 rip, u64 cs,
     for (;;) {
         __asm__ volatile ("cli; hlt");
     }
+}
+
+static volatile u64 timer_ticks = 0;
+
+void timer_handler(void) {
+	timer_ticks++;
+
+	lapic_write(0xB0, 0);
+}
+
+
+u64 get_ticks(void) {
+	return timer_ticks;
 }

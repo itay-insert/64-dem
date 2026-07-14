@@ -18,7 +18,16 @@ void ioapic_write_register(u32 offset, u32 value) {
     ioapic_write(IOAPIC_WINDOW, value);
 }
 
+#define LAPIC_EOI 0xB0
 #define LVT_TIMER 0x320
+#define TIMER_INITIAL 0x380
+#define TIMER_CURRENT 0x390
+#define TIMER_DIVIDE 0x3E0
+
+#define TIMER_VECTOR 0x40
+#define TIMER_PERIODIC (1U << 17)
+
+
 #define LVT_THERMAL 0x330
 #define LVT_PERF 0x340
 #define LVT_LINT0 0x350
@@ -63,3 +72,4 @@ void APIC_init(void) {
 
     ioapic_mask_all();
 }
+

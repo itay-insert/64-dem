@@ -2,12 +2,53 @@ BITS 64
 
 extern APIC_base
 extern exception_handler
+extern timer_handler
 
 global spurious_stub
 global isr_eoi
 global exception_stub_table
+global timer_stub
 
 section .text
+
+isr_timer:
+push rax
+push rbx
+push rcx
+push rdx
+push rbp
+push rdi
+push rsi
+push r8
+push r9
+push r10
+push r11
+push r12
+push r13
+push r14
+push r15
+
+mov rbp, rsp
+and rsp, -16
+call timer_handler
+mov rsp, rbp
+
+pop r15
+pop r14
+pop r13
+pop r12
+pop r11
+pop r10
+pop r9
+pop r8
+pop rsi
+pop rdi
+pop rbp
+pop rdx
+pop rcx
+pop rbx
+pop rax
+iretq
 
 isr_spurious:
 iretq
@@ -151,3 +192,8 @@ section .rodata
 align 8
 spurious_stub:
 dq isr_spurious - spurious_stub
+
+section .rodata
+align 8
+timer_stub:
+dq isr_timer - timer_stub

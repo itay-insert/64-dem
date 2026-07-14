@@ -48,6 +48,10 @@ void setup_execptions(void) {
     u64 spurious = (u64)&spurious_stub + spurious_stub;
 
     idt_set_gate(0xFF, spurious, 0, INTERRUPT_GATE);
+    
+    u64 timer = (u64)&timer_stub + timer_stub;
+
+    idt_set_gate(0x40, timer, 0, INTERRUPT_GATE);
 
     idtr_t idtr = {
         .limit = sizeof(idt) - 1,
