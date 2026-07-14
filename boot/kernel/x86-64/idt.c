@@ -45,6 +45,10 @@ void setup_execptions(void) {
     u64 double_fault_stub = stub_table_base + exception_stub_table[8];
     idt_set_gate(8, double_fault_stub, 1, INTERRUPT_GATE);
 
+    u64 spurious = (u64)&spurious_stub + spurious_stub;
+
+    idt_set_gate(0xFF, spurious, 0, INTERRUPT_GATE);
+
     idtr_t idtr = {
         .limit = sizeof(idt) - 1,
         .base = (u64)idt

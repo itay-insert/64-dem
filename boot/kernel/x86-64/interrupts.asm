@@ -3,10 +3,14 @@ BITS 64
 extern APIC_base
 extern exception_handler
 
+global spurious_stub
 global isr_eoi
 global exception_stub_table
 
 section .text
+
+isr_spurious:
+iretq
 
 isr_eoi:
     push rax
@@ -142,3 +146,8 @@ exception_stub_table:
     dq exception_stub_%+i - exception_stub_table
 %assign i i+1
 %endrep
+
+section .rodata
+align 8
+spurious_stub:
+dq isr_spurious - spurious_stub

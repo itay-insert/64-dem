@@ -45,6 +45,15 @@ void free_pages(u64 address, u64 pages) {
     free_frame(free);
 }
 
+void flush_pages(u64 virtual_address, u64 pages) {
+    u64 virtual_end = virtual_address + (4096 * pages);
+
+    while (virtual_address < virtual_end)
+    {
+        asm volatile("invlpg (%0)" :: "r"(virtual_address) : "memory");
+        virtual_address += 4096;
+    }
+}
 
 void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
     u64 virtual_end = virtual_address + (4096 * pages);

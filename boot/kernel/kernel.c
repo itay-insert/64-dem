@@ -11,6 +11,7 @@
 #include "gdt.h"
 #include "acpi.h"
 #include "idt.h"
+#include "apic.h"
 
 
 
@@ -128,6 +129,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     APIC_base = discover_APIC();
 
+    u64 *PML4 = (u64 *)KernelPML4;
+
+    create_mapping(APIC_base, APIC_base-BASE, 1, 0x13, PML4);
+
+    flush_pages(APIC_base, 1);
+
     printf("Validating rsdp... ");
 
     RSDP = RSDP + BASE;
@@ -178,12 +185,15 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         }
     }
 
+    create_mapping(IO_APIC, IO_APIC-BASE, 1, 0x13, PML4);
 
+    flush_pages(IO_APIC, 1);
 
+    APIC_init();
     
+    enable_interrupts();
+    printf("interrupts enabled!\n");
 
-  
-    
     cpu_info();
     printf("stack_top= 0x%lx\n", stack);
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",

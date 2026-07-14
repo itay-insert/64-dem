@@ -1,5 +1,9 @@
 BITS 64
 
+
+extern APIC_base
+extern IO_APIC
+
 global stack_get
 global check_1gb_PageSupport
 global enable_paging
@@ -8,6 +12,15 @@ global load_gdt
 global discover_APIC
 global load_idt
 global disable_pic
+global read_msr
+global write_msr
+global lapic_read
+global lapic_write
+global ioapic_read
+global ioapic_write
+global enable_interrupts
+global disable_interrupts
+
 
 section .text
 
@@ -121,3 +134,50 @@ out 0xA1, al
 ret 
 
 
+read_msr:
+mov ecx, edi
+rdmsr
+shl rdx, 32
+or rax, rdx
+ret
+
+write_msr:
+mov eax, esi
+shr rsi, 32
+mov edx, esi
+mov ecx, edi
+wrmsr
+ret
+
+
+lapic_read:
+mov rax, [rel APIC_base]
+add rax, rdi
+mov eax, [rax]
+ret
+
+lapic_write:
+mov rax, [rel APIC_base]
+add rax, rdi
+mov dword [rax], esi
+ret
+
+ioapic_read:
+mov rax, [rel IO_APIC]
+add rax, rdi
+mov eax, [rax]
+ret
+
+ioapic_write:
+mov rax, [rel IO_APIC]
+add rax, rdi
+mov dword [rax], esi
+ret
+
+enable_interrupts:
+sti
+ret
+
+disable_interrupts:
+cli
+ret
