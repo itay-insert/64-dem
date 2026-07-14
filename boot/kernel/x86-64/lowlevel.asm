@@ -69,6 +69,8 @@ rdmsr
 shl rdx, 32
 or rax, rdx
 and rax, 0xfffffffffffff000
+mov rdx, 0xFFFF900000000000
+add rax, rdx
 ret
 
 load_idt:

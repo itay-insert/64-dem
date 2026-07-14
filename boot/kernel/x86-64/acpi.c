@@ -1,6 +1,7 @@
 #include "uint_definitions.h"
 #include "memory.h"
 #include "vga.h"
+#include "paging.h"
 
 typedef struct {
     char signature[8];
@@ -84,13 +85,13 @@ u64 find_rsdp_legacy(void)
         }
 
         if (match)
-            return addr;
+            return addr+BASE;
     }
 
 
     // 2. Search BIOS area
-    for (u64 addr = 0xE0000;
-         addr < 0x100000;
+    for (u64 addr = 0xFFFF9000000E0000;
+         addr < 0xFFFF900000100000;
          addr += 16)
     {
         char *ptr = (char *)addr;
@@ -107,7 +108,7 @@ u64 find_rsdp_legacy(void)
         }
 
         if (match)
-            return addr;
+            return addr+BASE;
     }
 
     return 0;
@@ -132,7 +133,7 @@ u64 discover_IOAPIC(void)
         return 1;
 
     if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
-        ACPISDTHeader *rsdt = (ACPISDTHeader *)(u64)rsdp->rsdt_address;
+        ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
         u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
         u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
 
@@ -156,7 +157,7 @@ u64 discover_IOAPIC(void)
 
                     if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC)) {
                         MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
-                        return (u64)ioapic->address;
+                        return ((u64)ioapic->address+BASE);
                     }
 
                     madt_ptr += entry->length;
@@ -173,7 +174,7 @@ u64 discover_IOAPIC(void)
 
 
    
-    ACPISDTHeader *xsdt = (ACPISDTHeader*)rsdp->xsdt_address;
+    ACPISDTHeader *xsdt = (ACPISDTHeader*)(rsdp->xsdt_address+BASE);
 
     if (memcmp(xsdt->signature, "XSDT", 4) != 0)
         return 1;
@@ -186,7 +187,7 @@ u64 discover_IOAPIC(void)
 
     while (ptr + 8 <= end)
     {
-        u64 table_phys = *(u64*)ptr;
+        u64 table_phys = *(u64*)ptr + BASE;
         ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
 
         if (memcmp(table->signature, "APIC", 4) == 0)
@@ -209,7 +210,7 @@ u64 discover_IOAPIC(void)
                 if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC))
                 {
                     MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
-                    return (u64)ioapic->address;
+                    return (u64)ioapic->address+BASE;
                 }
 
                 madt_ptr += entry->length;

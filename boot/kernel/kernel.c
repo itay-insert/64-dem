@@ -126,6 +126,8 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     printf("Validating rsdp... ");
 
+    RSDP = RSDP + BASE;
+
     char *sign = (char *)RSDP;
     if (memcmp(sign, "RSD PTR ", 8) == 0) {
         printf("rsdp valid, using rsdp... ");
@@ -141,13 +143,13 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
                 IO_APIC = discover_IOAPIC();
                 if (IO_APIC == 1) {
                     printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
-                    IO_APIC = 0xFEC00000;
+                    IO_APIC = 0xFFFF9000FEC00000;
                 } else {
                     printf("IO_APIC = 0x%lx \n", IO_APIC);
                 }
             } else {
                 printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
-                IO_APIC = 0xFEC00000;
+                IO_APIC = 0xFFFF9000FEC00000;
             }
         } else {
             printf("IO_APIC = 0x%lx \n", IO_APIC);
@@ -162,13 +164,13 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
             IO_APIC = discover_IOAPIC();
             if (IO_APIC == 1) {
                 printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
-                IO_APIC = 0xFEC00000;
+                IO_APIC = 0xFFFF9000FEC00000;
             } else {
                 printf("IO_APIC = 0x%lx \n", IO_APIC);
             }
         } else {
             printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
-            IO_APIC = 0xFEC00000;
+            IO_APIC = 0xFFFF9000FEC00000;
         }
     }
 

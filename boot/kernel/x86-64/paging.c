@@ -20,6 +20,7 @@
 
 #define fb_virtual 0xffffa00000000000
 #define kernel_virtual 0xffff800000000000
+#define BASE 0xffff900000000000
 
 int GbPageSupport = 0;
 
@@ -139,40 +140,26 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     PML4_base = alloc_pages(1);
     qemu_debug_print("[paging] PML4 allocated\n");
     u64 *PML4 = (u64 *)PML4_base;
-    for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
-        u8 *ptr = (u8 *)ps.memory_map;
-        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
-        if (desc->Type == EfiConventionalMemory) {
-            create_mapping(
-            desc->PhysicalStart,
-            desc->PhysicalStart,
-            desc->NumberOfPages,
-            0x03,
-            PML4
-            );
-        }
-    }
     qemu_debug_print("[paging] conventional memory mapped\n");
     for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
-        if (desc->NumberOfPages == 0 || desc->Type == EfiConventionalMemory ||
-            desc->Type == EfiUnusableMemory)
+        if (desc->Type == EfiUnusableMemory)
             continue;
 
         if (desc->Type == EfiMemoryMappedIO || desc->Type == EfiMemoryMappedIOPortSpace) {
-            create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
-        } else {
-            /* Firmware configuration tables are allowed to reside in loader,
-               boot-service, runtime, reserved, or ACPI memory.  Keep those
-               physical ranges identity-mapped while early firmware discovery
-               still uses their physical addresses. */
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
+        } else if (desc->Type == EfiConventionalMemory || desc->Type == EfiPersistentMemory) {
             create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
+        } else if (desc->Type == EfiReservedMemoryType) {
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
+        } else if (desc->Type == EfiACPIReclaimMemory || desc->Type == EfiACPIMemoryNVS) {
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
         }
     }
     qemu_debug_print("[paging] firmware memory mapped\n");
 
-    create_mapping(0xE0000, 0xE0000, 32, 0x03, PML4);
+    create_mapping(BASE+0xE0000, 0xE0000, 32, 0x03, PML4);
     qemu_debug_print("[paging] mapped bios legacy area\n");
 
     create_mapping(fb_virtual, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);

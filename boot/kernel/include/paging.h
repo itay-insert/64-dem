@@ -6,6 +6,10 @@
 #ifndef PAGING_H
 #define PAGING_H
 
+#define fb_virtual 0xffffa00000000000
+#define kernel_virtual 0xffff800000000000
+#define BASE 0xffff900000000000
+
 typedef struct {
     u64 *info_buffer64;
     int *info_buffer;
