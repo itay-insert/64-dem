@@ -11,7 +11,7 @@ u32 buffer_speed[4] = {0};
 u32 buffer_model[3] = {0};
 u32 buffer_cores[3] = {0};
 
-void print_feature(char name[], int supported)
+void print_feature(const char *name, int supported)
 {
     printf(name);
     printf(": ");

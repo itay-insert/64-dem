@@ -190,6 +190,20 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     flush_pages(IO_APIC, 1);
 
     APIC_init();
+
+    PM_ret pm = discover_PM_timer();
+
+    const char *types[] = {
+        "MMIO",
+        "Port i/o",
+        "error"
+    };
+
+    printf("PM_address = 0x%lx   ", pm.io_base);
+    printf("PM_type: ");
+    printf(types[pm.code]);
+    
+    printf(" ");
     
     enable_interrupts();
     printf("interrupts enabled!\n");

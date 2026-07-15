@@ -356,6 +356,49 @@ PM_ret discover_PM_timer(void) {
         return pm;
     }
 
-    
+    ACPISDTHeader *xsdt = (ACPISDTHeader*)(rsdp->xsdt_address+BASE);
+
+    if (memcmp(xsdt->signature, "XSDT", 4) != 0) {
+        pm.code = 2;
+        return pm;
+    }
+
+    if (xsdt->length < sizeof(ACPISDTHeader)) {
+        pm.code = 2;
+        return pm;
+    }
+
+
+    u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
+    u8 *end = (u8*)xsdt + xsdt->length;
+
+    while (ptr + 8 <= end) {
+        u64 table_phys = *(u64*)ptr + BASE;
+        ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
+
+        if (memcmp(table->signature, "FACP", 4) == 0) {
+            FADT *fadt = (FADT *)table;
+
+            if (fadt->x_pm_timer_block.address != 0) {
+                if (fadt->x_pm_timer_block.address_space_id == 0) {
+                    pm.io_base = fadt->x_pm_timer_block.address;
+                    pm.code = 0;
+                    return pm;
+                } else if (fadt->x_pm_timer_block.address_space_id == 1) {
+                    pm.io_base = (u16)fadt->x_pm_timer_block.address;
+                    pm.code = 1;
+                    return pm;
+                }
+            } else {
+                pm.io_base = (u16)fadt->pm_timer_block;
+                pm.code = 1;
+                return pm;
+            }
+        }
+        ptr += 8;
+    }
+
+    pm.code = 2;
+    return pm;
 
 }

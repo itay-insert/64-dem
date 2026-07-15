@@ -38,7 +38,7 @@ typedef struct {
 	int row;
 } text_data;
 
-text_data printf(char str[], ...);
+text_data printf(const char *str, ...);
 void move_cursor(int amt);
 void cursor_Setpos(int coulmn, int row);
 

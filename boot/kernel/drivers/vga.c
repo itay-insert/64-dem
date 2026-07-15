@@ -303,7 +303,7 @@ typedef struct {
 	int row;
 } text_data;
 
-text_data printf(char str[], ...) {
+text_data printf(const char *str, ...) {
 	va_list args;
 	va_start (args, str);
 	
@@ -312,7 +312,7 @@ text_data printf(char str[], ...) {
 	td.coulmn = cursor.coulmn;
 	td.row = cursor.row;
 
-    char *p_str = str;
+    const char *p_str = str;
     while (*p_str != '\0') {
         if (*p_str == '\n') {
             qemu_debug_putc('\n');
