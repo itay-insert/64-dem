@@ -140,6 +140,11 @@ typedef struct {
 
 u64 rsdp_address = 0;
 
+typedef struct {
+    u64 io_base;
+    int code;
+} PM_ret;
+
 u64 find_rsdp_legacy(void)
 {
     const char signature[8] = "RSD PTR ";
@@ -307,5 +312,50 @@ u64 discover_IOAPIC(void)
 }
 
 
+PM_ret discover_PM_timer(void) {
+    PM_ret pm = {0, 0};
+    if (!rsdp_address) {
+        pm.code = 2;
+        return pm;
+    }
 
+    RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
 
+    if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0) {
+        pm.code = 2;
+        return pm;
+    }
+
+    if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
+        ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
+        u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
+        u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
+        for (u32 i = 0; i < entries; i++) {
+            ACPISDTHeader *table = (ACPISDTHeader *)(u64)tables[i];
+            if (memcmp(table->signature, "FACP", 4) == 0) {
+                FADT *fadt = (FADT *)table;
+
+                if (fadt->x_pm_timer_block.address != 0) {
+                    if (fadt->x_pm_timer_block.address_space_id == 0) {
+                        pm.io_base = fadt->x_pm_timer_block.address;
+                        pm.code = 0;
+                        return pm;
+                    } else if (fadt->x_pm_timer_block.address_space_id == 1) {
+                        pm.io_base = (u16)fadt->x_pm_timer_block.address;
+                        pm.code = 1;
+                        return pm;
+                    }
+                } else {
+                    pm.io_base = (u16)fadt->pm_timer_block;
+                    pm.code = 1;
+                    return pm;
+                }
+            }
+        }
+        pm.code = 2;
+        return pm;
+    }
+
+    
+
+}
