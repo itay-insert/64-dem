@@ -4,6 +4,8 @@ global outb
 global inw
 global outw
 global io_wait
+global inl
+global outl
 
 section .text
 
@@ -35,4 +37,15 @@ io_wait:
 mov al, 0
 mov dx, 0x80
 out dx, al
+ret
+
+inl:
+mov dx, di
+in eax, dx
+ret
+
+outl:
+mov dx, di
+mov eax, esi
+out dx, eax
 ret
