@@ -28,6 +28,7 @@
 #define Horizontal_res info_buffer[1]
 #define Vertical_res info_buffer[2]
 #define PixelsPerScanline info_buffer[3]
+#define InfoSize info_buffer[4]
 
 #define RGB 0
 #define BGR 1
@@ -47,6 +48,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     if (paging_enabled == 0) {
         qemu_debug_print("[kernel] starting paging setup\n");
+        vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
         paging_enabled = 1;
         u8 *bitmap = (u8 *)stack;
         PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
@@ -208,8 +210,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     enable_interrupts();
     printf("interrupts enabled!\n");
 
+    printf("PML4= 0x%lx  ", KernelPML4);
+
+    printf("BitmapSize = 0x%lx  stack_top = 0x%lx", BitmapSize, stack);
+
+
     cpu_info();
-    printf("stack_top= 0x%lx\n", stack);
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
          KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, IO_APIC);
     printf("the clock:");

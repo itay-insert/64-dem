@@ -82,7 +82,7 @@ FindFreeRegion(
         EFI_MEMORY_DESCRIPTOR *desc =
             (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)map + i * desc_size);
 
-        if (desc->Type != EfiConventionalMemory)
+        if (desc->Type != EfiConventionalMemory || desc->PhysicalStart < 0x100000)
             continue;
 
         if (desc->NumberOfPages >= pages_needed)
@@ -468,17 +468,17 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
     
-    u64 buf_sz = 16;
+    u64 buf_sz = 24;
     u64 buf_sz64 = 64;
 
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size+mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
+    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096) + 1 + ((mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
 
     EFI_PHYSICAL_ADDRESS addr = FindFreeRegion(memory_map, memory_map_size, descriptor_size, pages);
 
     EFI_PHYSICAL_ADDRESS stack = addr + kernel_end + 0x41000; 
 
-    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
+    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size+4096);
 
     u64 *p_buff64 = (u64 *)((u64)MMP + memory_map_size);
     int *p_buff =  (int *)((u64)p_buff64 + buf_sz64);
@@ -523,11 +523,12 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     p_buff[1] = (int)final_info->HorizontalResolution;
     p_buff[2] = (int)final_info->VerticalResolution;
     p_buff[3] = (int)final_info->PixelsPerScanLine;
+    p_buff[4] = (int)(buf_sz+buf_sz64);
 
 
     p_buff64[0] = ad.entry;
     p_buff64[1] = ad.start;
-    p_buff64[2] = (u64)p_buff+16;
+    p_buff64[2] = (u64)p_buff+24;
     p_buff64[3] = fb;
     p_buff64[4] = (u64)mmpsz;
     p_buff64[5] = (u64)mpc;

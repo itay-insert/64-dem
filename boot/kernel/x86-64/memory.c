@@ -89,7 +89,7 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
         count = desc->PhysicalStart >> 12;
         u64 PageCount = desc->NumberOfPages;
-        if (desc->Type == EfiConventionalMemory) {
+        if (desc->Type == EfiConventionalMemory && desc->PhysicalStart >= 0x100000) {
             if ((count & 7) > 0) {
                 u64 bits_left = 8 - (count & 7);
                 if (bits_left <= PageCount) {

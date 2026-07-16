@@ -16,6 +16,7 @@
 #define Horizontal_res ps.info_buffer[1]
 #define Vertical_res ps.info_buffer[2]
 #define PixelsPerScanline ps.info_buffer[3]
+#define InfoSize ps.info_buffer[4]
 
 
 #define fb_virtual 0xffffa00000000000
@@ -175,13 +176,23 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     qemu_debug_print("[paging] framebuffer mapped\n");
     Framebuffer_base = fb_virtual;
 
-    create_mapping(kernel_virtual, KernelStart, (((KernelEnd-KernelStart)+4095)>>12), 0x03, PML4);
+    u64 stack = (u64)ps.bitmap;
+    u64 mmp = (u64)ps.memory_map;
+
+
+    u64 pages = ((stack - KernelStart) >> 12) - 65;
+    create_mapping(kernel_virtual, KernelStart, pages, 0x03, PML4);
+
+    create_mapping(kernel_virtual+((pages+1)<<12), KernelStart+((pages+1)<<12), 64, 0x03, PML4);
+
     qemu_debug_print("[paging] kernel mapped\n");
+
+    create_mapping(kernel_virtual+(stack-KernelStart), stack, ((BitmapSize + 4095) >> 12), 0x03, PML4);
+
+    create_mapping(kernel_virtual+(mmp-KernelStart), mmp, (((MemoryMapSize+InfoSize) + 4095)>>12), 0x03, PML4);
 
     KernelEnd = kernel_virtual + (KernelEnd - KernelStart);
     KernelEntry = kernel_virtual + (KernelEntry - KernelStart);
-    u64 stack = (u64)ps.bitmap;
-    u64 mmp = (u64)ps.memory_map;
     u64 ib_addr = (u64)ps.info_buffer;
     u64 ib64_addr = (u64)ps.info_buffer64;
     stack = kernel_virtual + (stack - KernelStart);
