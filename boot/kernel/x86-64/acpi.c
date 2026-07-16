@@ -109,6 +109,15 @@ typedef struct {
 
 } __attribute__((packed)) FADT;
 
+typedef struct {
+    ACPISDTHeader header;
+    u32 EventTimerBlockID;
+    ACPIAddress Address;
+    u8 HPETNumber;
+    u16 MinimumTick;
+    u8 PageProtection;
+} __attribute__((packed)) ACPI_HPET;
+
 
 typedef struct {
     ACPISDTHeader header;
@@ -144,6 +153,13 @@ typedef struct {
     u64 io_base;
     int code;
 } PM_ret;
+
+typedef struct {
+    char signature[4];
+    u64 Address;
+    PM_ret simple_timer;
+    int status;
+} ACPI_ret;
 
 u64 find_rsdp_legacy(void)
 {
@@ -400,5 +416,37 @@ PM_ret discover_PM_timer(void) {
 
     pm.code = 2;
     return pm;
+
+}
+
+uint32_t acpi_signature(const char sig[4]) {
+    return ((uint32_t)sig[0]) |
+           ((uint32_t)sig[1] << 8) |
+           ((uint32_t)sig[2] << 16) |
+           ((uint32_t)sig[3] << 24);
+}
+
+
+ACPI_ret ACPI_discovery(const char *signature) {
+    ACPI_ret ret = {0};
+    if (!rsdp_address) {
+        ret.status = 1;
+        return ret;
+    }
+
+    RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
+
+    if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0) {
+        ret.status = 1;
+        return ret;
+    }
+
+    if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
+        ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
+        u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
+        u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
+    }
+
+
 
 }
