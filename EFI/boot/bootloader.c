@@ -478,7 +478,7 @@ UINTN bitmap_size = (total_pages + 7) / 8;
 
     EFI_PHYSICAL_ADDRESS stack = addr + kernel_end + 0x41000; 
 
-    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size+4096);
+    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+((bitmap_size+4095)&~4095ULL)+4096);
 
     u64 *p_buff64 = (u64 *)((u64)MMP + memory_map_size);
     int *p_buff =  (int *)((u64)p_buff64 + buf_sz64);
