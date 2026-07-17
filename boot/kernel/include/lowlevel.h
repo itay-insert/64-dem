@@ -20,5 +20,13 @@ u32 ioapic_read(u32 offset);
 void ioapic_write(u32 offset, u32 value);
 void enable_interrupts(void);
 void disable_interrupts(void);
+u64 MMIO_read64(u64 base, u64 offset);
+void MMIO_write64(u64 base, u64 offset, u64 value);
+u32 MMIO_read32(u64 base, u64 offset);
+void MMIO_write32(u64 base, u64 offset, u32 value);
+u16 MMIO_read16(u64 base, u64 offset);
+void MMIO_write16(u64 base, u64 offset, u16 value);
+u8 MMIO_read8(u64 base, u64 offset);
+void MMIO_write8(u64 base, u64 offset, u8 value);
 
 #endif
