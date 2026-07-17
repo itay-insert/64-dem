@@ -212,6 +212,19 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     
         printf(" ");
     }
+
+
+    ret = ACPI_discovery("HPET");
+
+    if (ret.status == 1) {
+        printf("error ");
+    } else if (ret.status == 0) {
+        printf("HPET_address = 0x%lx   ", ret.simple_timer.io_base);
+        printf("HPET_type: ");
+        printf(types[ret.simple_timer.code]);
+
+        printf(" ");
+    }
     
     enable_interrupts();
     printf("interrupts enabled!\n");

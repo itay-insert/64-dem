@@ -287,6 +287,17 @@ ACPI_ret handle_PM_timer(FADT *fadt, ACPI_ret ret) {
     return ret;
 }
 
+ACPI_ret handle_HPET(ACPI_HPET *hpet, ACPI_ret ret) {
+    if (hpet->Address.address_space_id != 0) {
+        ret.status = 1;
+        return ret;
+    }
+    ret.simple_timer.io_base = hpet->Address.address;
+    ret.simple_timer.code = 0;
+    ret.status = 0;
+    return ret;
+}
+
 
 ACPI_ret ACPI_discovery(const char *signature) {
     ACPI_ret ret = {0};
@@ -321,7 +332,8 @@ ACPI_ret ACPI_discovery(const char *signature) {
                         return ret;
                         
                     case HPET_sig:
-                        ret.status = 1;
+                        ACPI_HPET *hpet = (ACPI_HPET *)table;
+                        ret = handle_HPET(hpet, ret);
                         return ret;
 
                     default:
@@ -369,7 +381,8 @@ ACPI_ret ACPI_discovery(const char *signature) {
                     return ret;
                         
                 case HPET_sig:
-                    ret.status = 1;
+                    ACPI_HPET *hpet = (ACPI_HPET *)table;
+                    ret =  handle_HPET(hpet, ret);
                     return ret;
 
                 default:
