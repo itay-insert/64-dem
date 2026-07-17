@@ -38,7 +38,11 @@ void setup_execptions(void) {
 
     for (u8 vector = 0; vector < 32; vector++) {
         u64 stub = stub_table_base + exception_stub_table[vector];
-        idt_set_gate(vector, stub, 0, INTERRUPT_GATE);
+        if (vector == 14) {
+            idt_set_gate(vector, stub, 1, INTERRUPT_GATE);
+        } else {
+            idt_set_gate(vector, stub, 0, INTERRUPT_GATE);
+        }
     }
 
     /* Double fault switches to TSS.IST1 even if the current stack is broken. */
