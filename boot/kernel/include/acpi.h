@@ -8,9 +8,15 @@ typedef struct {
     int code;
 } PM_ret;
 
+typedef struct {
+    char signature[4];
+    u64 Address;
+    PM_ret simple_timer;
+    int status;
+} ACPI_ret;
+
 u64 find_rsdp_legacy(void);
 void rsdp_init(u64 rsdp_base);
-u64 discover_IOAPIC(void);
-PM_ret discover_PM_timer(void);
+ACPI_ret ACPI_discovery(const char *signature);
 
 #endif

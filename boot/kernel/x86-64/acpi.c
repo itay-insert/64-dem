@@ -3,6 +3,10 @@
 #include "vga.h"
 #include "paging.h"
 
+#define MADT_sig 0x43495041
+#define FACP_sig 0x50434146
+#define HPET_sig 0x54455048
+
 typedef struct {
     char signature[8];
     u8 checksum;
@@ -217,213 +221,70 @@ u64 find_rsdp_legacy(void)
 }
 
 
-
-
 void rsdp_init(u64 rsdp_base) {
     rsdp_address = rsdp_base;
 }
 
-
-u64 discover_IOAPIC(void)
-{
-    if (!rsdp_address)
-        return 1;
-
-    RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
-
-    if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0)
-        return 1;
-
-    if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
-        ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
-        u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
-        u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
-
-        for (u32 i = 0; i < entries; i++) {
-            ACPISDTHeader *table = (ACPISDTHeader *)(u64)tables[i];
-
-            if (memcmp(table->signature, "APIC", 4) == 0) {
-                MADT *madt = (MADT *)table;
-
-                u8 *madt_ptr = madt->entries;
-                u8 *madt_end = (u8*)madt + madt->header.length;
-
-                while (madt_ptr + 2 <= madt_end) {
-                    MADTEntryHeader *entry = (MADTEntryHeader*)madt_ptr;
-
-                    if (entry->length < 2)
-                        break;
-
-                    if (madt_ptr + entry->length > madt_end)
-                        break;
-
-                    if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC)) {
-                        MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
-                        return ((u64)ioapic->address+BASE);
-                    }
-
-                    madt_ptr += entry->length;
-                }
-
-                return 1;
-
-            }
-
-        }
-
-        return 1;
-    }
-
-
-   
-    ACPISDTHeader *xsdt = (ACPISDTHeader*)(rsdp->xsdt_address+BASE);
-
-    if (memcmp(xsdt->signature, "XSDT", 4) != 0)
-        return 1;
-
-    if (xsdt->length < sizeof(ACPISDTHeader))
-        return 1;
-
-    u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
-    u8 *end = (u8*)xsdt + xsdt->length;
-
-    while (ptr + 8 <= end)
-    {
-        u64 table_phys = *(u64*)ptr + BASE;
-        ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
-
-        if (memcmp(table->signature, "APIC", 4) == 0)
-        {
-            MADT *madt = (MADT*)table;
-
-            u8 *madt_ptr = madt->entries;
-            u8 *madt_end = (u8*)madt + madt->header.length;
-
-            while (madt_ptr + 2 <= madt_end)
-            {
-                MADTEntryHeader *entry = (MADTEntryHeader*)madt_ptr;
-
-                if (entry->length < 2)
-                    break;
-
-                if (madt_ptr + entry->length > madt_end)
-                    break;
-
-                if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC))
-                {
-                    MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
-                    return (u64)ioapic->address+BASE;
-                }
-
-                madt_ptr += entry->length;
-            }
-
-            return 1;
-        }
-
-        ptr += 8;
-    }
-
-    return 1;
-}
-
-
-PM_ret discover_PM_timer(void) {
-    PM_ret pm = {0, 0};
-    if (!rsdp_address) {
-        pm.code = 2;
-        return pm;
-    }
-
-    RSDPDescriptor20 *rsdp = (RSDPDescriptor20*)rsdp_address;
-
-    if (memcmp(rsdp->signature, "RSD PTR ", 8) != 0) {
-        pm.code = 2;
-        return pm;
-    }
-
-    if (rsdp->revision < 2 || rsdp->xsdt_address == 0) {
-        ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
-        u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
-        u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
-        for (u32 i = 0; i < entries; i++) {
-            ACPISDTHeader *table = (ACPISDTHeader *)(u64)tables[i];
-            if (memcmp(table->signature, "FACP", 4) == 0) {
-                FADT *fadt = (FADT *)table;
-
-                if (fadt->x_pm_timer_block.address != 0) {
-                    if (fadt->x_pm_timer_block.address_space_id == 0) {
-                        pm.io_base = fadt->x_pm_timer_block.address;
-                        pm.code = 0;
-                        return pm;
-                    } else if (fadt->x_pm_timer_block.address_space_id == 1) {
-                        pm.io_base = (u16)fadt->x_pm_timer_block.address;
-                        pm.code = 1;
-                        return pm;
-                    }
-                } else {
-                    pm.io_base = (u16)fadt->pm_timer_block;
-                    pm.code = 1;
-                    return pm;
-                }
-            }
-        }
-        pm.code = 2;
-        return pm;
-    }
-
-    ACPISDTHeader *xsdt = (ACPISDTHeader*)(rsdp->xsdt_address+BASE);
-
-    if (memcmp(xsdt->signature, "XSDT", 4) != 0) {
-        pm.code = 2;
-        return pm;
-    }
-
-    if (xsdt->length < sizeof(ACPISDTHeader)) {
-        pm.code = 2;
-        return pm;
-    }
-
-
-    u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
-    u8 *end = (u8*)xsdt + xsdt->length;
-
-    while (ptr + 8 <= end) {
-        u64 table_phys = *(u64*)ptr + BASE;
-        ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
-
-        if (memcmp(table->signature, "FACP", 4) == 0) {
-            FADT *fadt = (FADT *)table;
-
-            if (fadt->x_pm_timer_block.address != 0) {
-                if (fadt->x_pm_timer_block.address_space_id == 0) {
-                    pm.io_base = fadt->x_pm_timer_block.address;
-                    pm.code = 0;
-                    return pm;
-                } else if (fadt->x_pm_timer_block.address_space_id == 1) {
-                    pm.io_base = (u16)fadt->x_pm_timer_block.address;
-                    pm.code = 1;
-                    return pm;
-                }
-            } else {
-                pm.io_base = (u16)fadt->pm_timer_block;
-                pm.code = 1;
-                return pm;
-            }
-        }
-        ptr += 8;
-    }
-
-    pm.code = 2;
-    return pm;
-
-}
-
+      
 uint32_t acpi_signature(const char sig[4]) {
     return ((uint32_t)sig[0]) |
            ((uint32_t)sig[1] << 8) |
            ((uint32_t)sig[2] << 16) |
            ((uint32_t)sig[3] << 24);
+}
+
+
+
+ACPI_ret handle_APICIO(MADT *madt, ACPI_ret ret) {
+    u8 *madt_ptr = madt->entries;
+    u8 *madt_end = (u8*)madt + madt->header.length;
+
+    while (madt_ptr + 2 <= madt_end) {
+        MADTEntryHeader *entry = (MADTEntryHeader*)madt_ptr;
+
+        if (entry->length < 2)
+            break;
+
+        if (madt_ptr + entry->length > madt_end)
+            break;
+
+        if (entry->type == 1 && entry->length >= sizeof(MADTIOAPIC)) {
+            MADTIOAPIC *ioapic = (MADTIOAPIC*)entry;
+            ret.Address = (u64)ioapic->address + BASE;
+            ret.status = 0;
+            return ret;
+        }
+
+        madt_ptr += entry->length;
+                        
+    }
+
+    ret.status = 1;
+    return ret;
+}
+
+
+ACPI_ret handle_PM_timer(FADT *fadt, ACPI_ret ret) {
+    if (fadt->x_pm_timer_block.address != 0) {
+        if (fadt->x_pm_timer_block.address_space_id == 0) {
+            ret.simple_timer.io_base = fadt->x_pm_timer_block.address;
+            ret.simple_timer.code = 0;
+            ret.status = 0;
+            return ret;
+        } else if (fadt->x_pm_timer_block.address_space_id == 1) {
+            ret.simple_timer.io_base = (u16)fadt->x_pm_timer_block.address;
+            ret.simple_timer.code = 1;
+            ret.status = 0;
+            return ret;
+        }
+    } else {
+        ret.simple_timer.io_base = (u16)fadt->pm_timer_block;
+        ret.simple_timer.code = 1;
+        ret.status = 0;
+        return ret;
+    }
+    ret.status = 1;
+    return ret;
 }
 
 
@@ -445,8 +306,84 @@ ACPI_ret ACPI_discovery(const char *signature) {
         ACPISDTHeader *rsdt = (ACPISDTHeader *)((u64)rsdp->rsdt_address+BASE);
         u32 entries = (rsdt->length - sizeof(ACPISDTHeader)) / 4;
         u32 *tables = (u32 *)((u8 *)rsdt + sizeof(ACPISDTHeader));
+        for (u32 i = 0; i < entries; i++) {
+            ACPISDTHeader *table = (ACPISDTHeader *)((u64)tables[i] + BASE);
+            if (memcmp(table->signature, signature, 4) == 0) {
+                switch (acpi_signature(table->signature)) {
+                    case MADT_sig:
+                        MADT *madt = (MADT *)table;
+                        ret = handle_APICIO(madt, ret);
+                        return ret;
+
+                    case FACP_sig:
+                        FADT *fadt = (FADT *)table;
+                        ret = handle_PM_timer(fadt, ret);
+                        return ret;
+                        
+                    case HPET_sig:
+                        ret.status = 1;
+                        return ret;
+
+                    default:
+                        ret.status = 1;
+                        return ret;
+                }
+            }
+
+        }
+        ret.status = 1;
+        return ret;
     }
 
 
+    ACPISDTHeader *xsdt = (ACPISDTHeader*)(rsdp->xsdt_address+BASE);
+
+    if (memcmp(xsdt->signature, "XSDT", 4) != 0) {
+        ret.status = 1;
+        return ret;
+    }
+
+    if (xsdt->length < sizeof(ACPISDTHeader)) {
+        ret.status = 1;
+        return ret;
+    }
+
+
+    u8 *ptr = (u8*)xsdt + sizeof(ACPISDTHeader);
+    u8 *end = (u8*)xsdt + xsdt->length;
+
+    while (ptr + 8 <= end) {
+        u64 table_phys = *(u64*)ptr + BASE;
+        ACPISDTHeader *table = (ACPISDTHeader*)table_phys;
+
+        if (memcmp(table->signature, signature, 4) == 0) {
+            switch (acpi_signature(table->signature)) {
+                case MADT_sig:
+                    MADT *madt = (MADT *)table;
+                    ret = handle_APICIO(madt, ret);
+                    return ret;
+
+                case FACP_sig:
+                    FADT *fadt = (FADT *)table;
+                    ret = handle_PM_timer(fadt, ret);
+                    return ret;
+                        
+                case HPET_sig:
+                    ret.status = 1;
+                    return ret;
+
+                default:
+                    ret.status = 1;
+                    return ret;
+            }
+
+        }
+
+
+        ptr += 8;
+    }
+
+    ret.status = 1;
+    return ret;
 
 }

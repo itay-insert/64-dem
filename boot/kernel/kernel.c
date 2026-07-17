@@ -145,27 +145,29 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     if (memcmp(sign, "RSD PTR ", 8) == 0) {
         printf("rsdp valid, using rsdp... ");
         rsdp_init(RSDP);
-        IO_APIC = discover_IOAPIC();
-        if (IO_APIC == 1) {
+        ACPI_ret ioapic = ACPI_discovery("APIC");
+        if (ioapic.status == 1) {
             printf("IO_APIC discovery failed... trying legacy... ");
             u64 legacy_rsdp = find_rsdp_legacy();
             char *legacy_sign = (char *)legacy_rsdp;
             if (memcmp(legacy_sign, "RSD PTR ", 8) == 0) {
                 printf("legacy rsdp valid, using legacy rsdp... ");
                 rsdp_init(legacy_rsdp);
-                IO_APIC = discover_IOAPIC();
-                if (IO_APIC == 1) {
+                ioapic = ACPI_discovery("APIC");
+                if (ioapic.status == 1) {
                     printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
-                    IO_APIC = 0xFFFF9000FEC00000;
+                    ioapic.Address = 0xFFFF9000FEC00000;
                 } else {
-                    printf("IO_APIC = 0x%lx \n", IO_APIC);
+                    printf("IO_APIC = 0x%lx \n", ioapic.Address);
+                    IO_APIC = ioapic.Address;
                 }
             } else {
                 printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
                 IO_APIC = 0xFFFF9000FEC00000;
             }
         } else {
-            printf("IO_APIC = 0x%lx \n", IO_APIC);
+            printf("IO_APIC = 0x%lx \n", ioapic.Address);
+            IO_APIC = ioapic.Address;
         }
     } else {
         printf("rsdp is not valid, resulting into rsdp legacy... ");
@@ -174,12 +176,13 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         if (memcmp(legacy_sign, "RSD PTR ", 8) == 0) {
             printf("legacy rsdp valid, using legacy rsdp... ");
             rsdp_init(legacy_rsdp);
-            IO_APIC = discover_IOAPIC();
-            if (IO_APIC == 1) {
+            ACPI_ret ioapic = ACPI_discovery("APIC");
+            if (ioapic.status == 1) {
                 printf("IO_APIC discovery failed... assuming 0xFEC00000\n");
                 IO_APIC = 0xFFFF9000FEC00000;
             } else {
-                printf("IO_APIC = 0x%lx \n", IO_APIC);
+                printf("IO_APIC = 0x%lx \n", ioapic.Address);
+                IO_APIC = ioapic.Address;
             }
         } else {
             printf("no valid rsdp found... assuming IO_APIC is 0xFEC00000\n");
@@ -193,19 +196,22 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     APIC_init();
 
-    PM_ret pm = discover_PM_timer();
+    ACPI_ret ret = ACPI_discovery("FACP");
 
     const char *types[] = {
         "MMIO",
         "Port i/o",
-        "error"
     };
 
-    printf("PM_address = 0x%lx   ", pm.io_base);
-    printf("PM_type: ");
-    printf(types[pm.code]);
+    if (ret.status == 1) {
+        printf("error ");
+    } else if (ret.status == 0) {
+        printf("PM_address = 0x%lx   ", ret.simple_timer.io_base);
+        printf("PM_type: ");
+        printf(types[ret.simple_timer.code]);
     
-    printf(" ");
+        printf(" ");
+    }
     
     enable_interrupts();
     printf("interrupts enabled!\n");
