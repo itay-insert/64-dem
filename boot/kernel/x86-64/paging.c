@@ -23,6 +23,14 @@
 #define kernel_virtual 0xffff800000000000
 #define BASE 0xffff900000000000
 
+typedef struct {
+    u64 physical_address;
+    u16 attributes;
+    int Page_Type;
+    int status;
+    int error_code;
+} PAGING_LOOKUP_DESCRIPTOR;
+
 int GbPageSupport = 0;
 
 u64 PML4_base = 0;
@@ -121,6 +129,18 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
             }
         }
     }
+}
+
+PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
+    PAGING_LOOKUP_DESCRIPTOR ret = {0};
+    int pt_index = (virtual_address >> 12) & 511;
+    int pd_index = (virtual_address >> 21) & 511;
+    int pdpt_index = (virtual_address >> 30) & 511;
+    int pml4_index = (virtual_address >> 39) & 511;
+    if (PML4[pml4_index] == 0) {
+
+    }
+
 }
 
 typedef struct {

@@ -102,15 +102,17 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(5);
     u64 addr = alloc.PhysicalStart;
+    u64 attribute = alloc.Attribute;
     free_frame(alloc);
     alloc = alloc_frame(1);
 
-    if (alloc.PhysicalStart == addr) {
+    if (alloc.PhysicalStart == addr && alloc.Attribute == 0 && attribute == 0) {
         printf("bitmap allocator: [");
         Set_GlobalTextColor(Green);
         printf("OK");
         Set_GlobalTextColor(LightGray);
         printf("]\n");
+        free_frame(alloc);
     } else {
         printf("bitmap allocator: [");
         Set_GlobalTextColor(Red);
@@ -118,7 +120,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     }
-    free_frame(alloc);
+    
      if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");
     } else if (PixelMode == BGR) {

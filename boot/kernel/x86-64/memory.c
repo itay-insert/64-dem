@@ -76,10 +76,12 @@ u8 set_bit(u8 byte, u8 bit, u8 value, u8 dir) {
 }
 
 u64 bitmap_base = 0;
+u64 bitmapSize = 0;
 
 
 void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size) {
     bitmap_base = (u64)bitmap;
+    bitmapSize = bitmap_size;
     for (u64 i = 0; i < bitmap_size; i++) {
         bitmap[i] = 0xff;
     }
@@ -166,22 +168,35 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
 
 
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
+    EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
     u64 count = 0;
     u64 count_tar = 0;
     u64 match_count = 0;
     while (match_count < PageCount) {
         if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
+            if ((count>>3) >= bitmapSize) {
+                ret.Attribute = 1;
+                return ret;
+            } 
             match_count++;
             count++;
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             match_count = 0;
-            while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) 
+            while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
+                if ((count>>3) >= bitmapSize) {
+                    ret.Attribute = 1;
+                    return ret;
+                }
                 count++;
+            }
             count_tar = count;
         } 
     }
-    EFI_MEMORY_DESCRIPTOR ret = {0, count_tar<<12, count_tar<<12, PageCount, 0};
+    ret.PhysicalStart = count_tar<<12;
+    ret.VirtualStart = count_tar<<12;
+    ret.NumberOfPages = PageCount;
+    ret.Attribute = 0;
     count = count_tar;
     if ((count & 7) > 0) {
         u64 bits_left = 8 - (count & 7);
@@ -244,3 +259,6 @@ void SetBitmapBase(u8 *bitmap) {
     bitmap_base = (u64)bitmap;
 }
 
+u64 kmalloc(u64 virtual_address, u64 pages) {
+
+}
