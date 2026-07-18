@@ -20,6 +20,14 @@ global ioapic_read
 global ioapic_write
 global enable_interrupts
 global disable_interrupts
+global MMIO_read64
+global MMIO_write64
+global MMIO_read32
+global MMIO_write32
+global MMIO_read16
+global MMIO_write16
+global MMIO_read8
+global MMIO_write8
 
 
 section .text
@@ -181,3 +189,48 @@ ret
 disable_interrupts:
 cli
 ret
+
+
+
+MMIO_read64:
+add rdi, rsi
+mov rax, [rdi]
+ret
+
+MMIO_write64:
+add rdi, rsi
+mov [rdi], rdx
+ret
+
+MMIO_read32:
+add rdi, rsi
+mov eax, [rdi]
+ret
+
+MMIO_write32:
+add rdi, rsi
+mov [rdi], edx
+ret
+
+MMIO_read16:
+add rdi, rsi
+mov ax, [rdi]
+movzx eax, ax
+ret
+
+MMIO_write16:
+add rdi, rsi
+mov [rdi], dx
+ret
+
+MMIO_read8:
+add rdi, rsi
+mov al, [rdi]
+movzx eax, al
+ret
+
+MMIO_write8:
+add rdi, rsi
+mov [rdi], dl
+ret
+
