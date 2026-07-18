@@ -166,38 +166,42 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
 
 }
 
+u64 former_count = 0;
 
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
-    u64 count = 0;
-    u64 count_tar = 0;
+    u64 count = former_count;
+    u64 count_tar = count;
     u64 match_count = 0;
+    int warparounds = 0;
     while (match_count < PageCount) {
         if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
+            match_count++;
+            count++;
             if ((count>>3) >= bitmapSize) {
                 ret.Attribute = 1;
                 return ret;
             } 
-            match_count++;
-            count++;
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             match_count = 0;
             while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
+                count++;
                 if ((count>>3) >= bitmapSize) {
                     ret.Attribute = 1;
                     return ret;
                 }
-                count++;
             }
             count_tar = count;
         } 
     }
+    former_count = count;
     ret.PhysicalStart = count_tar<<12;
     ret.VirtualStart = count_tar<<12;
     ret.NumberOfPages = PageCount;
     ret.Attribute = 0;
     count = count_tar;
+
     if ((count & 7) > 0) {
         u64 bits_left = 8 - (count & 7);
         if (bits_left <= PageCount) {
@@ -230,6 +234,9 @@ void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
     u8 *bitmap = (u8 *)bitmap_base;
     u64 count = frame.PhysicalStart >> 12;
     u64 PageCount = frame.NumberOfPages;
+    if (count < former_count) {
+        former_count = count;
+    }
     if ((count & 7) > 0) {
         u64 bits_left = 8 - (count & 7);
         if (bits_left <= PageCount) {
@@ -259,6 +266,9 @@ void SetBitmapBase(u8 *bitmap) {
     bitmap_base = (u64)bitmap;
 }
 
-u64 kmalloc(u64 virtual_address, u64 pages) {
-
+EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
+    EFI_MEMORY_DESCRIPTOR ret = {0};
+    u8 *bitmap = (u8 *)bitmap_base;
+    
+    
 }
