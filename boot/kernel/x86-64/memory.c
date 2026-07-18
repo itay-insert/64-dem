@@ -1,24 +1,9 @@
 #include <stddef.h>
 #include <stdint.h>
-#include "efi_memory_types.h"
 #include "uint_definitions.h"
+#include "paging.h"
 
 
-typedef unsigned int UINT32;
-typedef unsigned long long UINT64; 
-
-
-typedef UINT64 EFI_PHYSICAL_ADDRESS;
-typedef UINT64 EFI_VIRTUAL_ADDRESS;
-
-
-typedef struct {
-    UINT32 Type;
-    EFI_PHYSICAL_ADDRESS PhysicalStart;
-    EFI_VIRTUAL_ADDRESS VirtualStart;
-    UINT64 NumberOfPages;
-    UINT64 Attribute;
-} EFI_MEMORY_DESCRIPTOR;
 
 u64 calculate_pages(EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize) {
     u64 pages = 0;
@@ -171,18 +156,21 @@ u64 former_count = 0;
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
+    if (PageCount == 0) {
+        ret.Attribute = 2; // 0 = success, 1 = error: not enough memory, 2 = error: invalid parameter
+        return ret;
+    }
     u64 count = former_count;
     u64 count_tar = count;
     u64 match_count = 0;
-    int warparounds = 0;
     while (match_count < PageCount) {
+        if ((count>>3) >= bitmapSize) {
+            ret.Attribute = 1;
+            return ret;
+        } 
         if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
             match_count++;
             count++;
-            if ((count>>3) >= bitmapSize) {
-                ret.Attribute = 1;
-                return ret;
-            } 
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             match_count = 0;
             while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
@@ -266,9 +254,88 @@ void SetBitmapBase(u8 *bitmap) {
     bitmap_base = (u64)bitmap;
 }
 
+void fill_bitmap(u64 count, u64 PageCount, u8 *bitmap) {
+    if ((count & 7) > 0) {
+        u64 bits_left = 8 - (count & 7);
+        if (bits_left <= PageCount) {
+            bitmap[count>>3] |= (u8)(0xff >> (count & 7));
+            PageCount -= bits_left;
+            count += bits_left;
+        } else {
+            for (u64 i = 0; i < PageCount; i++) {
+                bitmap[count>>3] = set_bit(bitmap[count>>3], (u8)count & 7, 1, 1);
+                count++;
+            }
+            PageCount = 0;
+        }
+        
+    }
+    u64 eightPage_count = PageCount >> 3;
+    u64 onePage_count = PageCount & 7;
+    for (u64 j = 0; j < eightPage_count; j++) {
+        bitmap[count>>3] = 0xff;
+        count += 8;
+    }
+    bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
+
+}
+
+int run_simulation(u64 count, u64 pages, u8 *bitmap) {
+    int status = 0;
+    if (pages == 0) {
+        status = 2; // 0 = wouldn't cross bounds, 1 = would cross bounds, 2 = invalid parameter
+        return status;
+    }
+    while (pages > 0) {
+        if ((count>>3) >= bitmapSize) {
+            status = 1;
+            return status;
+        }
+        if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) pages--;
+        count++;
+    }
+    return status;
+}
+
 EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
-    
-    
+    u64 *PML4 = (u64 *)KernelPML4;
+    if (pages == 0) {
+        ret.Attribute = 2;
+        return ret;
+    }
+    u64 count = former_count;
+    u64 count_tar = count;
+    u64 count_virt = virtual_address;
+    u64 match_count = 0;
+    u64 PageCount = pages;
+    if (run_simulation(count, PageCount, bitmap) == 1) {
+        ret.Attribute = 1;
+        return ret;
+    }
+    while (PageCount > 0) {
+        if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
+            match_count++;
+            count++;
+            PageCount--;
+        } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
+            fill_bitmap(count_tar, match_count, bitmap);
+            create_mapping(count_virt, count_tar<<12, match_count, 0x03, PML4);
+            count_virt += (match_count << 12);
+            match_count = 0;
+            while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) count++;
+            count_tar = count;
+        }
+    }
+    fill_bitmap(count_tar, match_count, bitmap);
+    create_mapping(count_virt, count_tar<<12, match_count, 0x03, PML4);
+    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(virtual_address, PML4);
+    ret.PhysicalStart = lookup.physical_address;
+    ret.VirtualStart = virtual_address;
+    ret.Attribute = 0;
+    ret.NumberOfPages = pages;
+    flush_pages(virtual_address, pages);
+    former_count = count;
+    return ret;
 }

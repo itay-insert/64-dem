@@ -120,8 +120,33 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     }
+
+    alloc = kmalloc((KernelEnd & ~0xfff)+0x1000, 1);
+    addr = alloc.PhysicalStart;
+    int *ptr = (int *)alloc.VirtualStart;
+    *ptr = 1;
+
+    u64 *PML4 = (u64 *)KernelPML4;
     
-     if (PixelMode == RGB) {
+    alloc = kmalloc((KernelEnd & ~0xfff)+0x2000, 1);
+    if (*ptr == 1 && addr != alloc.PhysicalStart) {
+        printf("kmalloc: [");
+        Set_GlobalTextColor(Green);
+        printf("OK");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+    } else {
+        printf("kmalloc: [");
+        Set_GlobalTextColor(Red);
+        printf("ERR");
+        Set_GlobalTextColor(LightGray);
+        printf("]\n");
+        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(alloc.VirtualStart, PML4);
+        printf("error_status: %lu  physical_start: 0x%lx  virtual_start: 0x%lx pages: 0x%lu  lookup: %d\n",
+             alloc.Attribute, alloc.PhysicalStart, alloc.VirtualStart, alloc.NumberOfPages, lookup.status);
+    }
+    
+    if (PixelMode == RGB) {
         printf("Pixel format: RGB\n");
     } else if (PixelMode == BGR) {
         printf("Pixel format: BGR\n");
@@ -133,7 +158,6 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     APIC_base = discover_APIC();
 
-    u64 *PML4 = (u64 *)KernelPML4;
 
     create_mapping(APIC_base, APIC_base-BASE, 1, 0x13, PML4);
 

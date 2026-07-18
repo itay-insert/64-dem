@@ -2,22 +2,8 @@
 #define MEMORY_H
 #include <stddef.h>
 #include "uint_definitions.h"
+#include "efi_memory_types.h"
 
-typedef unsigned int UINT32;
-typedef unsigned long long UINT64; 
-
-
-typedef UINT64 EFI_PHYSICAL_ADDRESS;
-typedef UINT64 EFI_VIRTUAL_ADDRESS;
-
-
-typedef struct {
-    UINT32 Type;
-    EFI_PHYSICAL_ADDRESS PhysicalStart;
-    EFI_VIRTUAL_ADDRESS VirtualStart;
-    UINT64 NumberOfPages;
-    UINT64 Attribute;
-} EFI_MEMORY_DESCRIPTOR;
 
 u64 calculate_pages(EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize);
 int memcmp(const void *ptr1, const void *ptr2, size_t count);
@@ -27,5 +13,6 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount);
 void free_frame(EFI_MEMORY_DESCRIPTOR frame);
 void SetBitmapBase(u8 *bitmap);
+EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages);
 
 #endif

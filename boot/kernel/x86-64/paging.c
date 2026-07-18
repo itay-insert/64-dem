@@ -1,9 +1,10 @@
 #include <stdint.h>
 #include "uint_definitions.h"
 #include "efi_memory_types.h"
-#include "memory.h"
 #include "lowlevel.h"
 #include "vga.h"
+#include "memory.h"
+
 
 #define KernelEntry ps.info_buffer64[0]
 #define KernelStart ps.info_buffer64[1]
@@ -23,12 +24,12 @@
 #define kernel_virtual 0xffff800000000000
 #define BASE 0xffff900000000000
 
+
 typedef struct {
     u64 physical_address;
     u16 attributes;
     int Page_Type;
     int status;
-    int error_code;
 } PAGING_LOOKUP_DESCRIPTOR;
 
 int GbPageSupport = 0;
@@ -138,7 +139,44 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     int pdpt_index = (virtual_address >> 30) & 511;
     int pml4_index = (virtual_address >> 39) & 511;
     if (PML4[pml4_index] == 0) {
-
+        ret.status = 1; // 0 = success, 1 = PDPT not found, 2 = PD not found, 3 = PT not found, 4 = pt_entry not valid, 5 = unknown
+        return ret;
+    }
+    u64 *PDPT = (u64 *)(PML4[pml4_index] & ~0xfff);
+    if (PDPT[pdpt_index] == 0) {
+        ret.status = 2;
+        return ret;
+    }
+    if ((PDPT[pdpt_index] & 0x80) != 0) {
+        ret.attributes = (PDPT[pdpt_index] & 0xfff) & ~0x80;
+        ret.physical_address = PDPT[pdpt_index] & ~0xfffULL;
+        ret.Page_Type = 2; // 2 = GB page, 1 = 2MB page, 0 = regular page
+        ret.status = 0;
+        return ret;
+    } else {
+        u64 *PD = (u64 *)(PDPT[pdpt_index] & ~0xfff);
+        if (PD[pd_index] == 0) {
+            ret.status = 3;
+            return ret;
+        }
+        if ((PD[pd_index] & 0x80) != 0) {
+            ret.attributes = (PD[pd_index] & 0xfff) & ~0x80;
+            ret.physical_address = PD[pd_index] & ~0xfffULL;
+            ret.Page_Type = 1; // 2 = GB page, 1 = 2MB page, 0 = regular page
+            ret.status = 0;
+            return ret;
+        } else {
+            u64 *PT = (u64 *)(PD[pd_index] & ~0xfff);
+            if (PT[pt_index] == 0) {
+                ret.status = 4;
+                return ret;
+            }
+            ret.attributes = (PT[pt_index] & 0xfff) & ~0x80;
+            ret.physical_address = PT[pt_index] & ~0xfffULL;
+            ret.Page_Type = 0; // 2 = GB page, 1 = 2MB page, 0 = regular page
+            ret.status = 0;
+            return ret;
+        }
     }
 
 }

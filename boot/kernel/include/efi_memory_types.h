@@ -22,4 +22,20 @@
 #define EfiUnacceptedMemoryType     15
 #define EfiMaxMemoryType            16
 
+typedef unsigned int UINT32;
+typedef unsigned long long UINT64; 
+
+
+typedef UINT64 EFI_PHYSICAL_ADDRESS;
+typedef UINT64 EFI_VIRTUAL_ADDRESS;
+
+
+typedef struct {
+    UINT32 Type;
+    EFI_PHYSICAL_ADDRESS PhysicalStart;
+    EFI_VIRTUAL_ADDRESS VirtualStart;
+    UINT64 NumberOfPages;
+    UINT64 Attribute;
+} EFI_MEMORY_DESCRIPTOR;
+
 #endif
