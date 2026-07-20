@@ -14,5 +14,6 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount);
 void free_frame(EFI_MEMORY_DESCRIPTOR frame);
 void SetBitmapBase(u8 *bitmap);
 EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages);
+void kfree(EFI_MEMORY_DESCRIPTOR allocation);
 
 #endif

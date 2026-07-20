@@ -339,3 +339,29 @@ EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
     former_count = count;
     return ret;
 }
+
+void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
+    u64 *PML4 = (u64 *)KernelPML4;
+    while (allocation.NumberOfPages > 0) {
+        EFI_MEMORY_DESCRIPTOR frame = {0};
+        frame.VirtualStart = allocation.VirtualStart;
+        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, PML4);
+        frame.PhysicalStart = lookup.physical_address;
+        if (lookup.Page_Type == 0) {
+            frame.NumberOfPages = 1;
+            free_frame(frame);
+            allocation.NumberOfPages--;
+            allocation.VirtualStart += 0x1000;
+        } else if (lookup.Page_Type == 1) {
+            frame.NumberOfPages = 512;
+            free_frame(frame);
+            allocation.NumberOfPages -= 512;
+            allocation.VirtualStart += 0x200000;
+        } else if (lookup.Page_Type == 2) {
+            frame.NumberOfPages = 262144;
+            free_frame(frame);
+            allocation.NumberOfPages -= 262144;
+            allocation.VirtualStart += 0x40000000;
+        }
+    }
+}
