@@ -6,6 +6,8 @@
 #define MADT_sig 0x43495041
 #define FACP_sig 0x50434146
 #define HPET_sig 0x54455048
+#define MCFG_sig 0x4746434D
+
 
 typedef struct {
     char signature[8];
@@ -349,6 +351,11 @@ ACPI_ret ACPI_discovery(const char *signature) {
                         ret = handle_HPET(hpet, ret);
                         return ret;
 
+                    case MCFG_sig:
+                        ret.status = 0;
+                        ret.Address = (u64)table;
+                        return ret;
+
                     default:
                         ret.status = 1;
                         return ret;
@@ -395,7 +402,12 @@ ACPI_ret ACPI_discovery(const char *signature) {
                         
                 case HPET_sig:
                     ACPI_HPET *hpet = (ACPI_HPET *)table;
-                    ret =  handle_HPET(hpet, ret);
+                    ret = handle_HPET(hpet, ret);
+                    return ret;
+
+                case MCFG_sig:
+                    ret.status = 0;
+                    ret.Address = (u64)table;
                     return ret;
 
                 default:
