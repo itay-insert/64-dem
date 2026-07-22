@@ -152,19 +152,6 @@ typedef struct {
     u32 gsi_base;
 } __attribute__((packed)) MADTIOAPIC;
 
-typedef struct {
-    ACPISDTHeader header;
-    u64 reserved;
-} __attribute__((packed)) MCFG;
-
-typedef struct {
-    u64 BaseAddress;
-    u16 SegmentGroup;
-    u8 StartBus;
-    u8 EndBus;
-    u32 Reserved;
-} __attribute__((packed)) MCFGEntry;
-
 
 u64 rsdp_address = 0;
 

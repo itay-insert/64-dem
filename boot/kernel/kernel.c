@@ -12,7 +12,7 @@
 #include "acpi.h"
 #include "idt.h"
 #include "apic.h"
-
+#include "pci.h"
 
 
 
@@ -277,10 +277,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     enable_interrupts();
     printf("interrupts enabled!\n");
 
-    printf("PML4= 0x%lx  ", KernelPML4);
-
-    printf("BitmapSize = 0x%lx  stack_top = 0x%lx", BitmapSize, stack);
-
+    pci_init();
 
     cpu_info();
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",

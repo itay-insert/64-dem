@@ -8,7 +8,7 @@
 #define fb_virtual 0xffffa00000000000
 #define kernel_virtual 0xffff800000000000
 #define BASE 0xffff900000000000
-
+#define PCI_BASE 0xffffa010e0000000
 
 typedef struct {
     u64 physical_address;
