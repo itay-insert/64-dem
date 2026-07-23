@@ -463,16 +463,33 @@ UINTN bitmap_size = (total_pages + 7) / 8;
         file_buffer
     );
 
+    EFI_DEVICE_PATH *node = path;
+    UINTN path_size = 0;
+
+    while (1) {
+        UINT16 node_size = node->Length[0] |
+                       (node->Length[1] << 8);
+
+        path_size += node_size;
+
+        if (node->Type == 0x7F && node->SubType == 0xFF)
+            break;
+
+        node = (EFI_DEVICE_PATH *)((UINT8 *)node + node_size);
+    }
+
+
+
     EFI_PHYSICAL_ADDRESS rsdp = find_rsdp(SystemTable);
     
     u64 kernel_start = 0;
     u64 file_base = (u64)file_buffer;
     
     u64 buf_sz = 24;
-    u64 buf_sz64 = 64;
+    u64 buf_sz64 = 72;
 
     u64 kernel_end = find_end(file_base, kernel_start);
-    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096) + ((mmpsz+buf_sz+buf_sz64 + 4095) / 4096);
+    UINTN pages = (kernel_end >> 12) + 65 + ((bitmap_size + 4095) / 4096) + ((mmpsz+buf_sz+buf_sz64+path_size + 4095) / 4096);
 
     EFI_PHYSICAL_ADDRESS addr = FindFreeRegion(memory_map, memory_map_size, descriptor_size, pages);
 
@@ -487,6 +504,13 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     UINT8 *dst = (UINT8 *)MMP;
 
     for (UINTN i = 0; i < memory_map_size; i++) {
+        dst[i] = src[i];
+    }
+
+    src = (UINT8 *)(u64)path;
+    dst = (UINT8 *)((u64)p_buff + buf_sz);
+
+    for (UINTN i = 0; i < path_size; i++) {
         dst[i] = src[i];
     }
 
@@ -523,17 +547,19 @@ UINTN bitmap_size = (total_pages + 7) / 8;
     p_buff[1] = (int)final_info->HorizontalResolution;
     p_buff[2] = (int)final_info->VerticalResolution;
     p_buff[3] = (int)final_info->PixelsPerScanLine;
-    p_buff[4] = (int)(buf_sz+buf_sz64);
+    p_buff[4] = (int)(buf_sz+buf_sz64+path_size);
+    p_buff[5] = (int)(path_size);
 
 
     p_buff64[0] = ad.entry;
     p_buff64[1] = ad.start;
-    p_buff64[2] = (u64)p_buff+24;
+    p_buff64[2] = (u64)p_buff+24+path_size;
     p_buff64[3] = fb;
     p_buff64[4] = (u64)mmpsz;
     p_buff64[5] = (u64)mpc;
     p_buff64[6] = (u64)bitmap_size;
     p_buff64[7] = (u64)rsdp;
+    p_buff64[8] = (u64)dst;
 
     while (1) {
         uefi_call_wrapper(
