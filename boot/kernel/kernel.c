@@ -13,22 +13,8 @@
 #include "idt.h"
 #include "apic.h"
 #include "pci.h"
-
-
-
-#define KernelEntry info_buffer64[0]
-#define KernelStart info_buffer64[1]
-#define KernelEnd info_buffer64[2]
-#define Framebuffer_base info_buffer64[3]
-#define MemoryMapSize info_buffer64[4]
-#define DescriptorSize info_buffer64[5]
-#define BitmapSize info_buffer64[6]
-#define RSDP info_buffer64[7]
-#define PixelMode info_buffer[0]
-#define Horizontal_res info_buffer[1]
-#define Vertical_res info_buffer[2]
-#define PixelsPerScanline info_buffer[3]
-#define InfoSize info_buffer[4]
+#include "pci_names.h"
+#include "boot_info.h"
 
 #define RGB 0
 #define BGR 1
@@ -43,26 +29,26 @@ u64 APIC_base = 0;
 
 u64 IO_APIC = 0;
 
-void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
+void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     qemu_debug_print("[kernel] entered kernel_main\n");
 
     if (paging_enabled == 0) {
         qemu_debug_print("[kernel] starting paging setup\n");
-        vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+        vga_init(info64->framebuffer_base, info32->horizontal_resolution, info32->vertical_resolution, info32->pixels_per_scanline, info32->pixel_mode);
         paging_enabled = 1;
         u8 *bitmap = (u8 *)stack;
-        PAGING_SETUP_DESCRIPTOR ps = {info_buffer64, info_buffer, bitmap, memory_map};
+        PAGING_SETUP_DESCRIPTOR ps = {info64, info32, bitmap, memory_map};
         SetupPaging(ps);
     }
     qemu_debug_print("[kernel] paging setup complete\n");
-    vga_init(Framebuffer_base, Horizontal_res, Vertical_res, PixelsPerScanline, PixelMode);
+    vga_init(info64->framebuffer_base, info32->horizontal_resolution, info32->vertical_resolution, info32->pixels_per_scanline, info32->pixel_mode);
     qemu_debug_print("[kernel] VGA initialized\n");
     qemu_debug_print("[kernel] GOP width=");
-    qemu_debug_hex_u64((u64)Horizontal_res);
+    qemu_debug_hex_u64((u64)info32->horizontal_resolution);
     qemu_debug_print(" height=");
-    qemu_debug_hex_u64((u64)Vertical_res);
+    qemu_debug_hex_u64((u64)info32->vertical_resolution);
     qemu_debug_print(" stride=");
-    qemu_debug_hex_u64((u64)PixelsPerScanline);
+    qemu_debug_hex_u64((u64)info32->pixels_per_scanline);
     qemu_debug_print("\n");
 
     tss_init();
@@ -80,7 +66,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     Set_GlobalTextColor(LightGray);
     printf("]\n");
 
-    u64 ram_size = calculate_pages(memory_map, MemoryMapSize, DescriptorSize);
+    u64 ram_size = calculate_pages(memory_map, info64->memory_map_size, info64->descriptor_size);
     u64 gib = ram_size >> 18;
     u64 remainder = ram_size & 0x3ffff;
     remainder = (remainder * 1000) >> 18;
@@ -121,14 +107,14 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
         printf("]\n");
     }
 
-    alloc = kmalloc((KernelEnd & ~0xfff)+0x1000, 1);
+    alloc = kmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
     addr = alloc.PhysicalStart;
     int *ptr = (int *)alloc.VirtualStart;
     *ptr = 1;
 
     u64 *PML4 = (u64 *)KernelPML4;
     
-    EFI_MEMORY_DESCRIPTOR alloc1 = kmalloc((KernelEnd & ~0xfff)+0x2000, 1);
+    EFI_MEMORY_DESCRIPTOR alloc1 = kmalloc((info64->kernel_end & ~0xfff)+0x2000, 1);
     if (*ptr == 1 && addr != alloc1.PhysicalStart) {
         printf("kmalloc: [");
         Set_GlobalTextColor(Green);
@@ -151,7 +137,7 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     kfree(alloc1);
     kfree(alloc);
 
-    alloc = kmalloc((KernelEnd & ~0xfff)+0x1000, 1);
+    alloc = kmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
     if (alloc.PhysicalStart < addr) {
         printf("kfree: [");
         Set_GlobalTextColor(Green);
@@ -168,9 +154,9 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
     
     kfree(alloc);
 
-    if (PixelMode == RGB) {
+    if (info32->pixel_mode == RGB) {
         printf("Pixel format: RGB\n");
-    } else if (PixelMode == BGR) {
+    } else if (info32->pixel_mode == BGR) {
         printf("Pixel format: BGR\n");
     }
 
@@ -187,12 +173,12 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     printf("Validating rsdp... ");
 
-    RSDP = RSDP + BASE;
+    info64->rsdp = info64->rsdp + BASE;
 
-    char *sign = (char *)RSDP;
+    char *sign = (char *)info64->rsdp;
     if (memcmp(sign, "RSD PTR ", 8) == 0) {
         printf("rsdp valid, using rsdp... ");
-        rsdp_init(RSDP);
+        rsdp_init(info64->rsdp);
         ACPI_ret ioapic = ACPI_discovery("APIC");
         if (ioapic.status == 1) {
             printf("IO_APIC discovery failed... trying legacy... ");
@@ -279,9 +265,35 @@ void kernel_main(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DES
 
     pci_init();
 
+    PCI_PATH_RET boot_path =
+        Discover_BootDevice(info64->device_path, info32->device_path_size);
+    if (boot_path.PCI_status == PCI_STATUS_SUCCESS) {
+        printf("PCI devices in boot path: %u\n",
+               (unsigned int)boot_path.DeviceCount);
+
+        for (u32 i = 0; i < boot_path.DeviceCount; i++) {
+            PCI_ret *device = &boot_path.Devices[i];
+            printf("  [%u] %u:%u.%u vendor=0x%ux device=0x%ux\n",
+                   (unsigned int)i,
+                   (unsigned int)device->Bus,
+                   (unsigned int)device->Device,
+                   (unsigned int)device->Function,
+                   (unsigned int)device->vendor_id,
+                   (unsigned int)device->device_id);
+            printf("      %s  %s\n",
+                   PCI_vendor_name(device->vendor_id),
+                   PCI_device_name(device->vendor_id,
+                                   device->device_id));
+        }
+    } else {
+        printf("Boot PCI path discovery failed: %d (found %u devices)\n",
+               boot_path.PCI_status,
+               (unsigned int)boot_path.DeviceCount);
+    }
+
     cpu_info();
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
-         KernelStart, KernelEntry, KernelEnd, Framebuffer_base, APIC_base, IO_APIC);
+         info64->kernel_start, info64->kernel_entry, info64->kernel_end, info64->framebuffer_base, APIC_base, IO_APIC);
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");

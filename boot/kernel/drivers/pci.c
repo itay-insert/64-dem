@@ -3,6 +3,8 @@
 #include "acpi.h"
 #include "paging.h"
 #include "ports.h"
+#include "pci.h"
+#include "path.h"
 
 
 typedef struct {
@@ -17,137 +19,6 @@ typedef struct {
     u8 EndBus;
     u32 Reserved;
 } __attribute__((packed)) MCFGEntry;
-
-typedef struct {
-    uint16_t command;
-    uint16_t status;
-
-    uint8_t revision_id;
-    uint8_t prog_if;
-    uint8_t subclass;
-    uint8_t class_code;
-
-    uint8_t cache_line_size;
-    uint8_t latency_timer;
-    uint8_t header_type;
-    uint8_t bist;
-} __attribute__((packed)) PCICommonHeader;
-
-typedef struct {
-
-    uint32_t bar[6];               // 0x10-0x27
-
-    uint32_t cardbus_cis_ptr;      // 0x28
-
-    uint16_t subsystem_vendor_id;  // 0x2C
-    uint16_t subsystem_id;         // 0x2E
-
-    uint32_t expansion_rom;        // 0x30
-
-    uint8_t capabilities_ptr;      // 0x34
-    uint8_t reserved1[3];
-
-    uint32_t reserved2;            // 0x38
-
-    uint8_t interrupt_line;        // 0x3C
-    uint8_t interrupt_pin;         // 0x3D
-    uint8_t min_grant;             // 0x3E
-    uint8_t max_latency;           // 0x3F
-} __attribute__((packed)) PCIHeaderType0;
-
-typedef struct {
-
-    uint32_t bar[2];                  // 0x10
-
-    uint8_t primary_bus;              // 0x18
-    uint8_t secondary_bus;
-    uint8_t subordinate_bus;
-    uint8_t secondary_latency;
-
-    uint8_t io_base;
-    uint8_t io_limit;
-
-    uint16_t secondary_status;
-
-    uint16_t memory_base;
-    uint16_t memory_limit;
-
-    uint16_t prefetch_base;
-    uint16_t prefetch_limit;
-
-    uint32_t prefetch_base_upper32;
-    uint32_t prefetch_limit_upper32;
-
-    uint16_t io_base_upper16;
-    uint16_t io_limit_upper16;
-
-    uint8_t capabilities_ptr;
-    uint8_t reserved[3];
-
-    uint32_t expansion_rom;
-
-    uint8_t interrupt_line;
-    uint8_t interrupt_pin;
-
-    uint16_t bridge_control;
-} __attribute__((packed)) PCIHeaderType1;
-
-
-typedef struct {
-
-    uint32_t cardbus_socket_base;
-
-    uint8_t capabilities_ptr;
-    uint8_t reserved;
-
-    uint16_t secondary_status;
-
-    uint8_t pci_bus;
-    uint8_t cardbus_bus;
-    uint8_t subordinate_bus;
-    uint8_t cardbus_latency;
-
-    uint32_t memory_base0;
-    uint32_t memory_limit0;
-
-    uint32_t memory_base1;
-    uint32_t memory_limit1;
-
-    uint32_t io_base0;
-    uint32_t io_limit0;
-
-    uint32_t io_base1;
-    uint32_t io_limit1;
-
-    uint8_t interrupt_line;
-    uint8_t interrupt_pin;
-
-    uint16_t bridge_control;
-
-    uint16_t subsystem_vendor_id;
-    uint16_t subsystem_device_id;
-
-    uint32_t legacy_base;
-} __attribute__((packed)) PCIHeaderType2;
-
-
-typedef struct {
-    int PCI_status;
-    int PCI_Type;
-    u8 Bus;
-    u8 Device;
-    u8 Function;
-    u16 vendor_id;
-    u16 device_id;
-    
-    PCICommonHeader common;
-
-    union {
-        PCIHeaderType0 header0;
-        PCIHeaderType1 header1;
-        PCIHeaderType2 header2;
-    } header;
-} PCI_ret;
 
 u8 Express_enabled = 0;
 int BusCount = 0;
@@ -206,6 +77,124 @@ u32 PCI_read(u8 bus, u8 device, u8 function, u8 offset, u8 size) {
 
 
     return 0;
+}
+
+static void PCI_read_bytes(u8 bus, u8 device, u8 function, u8 offset,
+                           u8 *destination, u8 byte_count) {
+    for (u8 i = 0; i < byte_count; i++) {
+        destination[i] = (u8)PCI_read(bus, device, function, offset + i, 1);
+    }
+}
+
+PCI_ret PCI_get_info(u8 bus, u8 device, u8 function) {
+    PCI_ret ret = {0};
+
+    ret.Bus = bus;
+    ret.Device = device;
+    ret.Function = function;
+
+    if (device >= 32 || function >= 8) {
+        ret.PCI_status = PCI_STATUS_INVALID_ADDRESS;
+        return ret;
+    }
+
+    ret.vendor_id = (u16)PCI_read(bus, device, function, 0x00, 2);
+    if (ret.vendor_id == 0xffff) {
+        ret.PCI_status = PCI_STATUS_NOT_PRESENT;
+        return ret;
+    }
+
+    ret.device_id = (u16)PCI_read(bus, device, function, 0x02, 2);
+    PCI_read_bytes(bus, device, function, 0x04,
+                   (u8 *)&ret.common, sizeof(ret.common));
+
+    ret.PCI_Type = ret.common.header_type & 0x7f;
+
+    switch (ret.PCI_Type) {
+        case 0:
+            PCI_read_bytes(bus, device, function, 0x10,
+                           (u8 *)&ret.header.header0, sizeof(ret.header.header0));
+            break;
+
+        case 1:
+            PCI_read_bytes(bus, device, function, 0x10,
+                           (u8 *)&ret.header.header1, sizeof(ret.header.header1));
+            break;
+
+        case 2:
+            PCI_read_bytes(bus, device, function, 0x10,
+                           (u8 *)&ret.header.header2, sizeof(ret.header.header2));
+            break;
+
+        default:
+            ret.PCI_status = PCI_STATUS_UNSUPPORTED_HEADER;
+            return ret;
+    }
+
+    ret.PCI_status = PCI_STATUS_SUCCESS;
+    return ret;
+}
+
+PCI_PATH_RET Discover_BootDevice(u64 path_addr, int size) {
+    PCI_PATH_RET result = {0};
+    result.PCI_status = PCI_STATUS_NOT_PRESENT;
+
+    if (path_addr == 0 || size < (int)sizeof(EFI_DEVICE_PATH_PROTOCOL)) {
+        result.PCI_status = PCI_STATUS_INVALID_ADDRESS;
+        return result;
+    }
+
+    u8 *path_address = (u8 *)path_addr;
+    u8 *path_end = path_address + size;
+    u8 bus = 0;
+
+    while (path_address + sizeof(EFI_DEVICE_PATH_PROTOCOL) <= path_end) {
+        EFI_DEVICE_PATH_PROTOCOL *path =
+            (EFI_DEVICE_PATH_PROTOCOL *)path_address;
+        u16 length = device_path_node_length(path);
+
+        if (length < sizeof(EFI_DEVICE_PATH_PROTOCOL) ||
+            path_address + length > path_end) {
+            result.PCI_status = PCI_STATUS_INVALID_ADDRESS;
+            return result;
+        }
+
+        if (path->Type == EFI_DEVICE_PATH_TYPE_END &&
+            path->SubType == EFI_DEVICE_PATH_SUBTYPE_END_ENTIRE)
+            return result;
+
+        if (path->Type == EFI_DEVICE_PATH_TYPE_HARDWARE &&
+            path->SubType == EFI_DEVICE_PATH_SUBTYPE_PCI) {
+            if (length < sizeof(PCI_DEVICE_PATH)) {
+                result.PCI_status = PCI_STATUS_INVALID_ADDRESS;
+                return result;
+            }
+
+            PCI_DEVICE_PATH *pci_path = (PCI_DEVICE_PATH *)path;
+            if (result.DeviceCount >= PCI_PATH_MAX_DEVICES) {
+                result.PCI_status = PCI_STATUS_TOO_MANY_DEVICES;
+                return result;
+            }
+
+            PCI_ret device =
+                PCI_get_info(bus, pci_path->Device, pci_path->Function);
+            if (device.PCI_status != PCI_STATUS_SUCCESS) {
+                result.PCI_status = device.PCI_status;
+                return result;
+            }
+
+            result.Devices[result.DeviceCount] = device;
+            result.DeviceCount++;
+            result.PCI_status = PCI_STATUS_SUCCESS;
+
+            if (device.PCI_Type == 1)
+                bus = device.header.header1.secondary_bus;
+        }
+
+        path_address += length;
+    }
+
+    return result;
 }
 
 int PCI_list(void) {

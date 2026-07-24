@@ -18,6 +18,7 @@ gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/vga.c -o vga.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/rtc.c -o rtc.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/pci.c -o pci.o
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/pci_names.c -o pci_names.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/memory.c -o memory.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/paging.c -o paging.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/cpudir.c -o cpudir.o
@@ -32,4 +33,3 @@ ld -T kernel/link.ld -o kernel.elf *.o
 rm *.o
 
 cd ..
-

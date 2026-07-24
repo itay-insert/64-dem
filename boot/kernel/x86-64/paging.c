@@ -4,20 +4,7 @@
 #include "lowlevel.h"
 #include "vga.h"
 #include "memory.h"
-
-
-#define KernelEntry ps.info_buffer64[0]
-#define KernelStart ps.info_buffer64[1]
-#define KernelEnd ps.info_buffer64[2]
-#define Framebuffer_base ps.info_buffer64[3]
-#define MemoryMapSize ps.info_buffer64[4]
-#define DescriptorSize ps.info_buffer64[5]
-#define BitmapSize ps.info_buffer64[6]
-#define PixelMode ps.info_buffer[0]
-#define Horizontal_res ps.info_buffer[1]
-#define Vertical_res ps.info_buffer[2]
-#define PixelsPerScanline ps.info_buffer[3]
-#define InfoSize ps.info_buffer[4]
+#include "boot_info.h"
 
 
 #define fb_virtual 0xffffa00000000000
@@ -183,8 +170,8 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
 }
 
 typedef struct {
-    u64 *info_buffer64;
-    int *info_buffer;
+    BOOT_INFO64 *info64;
+    BOOT_INFO32 *info32;
     u8 *bitmap;
     EFI_MEMORY_DESCRIPTOR *memory_map;
 } PAGING_SETUP_DESCRIPTOR;
@@ -197,22 +184,23 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     qemu_debug_print("[paging] bitmap base=");
     qemu_debug_hex_u64((u64)ps.bitmap);
     qemu_debug_print(" size=");
-    qemu_debug_hex_u64(BitmapSize);
+    qemu_debug_hex_u64(ps.info64->bitmap_size);
     qemu_debug_print(" mmap size=");
-    qemu_debug_hex_u64(MemoryMapSize);
+    qemu_debug_hex_u64(ps.info64->memory_map_size);
     qemu_debug_print(" descriptor size=");
-    qemu_debug_hex_u64(DescriptorSize);
+    qemu_debug_hex_u64(ps.info64->descriptor_size);
     qemu_debug_print("\n");
-    allocator_init(ps.bitmap, ps.memory_map, MemoryMapSize, DescriptorSize, 
-    KernelStart, KernelEnd, BitmapSize);
+    allocator_init(ps.bitmap, ps.memory_map, ps.info64->memory_map_size,
+                   ps.info64->descriptor_size, ps.info64->kernel_start,
+                   ps.info64->kernel_end, ps.info64->bitmap_size);
     qemu_debug_print("[paging] allocator initialized\n");
     PML4_base = alloc_pages(1);
     qemu_debug_print("[paging] PML4 allocated\n");
     u64 *PML4 = (u64 *)PML4_base;
     qemu_debug_print("[paging] conventional memory mapped\n");
-    for (u64 i = 0; i < (MemoryMapSize / DescriptorSize); i++) {
+    for (u64 i = 0; i < (ps.info64->memory_map_size / ps.info64->descriptor_size); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
-        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * DescriptorSize);
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(ptr + i * ps.info64->descriptor_size);
         if (desc->Type == EfiUnusableMemory)
             continue;
 
@@ -231,39 +219,41 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     create_mapping(BASE+0xE0000, 0xE0000, 32, 0x03, PML4);
     qemu_debug_print("[paging] mapped bios legacy area\n");
 
-    create_mapping(fb_virtual, Framebuffer_base, (((Vertical_res*PixelsPerScanline*4)+4095)>>12), 0x13, PML4);
+    create_mapping(fb_virtual, ps.info64->framebuffer_base, (((ps.info32->vertical_resolution*ps.info32->pixels_per_scanline*4)+4095)>>12), 0x13, PML4);
     qemu_debug_print("[paging] framebuffer mapped\n");
-    Framebuffer_base = fb_virtual;
+    ps.info64->framebuffer_base = fb_virtual;
 
     u64 stack = (u64)ps.bitmap;
     u64 mmp = (u64)ps.memory_map;
 
 
-    u64 pages = ((stack - KernelStart) >> 12) - 65;
-    create_mapping(kernel_virtual, KernelStart, pages, 0x03, PML4);
+    u64 pages = ((stack - ps.info64->kernel_start) >> 12) - 65;
+    create_mapping(kernel_virtual, ps.info64->kernel_start, pages, 0x03, PML4);
 
-    create_mapping(kernel_virtual+((pages+1)<<12), KernelStart+((pages+1)<<12), 64, 0x03, PML4);
+    create_mapping(kernel_virtual+((pages+1)<<12), ps.info64->kernel_start+((pages+1)<<12), 64, 0x03, PML4);
 
     qemu_debug_print("[paging] kernel mapped\n");
 
-    create_mapping(kernel_virtual+(stack-KernelStart), stack, ((BitmapSize + 4095) >> 12), 0x03, PML4);
+    create_mapping(kernel_virtual+(stack-ps.info64->kernel_start), stack, ((ps.info64->bitmap_size + 4095) >> 12), 0x03, PML4);
 
-    create_mapping(kernel_virtual+(mmp-KernelStart), mmp, (((MemoryMapSize+InfoSize) + 4095)>>12), 0x03, PML4);
+    create_mapping(kernel_virtual+(mmp-ps.info64->kernel_start), mmp, (((ps.info64->memory_map_size+ps.info32->info_size) + 4095)>>12), 0x03, PML4);
 
-    KernelEnd = kernel_virtual + (KernelEnd - KernelStart);
-    KernelEntry = kernel_virtual + (KernelEntry - KernelStart);
-    u64 ib_addr = (u64)ps.info_buffer;
-    u64 ib64_addr = (u64)ps.info_buffer64;
-    stack = kernel_virtual + (stack - KernelStart);
-    mmp = kernel_virtual + (mmp - KernelStart);
-    ib_addr = kernel_virtual + (ib_addr - KernelStart);
-    ib64_addr = kernel_virtual + (ib64_addr - KernelStart);
+    ps.info64->device_path =
+        kernel_virtual + (ps.info64->device_path - ps.info64->kernel_start);
+    ps.info64->kernel_end = kernel_virtual + (ps.info64->kernel_end - ps.info64->kernel_start);
+    ps.info64->kernel_entry = kernel_virtual + (ps.info64->kernel_entry - ps.info64->kernel_start);
+    u64 ib_addr = (u64)ps.info32;
+    u64 ib64_addr = (u64)ps.info64;
+    stack = kernel_virtual + (stack - ps.info64->kernel_start);
+    mmp = kernel_virtual + (mmp - ps.info64->kernel_start);
+    ib_addr = kernel_virtual + (ib_addr - ps.info64->kernel_start);
+    ib64_addr = kernel_virtual + (ib64_addr - ps.info64->kernel_start);
     u8 *virtual_bitmap = (u8 *)stack;
     SetBitmapBase(virtual_bitmap);
-    KernelStart = kernel_virtual;
+    ps.info64->kernel_start = kernel_virtual;
     EFI_MEMORY_DESCRIPTOR *virtual_mmp = (EFI_MEMORY_DESCRIPTOR *)mmp;
-    int *ib = (int *)ib_addr;
-    u64 *ib64 = (u64 *)ib64_addr;
+    BOOT_INFO32 *ib = (BOOT_INFO32 *)ib_addr;
+    BOOT_INFO64 *ib64 = (BOOT_INFO64 *)ib64_addr;
 
 
     KernelPML4 = PML4_base;
@@ -272,7 +262,7 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     qemu_debug_print("[paging] CR3 loaded\n");
 
     qemu_debug_print("[paging] jumping to virtual kernel\n");
-    kernel_trampoline(ib64, ib, stack, virtual_mmp, KernelEntry);
+    kernel_trampoline(ib64, ib, stack, virtual_mmp, ib64->kernel_entry);
     
 
 }

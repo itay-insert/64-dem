@@ -359,6 +359,18 @@ text_data printf(const char *str, ...) {
 				case 'b':
 					print_byte_hex((u8)va_arg(args, int));
 					break;
+
+				case 's': {
+					const char *value = va_arg(args, const char *);
+					if (value == 0)
+						value = "(null)";
+					while (*value != '\0') {
+						draw_char(*value, cursor.coulmn, cursor.row);
+						cursor_inc();
+						value++;
+					}
+					break;
+				}
 				
 				case 'w':
 					print_byte_hex((u16)va_arg(args, int));

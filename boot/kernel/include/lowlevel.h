@@ -1,5 +1,6 @@
 #include "uint_definitions.h"
 #include "memory.h"
+#include "boot_info.h"
 
 #ifndef LOWLEVEL_H
 #define LOWLEVEL_H
@@ -7,7 +8,8 @@
 u64 stack_get(void);
 int check_1gb_PageSupport(void);
 void enable_paging(u64 PML4_address);
-void kernel_trampoline(u64 *info_buffer64, int *info_buffer, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map, u64 entry);
+void kernel_trampoline(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
+                       EFI_MEMORY_DESCRIPTOR *memory_map, u64 entry);
 void load_gdt(u64 addr);
 u64 discover_APIC(void);
 void load_idt(u64 addr);
