@@ -33,6 +33,19 @@ int memcmp(const void *ptr1, const void *ptr2, size_t count) {
     return 0;
 }
 
+void *memset(void *ptr, int value, size_t num) {
+    unsigned char val = (unsigned char)value;
+    unsigned char *dest = ptr;
+    if (size_t == 0) {
+        ptr = NULL;
+        return ptr;
+    }
+
+    for (size_t i = 0; i < num; i++) {
+        dest[i] = val;
+    }
+    return ptr;
+}
 
 u8 check_byte(u8 byte, u8 bit, u8 dir) {
     if (dir == 1) {

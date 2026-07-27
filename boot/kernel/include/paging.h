@@ -10,6 +10,7 @@
 #define kernel_virtual 0xffff800000000000
 #define BASE 0xffff900000000000
 #define PCI_BASE 0xffffa010e0000000
+#define DMA_BASE 0xffffa0ffc0000000
 
 typedef struct {
     u64 physical_address;
