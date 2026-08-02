@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "paging.h"
 
@@ -375,6 +376,42 @@ void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
             free_frame(frame);
             allocation.NumberOfPages -= 262144;
             allocation.VirtualStart += 0x40000000;
+        }
+    }
+}
+
+#define Free 0
+#define Used 1
+
+
+typedef struct {
+    int status;
+    u64 SizeInPages;
+} __attribute__((packed)) dma_header;
+
+bool Mapped = false;
+
+int entries = 0;
+
+
+u64 allocate_dma(u64 size) {
+    u64 pages = (size + sizeof(dma_header) + 4095) >> 12;
+    void *ptr = (void *)DMA_BASE;
+    if (Mapped == false) {
+        create_dma();
+    } else if (Mapped == true) {
+        u64 free_base = 0;
+        for (int i = 0; i < entries; i++) {
+            dma_header *header = (dma_header *)ptr;
+            if (header->status == Free && header->SizeInPages >= pages) {
+                u64 addr_base = ptr + sizeof(dma_header);
+                return addr_base;
+            } else {
+                if (free_base == 0 && header->status == Free) {
+                    
+                }
+                ptr += header->SizeInPages << 12;
+            }
         }
     }
 }
