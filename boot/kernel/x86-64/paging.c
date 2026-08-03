@@ -12,6 +12,7 @@
 #define BASE 0xffff900000000000
 #define PCI_BASE 0xffffa010e0000000
 #define DMA_BASE 0xffffa0ffc0000000
+#define DMA_POOL 0xffffa10000000000
 
 
 typedef struct {

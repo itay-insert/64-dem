@@ -383,35 +383,64 @@ void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
 #define Free 0
 #define Used 1
 
-
 typedef struct {
     int status;
     u64 SizeInPages;
-} __attribute__((packed)) dma_header;
+    dma_entry *next_entry;
+} __attribute__((packed)) dma_entry;
 
-bool Mapped = false;
 
 int entries = 0;
 
+dma_entry *dma_header = NULL;
+dma_entry *dma_start = NULL;
+
+dma_entry *dma_latest = NULL;
+
+u64 dma_top = DMA_POOL;
 
 u64 allocate_dma(u64 size) {
-    u64 pages = (size + sizeof(dma_header) + 4095) >> 12;
-    void *ptr = (void *)DMA_BASE;
-    if (Mapped == false) {
-        create_dma();
-    } else if (Mapped == true) {
-        u64 free_base = 0;
-        for (int i = 0; i < entries; i++) {
-            dma_header *header = (dma_header *)ptr;
-            if (header->status == Free && header->SizeInPages >= pages) {
-                u64 addr_base = ptr + sizeof(dma_header);
-                return addr_base;
-            } else {
-                if (free_base == 0 && header->status == Free) {
-                    
-                }
-                ptr += header->SizeInPages << 12;
+    u64 pages = (size + sizeof(dma_entry) + 4095) >> 12;
+    if (dma_header == NULL) {
+        EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
+        if (allocation.Attribute != 0) return 1;
+        dma_top += 0x1000;
+        dma_header = (dma_entry *)DMA_POOL;
+        dma_header->status = 0;
+        dma_header->SizeInPages = (4096 / sizeof(dma_entry)) - 2;
+        dma_header->next_entry = NULL;
+        dma_latest = dma_header;
+    }
+    int free_pages = 0;
+    int free_base = DMA_BASE;
+    dma_entry *entry = dma_header;
+    dma_entry *free_entry = entry->next_entry;
+    for (int i = 0; i < entries; i++) {
+        entry = entry->next_entry;
+        if (entry->status == Free) {
+            free_pages += entry->SizeInPages;
+            if (free_pages >= pages) {
+                break;
+            }
+        } else if (entry->status == Used) {
+            free_base += free_pages << 12;
+            free_pages = 0;
+            while (entry->status == Used) {
+                free_base += entry->SizeInPages << 12;
+                entry = entry->next_entry;
+            }
+            free_entry = entry;
+        }
+    }
+    if (free_pages < pages) {
+        entry = dma_header;
+        int entries_used = entry->status;
+        int entries_limit = (int)entry->SizeInPages;
+        while (entries_used == entries_limit) {
+            if (entry->next_entry == NULL) {
+                EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, )
             }
         }
     }
 }
+
