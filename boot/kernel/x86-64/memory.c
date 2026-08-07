@@ -382,6 +382,8 @@ void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
 
 #define Free 0
 #define Used 1
+#define Header 2
+#define NoEntriesLeft 0
 
 typedef struct {
     int status;
@@ -393,9 +395,11 @@ typedef struct {
 int entries = 0;
 
 dma_entry *dma_header = NULL;
-dma_entry *dma_start = NULL;
+
 
 dma_entry *dma_latest = NULL;
+
+int limit = 0;
 
 u64 dma_top = DMA_POOL;
 
@@ -406,8 +410,9 @@ u64 allocate_dma(u64 size) {
         if (allocation.Attribute != 0) return 1;
         dma_top += 0x1000;
         dma_header = (dma_entry *)DMA_POOL;
-        dma_header->status = 0;
-        dma_header->SizeInPages = (4096 / sizeof(dma_entry)) - 2;
+        dma_header->status = Header;
+        dma_header->SizeInPages = (4096 / sizeof(dma_entry)) - 1;
+        limit = (int)dma_header->SizeInPages;
         dma_header->next_entry = NULL;
         dma_latest = dma_header;
     }
@@ -434,12 +439,19 @@ u64 allocate_dma(u64 size) {
     }
     if (free_pages < pages) {
         entry = dma_header;
-        int entries_used = entry->status;
         int entries_limit = (int)entry->SizeInPages;
-        while (entries_used == entries_limit) {
-            if (entry->next_entry == NULL) {
-                EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, )
+        while (entries_limit == NoEntriesLeft) {
+            if (entry[limit - entries_limit].next_entry == NULL) {
+                EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, 1);
+                dma_entry *new_page = (dma_entry *)allocation.VirtualStart;
+                dma_top += 0x1000;
+                new_page->status = Header;
+                new_page->next_entry = NULL;
+                new_page->SizeInPages = limit;
+                entry[limit - entries_limit].next_entry = new_page;
+                entry = new_page;
             }
+            entries_limit = (int)entry->SizeInPages;
         }
     }
 }
