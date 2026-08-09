@@ -17,5 +17,7 @@ void free_frame(EFI_MEMORY_DESCRIPTOR frame);
 void SetBitmapBase(u8 *bitmap);
 EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages);
 void kfree(EFI_MEMORY_DESCRIPTOR allocation);
+u64 allocate_dma(u64 size);
+void free_dma(u64 base);
 
 #endif

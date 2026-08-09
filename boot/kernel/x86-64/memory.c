@@ -425,7 +425,7 @@ int metadata_pages = 0;
 u64 dma_top = DMA_POOL;
 
 u64 allocate_dma(u64 size) {
-
+    u64 *PML4 = (u64 *)KernelPML4;
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     if (dma_header == NULL) {
         EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
@@ -444,40 +444,42 @@ u64 allocate_dma(u64 size) {
         dma_start->SizeInPages = pages;
         dma_start->status = Used;
         dma_latest = dma_start;
-        EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_BASE, pages);
-        if (allocation.Attribute != 0) return 1;
+        EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
+        if (frame.Attribute != 0) return 1;
+        frame.VirtualStart = DMA_BASE;
+        create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, PML4);
+        flush_pages(DMA_BASE, pages);
         entries++;
         dma_header->SizeInPages--;
         dma_descriptor *header = 
-            (dma_descriptor *)(allocation.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
+            (dma_descriptor *)(frame.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
         memcpy(header->sign, "DMA_POOL", 8);
         header->status = 1; // metadata for freeing the region
         header->SizeInPages = pages;
         header->home_entry = dma_start;
 
-        return allocation.VirtualStart;
+        return frame.VirtualStart;
     }
 
-    int free_pages = 0;
+    u64 free_pages = 0;
     u64 free_base = DMA_BASE;
+    u64 cursor = DMA_BASE;
     dma_entry *entry = dma_start;
-    dma_entry *free_entry = entry;
-    for (int i = 0; i < entries; i++) {
+    dma_entry *free_entry = NULL;
+    while (entry != NULL) {
         if (entry->status == Free) {
+            if (free_entry == NULL) {
+                free_entry = entry;
+                free_base = cursor;
+            }
             free_pages += entry->SizeInPages;
-            if (free_pages >= pages) {
-                break;
-            }
-        } else if (entry->status == Used) {
-            free_base += free_pages << 12;
+            if (free_pages >= pages) break;
+        } else {
+            free_entry = NULL;
             free_pages = 0;
-            while (entry->status == Used) {
-                free_base += entry->SizeInPages << 12;
-                if (entry->next_entry == NULL) break;
-                entry = entry->next_entry;
-            }
-            free_entry = entry;
+            free_base = cursor + (entry->SizeInPages << 12);
         }
+        cursor += entry->SizeInPages << 12;
         entry = entry->next_entry;
     }
 
@@ -486,10 +488,6 @@ u64 allocate_dma(u64 size) {
     if (free_pages < pages) {
         entry = dma_header;
         int entries_limit = (int)entry->SizeInPages;
-        if (entries_limit != NoEntriesLeft) {
-            dma_latest->next_entry = (dma_entry *)((u8 *)dma_latest + sizeof(dma_entry));
-            dma_latest = dma_latest->next_entry;
-        }
         while (entries_limit == NoEntriesLeft) {
             if (entry->next_entry == NULL) {
                 EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, 1);
@@ -508,6 +506,10 @@ u64 allocate_dma(u64 size) {
             entry = entry->next_entry;
             entries_limit = (int)entry->SizeInPages;
         }
+        if (entries_limit != limit || metadata_pages == 0) {
+            dma_latest->next_entry = (dma_entry *)((u8 *)dma_latest + sizeof(dma_entry));
+            dma_latest = dma_latest->next_entry;
+        }
         entries++;
         entry->SizeInPages--;
         dma_latest->status = Used;
@@ -515,18 +517,30 @@ u64 allocate_dma(u64 size) {
         dma_latest->next_entry = NULL;
         entries_used++;
         if (free_pages > 0) {
-            free_entry->status = Used;
-            entries_used++;
+            entry = free_entry;
+            while (entry != dma_latest) {
+                entry->status = Used;
+                entries_used++;
+                entry = entry->next_entry;
+            }
         } else free_entry = dma_latest;
     } else {
-        free_entry->status = Used;
-        entries_used++;
+        entry = free_entry;
+        u64 claimed_pages = 0;
+        while (claimed_pages < pages) {
+            entry->status = Used;
+            claimed_pages += entry->SizeInPages;
+            entries_used++;
+            entry = entry->next_entry;
+        }
     }
     
 
-    EFI_MEMORY_DESCRIPTOR allocation = kmalloc(free_base, pages);
+    EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
     if (allocation.Attribute != 0) return 1;
-
+    allocation.VirtualStart = free_base;
+    create_mapping(free_base, allocation.PhysicalStart, pages, 0x03, PML4);
+    flush_pages(free_base, pages);
     dma_descriptor *header = 
         (dma_descriptor *)(allocation.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
     
@@ -557,14 +571,16 @@ u64 find_descriptorBase(u64 Base) {
 }
 
 void free_dma(u64 Base) {
+    u64 *PML4 = (u64 *)KernelPML4;
     dma_descriptor *ptr = (dma_descriptor *)find_descriptorBase(Base);
     dma_entry *pool_entry = ptr->home_entry;
     int entries_used = ptr->status;
     EFI_MEMORY_DESCRIPTOR allocation = {0};
-    allocation.VirtualStart = (u64)ptr;
+    allocation.VirtualStart = Base;
     allocation.NumberOfPages = ptr->SizeInPages;
-    kfree(allocation);
-
+    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, PML4);
+    allocation.PhysicalStart = lookup.physical_address;
+    free_frame(allocation);
 
     for (int i = 0; i < entries_used; i++) {
         if (pool_entry->status != Header) {
@@ -584,7 +600,13 @@ void free_dma(u64 Base) {
         }
 
         if (pool_entry->SizeInPages == (u64)limit) {
-            dma_latest = (dma_entry *)((u8 *)pool_entry - sizeof(dma_entry));
+            dma_entry *first_entry = (dma_entry *)((u8 *)pool_entry + sizeof(dma_entry));
+            dma_entry *previous_entry = dma_start;
+            while (previous_entry->next_entry != first_entry) {
+                previous_entry = previous_entry->next_entry;
+            }
+            dma_latest = previous_entry;
+            dma_latest->next_entry = NULL;
             dma_entry *Header_before = (dma_entry *)((u8 *)pool_entry - 0x1000);
             Header_before->next_entry = NULL;
             allocation.VirtualStart = (u64)pool_entry;
