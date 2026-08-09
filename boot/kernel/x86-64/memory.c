@@ -48,6 +48,17 @@ void *memset(void *ptr, int value, size_t num) {
     return ptr;
 }
 
+void *memcpy(void *dest, const void *src, size_t n) {
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+
+    while (n--)
+        *d++ = *s++;
+
+    
+    return dest;
+}
+
 u8 check_byte(u8 byte, u8 bit, u8 dir) {
     if (dir == 1) {
         byte = byte >> (7 - bit);
@@ -385,12 +396,21 @@ void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
 #define Header 2
 #define NoEntriesLeft 0
 
-typedef struct {
+
+typedef struct dma_entry dma_entry;
+
+struct dma_entry {
     int status;
     u64 SizeInPages;
     dma_entry *next_entry;
-} __attribute__((packed)) dma_entry;
+} __attribute__((packed));
 
+typedef struct {
+    char sign[8];
+    int status;
+    u64 SizeInPages;
+    dma_entry *home_entry;
+} __attribute__((packed)) dma_descriptor;
 
 int entries = 0;
 
@@ -406,7 +426,7 @@ u64 dma_top = DMA_POOL;
 
 u64 allocate_dma(u64 size) {
 
-    u64 pages = (size + sizeof(dma_entry) + 4095) >> 12;
+    u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     if (dma_header == NULL) {
         EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
         if (allocation.Attribute != 0) return 1;
@@ -428,12 +448,14 @@ u64 allocate_dma(u64 size) {
         if (allocation.Attribute != 0) return 1;
         entries++;
         dma_header->SizeInPages--;
-        dma_entry *header = (dma_entry *)allocation.VirtualStart;
+        dma_descriptor *header = 
+            (dma_descriptor *)(allocation.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
+        memcpy(header->sign, "DMA_POOL", 8);
         header->status = 1; // metadata for freeing the region
         header->SizeInPages = pages;
-        header->next_entry = dma_start;
+        header->home_entry = dma_start;
 
-        return (allocation.VirtualStart + sizeof(dma_entry));
+        return allocation.VirtualStart;
     }
 
     int free_pages = 0;
@@ -505,12 +527,15 @@ u64 allocate_dma(u64 size) {
     EFI_MEMORY_DESCRIPTOR allocation = kmalloc(free_base, pages);
     if (allocation.Attribute != 0) return 1;
 
-    dma_entry *header = (dma_entry *)allocation.VirtualStart;
+    dma_descriptor *header = 
+        (dma_descriptor *)(allocation.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
+    
+    memcpy(header->sign, "DMA_POOL", 8);
     header->status = entries_used; // metadata for freeing the region
     header->SizeInPages = pages;
-    header->next_entry = free_entry;
+    header->home_entry = free_entry;
 
-    return (allocation.VirtualStart + sizeof(dma_entry));
+    return allocation.VirtualStart;
 
 }
 
@@ -522,11 +547,18 @@ dma_entry *find_header(dma_entry *entry) {
     return entry;
 }
 
-
+u64 find_descriptorBase(u64 Base) {
+    while (1) {
+        dma_descriptor *ptr = (dma_descriptor *)Base;
+        if (memcmp(ptr->sign, "DMA_POOL", 8) == 0) 
+            return Base;
+        Base++;
+    }
+}
 
 void free_dma(u64 Base) {
-    dma_entry *ptr = (dma_entry *)(Base - sizeof(dma_entry));
-    dma_entry *pool_entry = ptr->next_entry;
+    dma_descriptor *ptr = (dma_descriptor *)find_descriptorBase(Base);
+    dma_entry *pool_entry = ptr->home_entry;
     int entries_used = ptr->status;
     EFI_MEMORY_DESCRIPTOR allocation = {0};
     allocation.VirtualStart = (u64)ptr;
