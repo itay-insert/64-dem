@@ -1,4 +1,4 @@
-#include "uint.h"
+#include "uint_definitions.h"
 
 typedef struct block_device block_device_t;
 
@@ -33,4 +33,3 @@ struct block_device {
     u32 max_blocks_per_request;
     u32 flags;
 };
-
