@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "tss.h"
+#include "x86-64/tss.h"
 
 
 struct tss64 tss = {0};
@@ -10,4 +10,3 @@ void tss_init(void) {
     tss.ist1 = (uint64_t)(double_fault_stack + sizeof(double_fault_stack));
     tss.iomap_base = sizeof(tss);
 }
-

@@ -5,11 +5,18 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 
+#ifndef DMA_BASE
 #define DMA_BASE UINT64_C(0x100000000)
+#endif
+#ifndef DMA_POOL
 #define DMA_POOL UINT64_C(0x200000000)
+#endif
 #define TEST_REGION_SIZE (32UL * 1024 * 1024)
 
-#include "../boot/kernel/x86-64/memory.c"
+#include "x86-64/memory/memory_helpers.h"
+#include "x86-64/memory/frame_allocator.h"
+#include "x86-64/memory/dma_internal.h"
+#include "x86-64/memory/dma.h"
 
 u64 KernelPML4;
 

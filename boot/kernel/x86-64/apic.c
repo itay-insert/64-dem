@@ -1,6 +1,6 @@
 #include "uint_definitions.h"
-#include "memory.h"
-#include "lowlevel.h"
+#include "x86-64/memory/memory.h"
+#include "x86-64/lowlevel.h"
 
 #define IOAPIC_REGSEL 0x00
 #define IOAPIC_WINDOW 0x10
@@ -72,4 +72,3 @@ void APIC_init(void) {
 
     ioapic_mask_all();
 }
-

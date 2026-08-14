@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include "uint_definitions.h"
-#include "lowlevel.h"
-#include "tss.h"
+#include "x86-64/lowlevel.h"
+#include "x86-64/tss.h"
 
 
 typedef struct {

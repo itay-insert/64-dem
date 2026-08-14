@@ -1,10 +1,10 @@
-#include <stdint.h>
-#include "uint_definitions.h"
-#include "efi_memory_types.h"
-#include "boot_info.h"
-
 #ifndef PAGING_H
 #define PAGING_H
+
+
+#include "uint_definitions.h"
+#include "x86-64/efi_memory_types.h"
+#include "boot_info.h"
 
 #define fb_virtual 0xffffa00000000000
 #define kernel_virtual 0xffff800000000000

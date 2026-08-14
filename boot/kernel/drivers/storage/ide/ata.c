@@ -1,5 +1,5 @@
-#include "ata.h"
-#include "ports.h"
+#include "drivers/storage/ide/ata.h"
+#include "x86-64/ports.h"
 
 
 ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_count) {

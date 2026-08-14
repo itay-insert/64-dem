@@ -1,9 +1,9 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include "uint_definitions.h"
-#include "memory.h"
-#include "font.h"
-#include "ports.h"
+#include "x86-64/memory/memory.h"
+#include "drivers/display/font.h"
+#include "x86-64/ports.h"
 
 
 #ifndef VGA_MIRROR_TO_QEMU_DEBUGCON

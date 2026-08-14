@@ -1,5 +1,5 @@
-#include "ata.h"
-#include "ports.h"
+#include "drivers/storage/ide/ata.h"
+#include "x86-64/ports.h"
 
 bool ata_reset_channel(u16 control_port) {
     outb(control_port, ATA_CTL_NIEN | ATA_CTL_SRST);

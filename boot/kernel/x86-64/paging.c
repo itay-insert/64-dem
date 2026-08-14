@@ -1,9 +1,9 @@
 #include <stdint.h>
 #include "uint_definitions.h"
-#include "efi_memory_types.h"
-#include "lowlevel.h"
-#include "vga.h"
-#include "memory.h"
+#include "x86-64/efi_memory_types.h"
+#include "x86-64/lowlevel.h"
+#include "drivers/display/vga.h"
+#include "x86-64/memory/memory.h"
 #include "boot_info.h"
 
 

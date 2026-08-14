@@ -1,4 +1,4 @@
-#include "pci_names.h"
+#include "drivers/pci/pci_names.h"
 
 #include "pci_names_data.inc"
 

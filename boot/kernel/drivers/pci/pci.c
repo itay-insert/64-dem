@@ -1,10 +1,10 @@
 #include "uint_definitions.h"
-#include "vga.h"
-#include "acpi.h"
-#include "paging.h"
-#include "ports.h"
-#include "pci.h"
-#include "path.h"
+#include "drivers/display/vga.h"
+#include "x86-64/acpi.h"
+#include "x86-64/paging.h"
+#include "x86-64/ports.h"
+#include "drivers/pci/pci.h"
+#include "drivers/pci/path.h"
 
 
 typedef struct {

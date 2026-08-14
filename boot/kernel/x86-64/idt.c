@@ -1,6 +1,6 @@
 #include "uint_definitions.h"
-#include "lowlevel.h"
-#include "interrupts.h"
+#include "x86-64/lowlevel.h"
+#include "x86-64/interrupts.h"
 
 #define INTERRUPT_GATE 0xE
 

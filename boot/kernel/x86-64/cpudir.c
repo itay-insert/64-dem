@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include "uint_definitions.h"
-#include "vga.h"
-#include "cpuid.h"
-#include "memory.h"
+#include "drivers/display/vga.h"
+#include "x86-64/cpuid.h"
+#include "x86-64/memory/memory.h"
 
 
 char buffer_vendor[30] = {0};

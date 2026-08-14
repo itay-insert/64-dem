@@ -1,7 +1,7 @@
 #include "uint_definitions.h"
-#include "vga.h"
-#include "apic.h"
-#include "lowlevel.h"
+#include "drivers/display/vga.h"
+#include "x86-64/apic.h"
+#include "x86-64/lowlevel.h"
 
 static char exception_names[32][24] = {
     "Divide error", "Debug", "NMI", "Breakpoint",

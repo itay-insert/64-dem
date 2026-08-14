@@ -1,7 +1,7 @@
 #include "uint_definitions.h"
-#include "memory.h"
-#include "vga.h"
-#include "paging.h"
+#include "x86-64/memory/memory.h"
+#include "drivers/display/vga.h"
+#include "x86-64/paging.h"
 
 #define MADT_sig 0x43495041
 #define FACP_sig 0x50434146

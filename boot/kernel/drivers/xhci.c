@@ -1,7 +1,7 @@
 #include "uint_definitions.h"
-#include "vga.h"
-#include "lowlevel.h"
-#include "paging.h"
+#include "drivers/display/vga.h"
+#include "x86-64/lowlevel.h"
+#include "x86-64/paging.h"
 
 
 extern u64 xhci_base;

@@ -1,5 +1,5 @@
 #include "uint_definitions.h"
-#include "storage.h"
+#include "drivers/storage/storage.h"
 
 typedef enum {
     BLOCK_OK = 0,
@@ -32,5 +32,4 @@ struct block_device {
     u32 max_blocks_per_request;
     u32 flags;
 };
-
 

@@ -29,7 +29,10 @@ void io_wait(void);
 u32 inl(u16 port);
 void outl(u16 port, u32 value);
 
-#include "../boot/kernel/drivers/storage/ata.c"
+#define PORTS_H
+#include "../boot/kernel/drivers/storage/ide/atahlp.c"
+#include "../boot/kernel/drivers/storage/ide/ataid.c"
+#include "../boot/kernel/drivers/storage/ide/ata.c"
 
 static void mock_reset(u8 signature_mid, u8 signature_high) {
     mock_command = MOCK_COMMAND_NONE;

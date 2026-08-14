@@ -1,5 +1,5 @@
-#include "ports.h"
-#include "ata.h"
+#include "x86-64/ports.h"
+#include "drivers/storage/ide/ata.h"
 
 void ata_400ns_delay(u16 control_port) {
     inb(control_port);

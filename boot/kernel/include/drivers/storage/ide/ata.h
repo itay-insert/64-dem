@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include "uint_definitions.h"
 
-#include "atadef.h"
+#include "drivers/storage/ide/atadef.h"
 
 typedef enum {
     ATA_DEVICE_NONE,

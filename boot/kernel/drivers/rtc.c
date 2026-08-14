@@ -1,6 +1,6 @@
 #include <stdint.h>
-#include "ports.h"
-#include "vga.h"
+#include "x86-64/ports.h"
+#include "drivers/display/vga.h"
 #include "uint_definitions.h"
 
 #define Seconds 0x00

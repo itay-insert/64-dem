@@ -1,5 +1,5 @@
 #include "uint_definitions.h"
-#include "memory.h"
+#include "x86-64/memory/memory.h"
 #include "boot_info.h"
 
 #ifndef LOWLEVEL_H
