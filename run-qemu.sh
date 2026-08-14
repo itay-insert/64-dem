@@ -9,6 +9,8 @@ VARS_TEMPLATE="${OVMF_VARS:-}"
 MEMORY="512M"
 VGA_MEMORY="2"
 CPU_MODEL="${QEMU_CPU:-}"
+ACCELERATOR="${QEMU_ACCEL:-}"
+BOOTLOADER="${BOOTLOADER_IMAGE:-}"
 BUILD=true
 HEADLESS=false
 
@@ -23,6 +25,8 @@ Options:
   --memory SIZE        Guest RAM size (default: 512M)
   --vga-memory MB      VGA memory in MB (default: 2)
   --cpu MODEL          Override QEMU's default CPU model
+  --accel ACCEL        Override the accelerator (for example, tcg or kvm)
+  --bootloader FILE    Use an alternate BOOTX64.efi image
   --firmware FILE      Path to OVMF_CODE firmware
   --headless           Disable the graphical GOP framebuffer window
   -h, --help           Show this help
@@ -30,6 +34,8 @@ Options:
 Environment variables:
   QEMU                 QEMU executable (default: qemu-system-x86_64)
   QEMU_CPU             QEMU CPU model (same as --cpu)
+  QEMU_ACCEL           QEMU accelerator (same as --accel)
+  BOOTLOADER_IMAGE     Bootloader image (same as --bootloader)
   OVMF_CODE            Path to the OVMF code image
   OVMF_VARS            Optional path to the OVMF variables template
 
@@ -66,6 +72,22 @@ while (($#)); do
                 exit 2
             fi
             CPU_MODEL="$2"
+            shift 2
+            ;;
+        --accel)
+            if (($# < 2)); then
+                echo "error: --accel requires a value" >&2
+                exit 2
+            fi
+            ACCELERATOR="$2"
+            shift 2
+            ;;
+        --bootloader)
+            if (($# < 2)); then
+                echo "error: --bootloader requires a value" >&2
+                exit 2
+            fi
+            BOOTLOADER="$2"
             shift 2
             ;;
         --firmware)
@@ -129,8 +151,12 @@ if [[ "$BUILD" == true ]]; then
     (cd "$ROOT_DIR" && bash ./make.sh)
 fi
 
-for required_file in EFI/boot/BOOTX64.efi boot/kernel.elf; do
-    if [[ ! -r "$ROOT_DIR/$required_file" ]]; then
+if [[ -z "$BOOTLOADER" ]]; then
+    BOOTLOADER="$ROOT_DIR/EFI/boot/BOOTX64.efi"
+fi
+
+for required_file in "$BOOTLOADER" "$ROOT_DIR/boot/kernel.elf"; do
+    if [[ ! -r "$required_file" ]]; then
         echo "error: missing $required_file; run without --no-build first." >&2
         exit 1
     fi
@@ -149,10 +175,12 @@ if [[ -z "$VARS_TEMPLATE" ]]; then
     esac
 fi
 
-if [[ -r /dev/kvm && -w /dev/kvm ]]; then
-    ACCELERATOR=kvm
-else
-    ACCELERATOR=tcg
+if [[ -z "$ACCELERATOR" ]]; then
+    if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+        ACCELERATOR=kvm
+    else
+        ACCELERATOR=tcg
+    fi
 fi
 
 QEMU_ARGS=(
@@ -188,7 +216,7 @@ fi
 # Build a disposable FAT disk tree so firmware writes cannot alter the source
 # directory. It contains the standard x86-64 UEFI fallback boot path.
 mkdir -p "$TEMP_DIR/disk/EFI/boot" "$TEMP_DIR/disk/boot"
-cp -- "$ROOT_DIR/EFI/boot/BOOTX64.efi" "$TEMP_DIR/disk/EFI/boot/BOOTX64.efi"
+cp -- "$BOOTLOADER" "$TEMP_DIR/disk/EFI/boot/BOOTX64.efi"
 cp -- "$ROOT_DIR/boot/kernel.elf" "$TEMP_DIR/disk/boot/kernel.elf"
 
 QEMU_ARGS+=(

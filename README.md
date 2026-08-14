@@ -38,3 +38,24 @@ limited to 2 MB, making the bootloader select QEMU's small 832x624 GOP mode—th
 closest mode QEMU exposes above 800x600. The launcher leaves the CPU model
 unspecified so QEMU supplies its default CPUID configuration. Use `--cpu MODEL`
 only when a particular virtual CPU configuration is needed.
+
+### Live CPU visualizer
+
+To stop at the UEFI bootloader's `efi_main` and watch the bootloader and kernel
+execute instruction by instruction, run:
+
+```sh
+./visual-debugger.sh --hz 5 --run
+```
+
+The terminal interface displays changing CPU registers, upcoming assembly,
+kernel debug output, and interrupt-controller state. Space pauses or resumes,
+`s` advances one instruction, `+`/`-` changes the visible instruction rate,
+and `q` exits. Add `--headless` to hide the separate GOP framebuffer or
+`--no-build` to use the existing binaries. The selected rate is deliberately a
+human-visible instruction rate; it is not a cycle-accurate model of a physical
+
+The visualizer builds a temporary trap-enabled copy of `BOOTX64.efi`; the
+ordinary bootloader image used by `run-qemu.sh` is not modified. When execution
+reaches the kernel's fixed higher-half mapping, the display automatically
+switches from bootloader symbols to kernel symbols.

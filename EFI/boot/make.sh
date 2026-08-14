@@ -1,7 +1,14 @@
+BOOTLOADER_OUTPUT="${BOOTLOADER_OUTPUT:-BOOTX64.efi}"
+DEBUG_DEFINE=()
+if [[ "${VISUAL_DEBUGGER:-0}" == 1 ]]; then
+  DEBUG_DEFINE=(-DVISUAL_DEBUGGER)
+fi
+
 gcc -march=x86-64 \
   -I/usr/include/efi \
   -I/usr/include/efi/x86_64 \
   -ffreestanding -fshort-wchar -mno-red-zone \
+  "${DEBUG_DEFINE[@]}" \
   -c bootloader.c -o bootloader.o
 
 
@@ -19,7 +26,11 @@ objcopy \
   -j .text -j .rodata -j .sdata -j .data -j .bss \
   -j .rel -j .rela -j .reloc \
   --target efi-app-x86_64 \
-  bootloader.so BOOTX64.efi
+  bootloader.so "$BOOTLOADER_OUTPUT"
+
+if [[ -n "${BOOTLOADER_DEBUG_ELF:-}" ]]; then
+  cp -- bootloader.so "$BOOTLOADER_DEBUG_ELF"
+fi
 
   rm *.o
   rm *.so

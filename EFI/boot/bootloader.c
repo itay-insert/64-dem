@@ -200,12 +200,14 @@ void load_segment(u64 p_offset, u64 p_filesz, u64 p_align, VOID *buf, EFI_FILE_P
 
 
 u64 elf_allocator(pt_data e, EFI_FILE_PROTOCOL *file) {
-    VOID *buf = (VOID *)e.e_entry;
     void *p_header = (void *)e.file_base;
+    u64 st_vaddr = *(u64 *)(p_header+0x10);
+    VOID *buf = (VOID *)e.e_entry;
     for (u16 i = 0; i < e.e_phnum; i++) {
         u32 p_type = *(u32 *)p_header;
         u64 p_offset = *(u64 *)(p_header+0x08);
         u64 p_vaddr = *(u64 *)(p_header+0x10);
+        p_vaddr = p_vaddr - st_vaddr;
         u64 p_filesz = *(u64 *)(p_header+0x20);
         u64 p_memsz = *(u64 *)(p_header+0x28);
         u64 p_align = *(u64 *)(p_header+0x30);
@@ -254,8 +256,12 @@ aloc_data elf_loader(u64 file_base, u64 p_entry, EFI_FILE_PROTOCOL *file) {
     magic_ptr[2] == 'L' && magic_ptr[3] == 'F') {
         void *p_header = (void *)file_base;
         u64 e_entry = *(u64 *)(p_header+0x18);
-        e_entry = e_entry + p_entry;
         u64 e_phoff = *(u64 *)(p_header+0x20);
+        p_header = (void *)(file_base+e_phoff);
+        u64 st_vaddr = *(u64 *)(p_header+0x10);
+        e_entry = e_entry - st_vaddr;
+        p_header = (void *)file_base;
+        e_entry = e_entry + p_entry;
         u16 e_phentsize = *(u16 *)(p_header+0x36);
         u16 e_phnum = *(u16 *)(p_header+0x38);
         pt_data e = {file_base+e_phoff, p_entry, e_phentsize, e_phnum};
@@ -268,6 +274,22 @@ aloc_data elf_loader(u64 file_base, u64 p_entry, EFI_FILE_PROTOCOL *file) {
 // UEFI entry point
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
+#ifdef VISUAL_DEBUGGER
+    __asm__ __volatile__(
+        "mov $0xe9, %%dx\n"
+        "mov $'V', %%al\n" "out %%al, %%dx\n"
+        "mov $'D', %%al\n" "out %%al, %%dx\n"
+        "mov $'B', %%al\n" "out %%al, %%dx\n"
+        "mov $'G', %%al\n" "out %%al, %%dx\n"
+        "mov $10, %%al\n"  "out %%al, %%dx\n"
+        ".global visual_debugger_trap\n"
+        "visual_debugger_trap:\n"
+        "jmp visual_debugger_trap\n"
+        ".global visual_debugger_resume\n"
+        "visual_debugger_resume:\n"
+        : : : "rax", "rdx", "memory"
+    );
+#endif
     InitializeLib(ImageHandle, SystemTable);
 
     EFI_LOADED_IMAGE *LoadedImage;
