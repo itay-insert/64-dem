@@ -3,6 +3,9 @@
 
 #define SUCCESS 0
 #define ERR_INVALID_COUNT 1
+#define ERR_INVALID_BUFFER 2
+#define ERR_INVALID_TYPE 3
+#define ERR_IO 4
 
 #define P_CTL 0x3F6
 #define S_CTL 0x376

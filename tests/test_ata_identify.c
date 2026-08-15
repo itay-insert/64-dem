@@ -8,7 +8,10 @@
 enum mock_command {
     MOCK_COMMAND_NONE,
     MOCK_COMMAND_ATA,
-    MOCK_COMMAND_ATAPI
+    MOCK_COMMAND_ATAPI,
+    MOCK_COMMAND_WRITE,
+    MOCK_COMMAND_FLUSH,
+    MOCK_COMMAND_READ
 };
 
 static const u16 mock_io = 0x1F0;
@@ -20,6 +23,11 @@ static u8 mock_completion_status;
 static u16 mock_identify[256];
 static u32 mock_status_reads;
 static u32 mock_data_reads;
+static u32 mock_data_writes;
+static u8 mock_write_command;
+static u8 mock_flush_command;
+static u8 mock_read_command;
+static u16 mock_written_data[512];
 
 u8 inb(u16 port);
 void outb(u16 port, u8 byte);
@@ -41,6 +49,10 @@ static void mock_reset(u8 signature_mid, u8 signature_high) {
     mock_completion_status = ATA_SR_DRQ | ATA_SR_DRDY;
     mock_status_reads = 0;
     mock_data_reads = 0;
+    mock_data_writes = 0;
+    mock_write_command = 0;
+    mock_flush_command = 0;
+    mock_read_command = 0;
     memset(mock_identify, 0, sizeof(mock_identify));
 }
 
@@ -68,6 +80,19 @@ void outb(u16 port, u8 byte) {
         mock_command = MOCK_COMMAND_ATA;
     else if (byte == ATA_CMD_IDENTIFY_PACKET)
         mock_command = MOCK_COMMAND_ATAPI;
+    else if (byte == ATA_CMD_WRITE || byte == ATA_CMD_WRITE_EXT) {
+        mock_command = MOCK_COMMAND_WRITE;
+        mock_write_command = byte;
+        mock_completion_status = ATA_SR_DRQ | ATA_SR_DRDY;
+    } else if (byte == ATA_CMD_FLUSH || byte == ATA_CMD_FLUSH_EXT) {
+        mock_command = MOCK_COMMAND_FLUSH;
+        mock_flush_command = byte;
+        mock_completion_status = ATA_SR_DRDY;
+    } else if (byte == ATA_CMD_READ || byte == ATA_CMD_READ_EXT) {
+        mock_command = MOCK_COMMAND_READ;
+        mock_read_command = byte;
+        mock_completion_status = ATA_SR_DRQ | ATA_SR_DRDY;
+    }
 }
 
 u16 inw(u16 port) {
@@ -76,15 +101,21 @@ u16 inw(u16 port) {
     return mock_identify[mock_data_reads++];
 }
 
-void outw(u16 port, u16 word) { (void)port; (void)word; }
+void outw(u16 port, u16 word) {
+    assert(port == mock_io + ATA_REG_DATA);
+    assert(mock_data_writes < 512);
+    mock_written_data[mock_data_writes++] = word;
+}
 void io_wait(void) {}
 u32 inl(u16 port) { (void)port; return 0; }
 void outl(u16 port, u32 value) { (void)port; (void)value; }
 
 static ata_drive_t new_drive(void) {
     ata_drive_t drive = {0};
-    drive.io_base = mock_io;
-    drive.control_port = mock_control;
+    static ata_channel_t mock_channel;
+    mock_channel.io_base = mock_io;
+    mock_channel.control_port = mock_control;
+    drive.channel = &mock_channel;
     return drive;
 }
 
@@ -180,6 +211,83 @@ static void test_channel_reset(void) {
     assert(ata_reset_channel(mock_control));
 }
 
+static void test_ata_lba28_write_and_flush(void) {
+    mock_reset(0x00, 0x00);
+
+    ata_drive_t drive = new_drive();
+    drive.type = ATA_DEVICE_ATA;
+    drive.supports_lba28 = true;
+    drive.sector_count = 1024;
+
+    u8 buffer[512];
+    for (u32 i = 0; i < sizeof(buffer); i++)
+        buffer[i] = (u8)i;
+
+    ata_write(&drive, 7, buffer, 1);
+
+    assert(drive.ata_status == SUCCESS);
+    assert(mock_write_command == ATA_CMD_WRITE);
+    assert(mock_flush_command == ATA_CMD_FLUSH);
+    assert(mock_data_writes == 256);
+    assert(mock_written_data[0] == 0x0100);
+    assert(mock_written_data[255] == 0xFFFE);
+}
+
+static void test_ata_lba48_write_and_flush(void) {
+    mock_reset(0x00, 0x00);
+
+    ata_drive_t drive = new_drive();
+    drive.type = ATA_DEVICE_ATA;
+    drive.supports_lba28 = true;
+    drive.supports_lba48 = true;
+    drive.sector_count = (1ULL << 28) + 1024;
+
+    u8 buffer[512] = {0};
+    ata_write(&drive, 1ULL << 28, buffer, 1);
+
+    assert(drive.ata_status == SUCCESS);
+    assert(mock_write_command == ATA_CMD_WRITE_EXT);
+    assert(mock_flush_command == ATA_CMD_FLUSH_EXT);
+    assert(mock_data_writes == 256);
+}
+
+static void test_ata_lba28_read(void) {
+    mock_reset(0x00, 0x00);
+
+    ata_drive_t drive = new_drive();
+    drive.type = ATA_DEVICE_ATA;
+    drive.supports_lba28 = true;
+    drive.sector_count = 1024;
+
+    for (u32 i = 0; i < 256; i++)
+        mock_identify[i] = (u16)(0xA000 + i);
+
+    u8 buffer[512] = {0};
+    ata_read(&drive, 9, buffer, 1);
+
+    assert(drive.ata_status == SUCCESS);
+    assert(mock_read_command == ATA_CMD_READ);
+    assert(mock_data_reads == 256);
+    assert(buffer[0] == 0x00 && buffer[1] == 0xA0);
+    assert(buffer[510] == 0xFF && buffer[511] == 0xA0);
+}
+
+static void test_ata_lba48_read(void) {
+    mock_reset(0x00, 0x00);
+
+    ata_drive_t drive = new_drive();
+    drive.type = ATA_DEVICE_ATA;
+    drive.supports_lba48 = true;
+    drive.sector_count = (1ULL << 28) + 1024;
+
+    u8 buffer[512];
+    ata_read(&drive, 1ULL << 28, buffer, 1);
+
+    assert(drive.ata_status == SUCCESS);
+    assert(mock_read_command == ATA_CMD_READ_EXT);
+    assert(mock_data_reads == 256);
+}
+
 int main(void) {
     test_ata_lba48_identification();
     test_ata_lba28_fallback();
@@ -187,6 +295,10 @@ int main(void) {
     test_atapi_identification();
     test_atapi_rejects_ata_and_command_error();
     test_channel_reset();
+    test_ata_lba28_write_and_flush();
+    test_ata_lba48_write_and_flush();
+    test_ata_lba28_read();
+    test_ata_lba48_read();
     puts("ATA identify tests passed");
     return 0;
 }

@@ -26,7 +26,10 @@ bool ata_wait_not_busy(u16 io_base) {
 
 
 bool ata_poll_drq(ata_drive_t *drive) {
-    u16 status_port = drive->io_base + ATA_REG_STATUS;
+    if (!drive || !drive->channel)
+        return false;
+
+    u16 status_port = drive->channel->io_base + ATA_REG_STATUS;
 
     for (u32 timeout = 0; timeout < 1000000; timeout++) {
         u8 status = inb(status_port);

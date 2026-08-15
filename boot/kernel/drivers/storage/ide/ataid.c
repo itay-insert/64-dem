@@ -36,6 +36,9 @@ u16 control_port, bool slave) {
 
 bool ata_identify(ata_drive_t *drive, 
 u16 identify[256]) {
+    if (!drive || !drive->channel || !identify)
+        return false;
+
     drive->type = ATA_DEVICE_NONE;
     drive->supports_lba28 = false;
     drive->supports_lba48 = false;
@@ -43,9 +46,9 @@ u16 identify[256]) {
     drive->model[0] = '\0';
     drive->serial[0] = '\0';
 
-    u16 io = drive->io_base;
+    u16 io = drive->channel->io_base;
 
-    ata_select_drive(drive->io_base, drive->control_port, drive->slave);
+    ata_select_drive(drive->channel->io_base, drive->channel->control_port, drive->slave);
 
     if (!ata_wait_not_busy(io)) {
         drive->type = ATA_DEVICE_NONE;
@@ -177,6 +180,9 @@ u16 identify[256]) {
 
 
 bool atapi_identify(ata_drive_t *drive, u16 identify[256]) {
+    if (!drive || !drive->channel || !identify)
+        return false;
+
     drive->type = ATA_DEVICE_NONE;
     drive->supports_lba28 = false;
     drive->supports_lba48 = false;
@@ -184,9 +190,9 @@ bool atapi_identify(ata_drive_t *drive, u16 identify[256]) {
     drive->serial[0] = '\0';
     drive->model[0] = '\0';
 
-    u16 io = drive->io_base;
+    u16 io = drive->channel->io_base;
 
-    ata_select_drive(drive->io_base, drive->control_port, drive->slave);
+    ata_select_drive(drive->channel->io_base, drive->channel->control_port, drive->slave);
 
     if (!ata_wait_not_busy(io)) 
         return false;
