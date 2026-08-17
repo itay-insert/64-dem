@@ -9,6 +9,16 @@
 #include "x86-64/spinlock.h"
 
 typedef enum {
+    ATA_PROBE_NONE,
+    ATA_PROBE_ATA,
+    ATA_PROBE_ATAPI,
+    ATA_PROBE_TIMEOUT,
+    ATA_PROBE_DEVICE_FAULT,
+    ATA_PROBE_PROTOCOL_ERROR
+} ata_probe_t;
+
+
+typedef enum {
     ATA_DEVICE_NONE,
     ATA_DEVICE_ATA,
     ATA_DEVICE_ATAPI
@@ -39,6 +49,7 @@ typedef struct {
     u64 sector_count;
 
     char model[41];
+    char firmware[9];
     char serial[21];
 
     u8 ata_status;

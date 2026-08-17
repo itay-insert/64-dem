@@ -50,5 +50,7 @@
 #define ATA_CMD_READ 0x20
 #define ATA_CMD_READ_EXT 0x24
 
+#define ATA_CMD_PACKET 0xA0
+#define ATA_SLAVE_PACKET 0xB0
 
 #endif
