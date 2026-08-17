@@ -2,7 +2,7 @@ BITS 64
 global _start
 extern kernel_main
 
-section .text
+section .text.start
 
 _start:
 mov rsp, rdx

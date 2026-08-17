@@ -33,9 +33,34 @@ u16 control_port, bool slave) {
 }
 
 
+
+static void ata_copy_string(char *dst, u32 dst_size, const u16 *identify, 
+u32 first_word, u32 word_count) {
+    u32 length = word_count << 1;
+
+    if (length >= dst_size)
+        length = dst_size - 1;
+
+    for (u32 i = 0; i < length; i++) {
+        u16 word = identify[first_word + i / 2];
+
+        if ((i & 1) == 0) 
+            dst[i] = (char)(word >> 8);
+        else 
+            dst[i] = (char)(word & 0xFF);
+    }
+
+    while (length > 0 && 
+                (dst[length - 1] == ' ' || dst[length - 1] == '\0')) {
+        length--;                    
+    }
+
+    dst[length] = '\0';
+}
+
+
 ata_probe_t ata_probe_device(ata_drive_t *drive) {
     u16 words[256];
-    char destination[512];
 
     // initialize the drive
     drive->type = ATA_DEVICE_NONE;
@@ -70,32 +95,34 @@ ata_probe_t ata_probe_device(ata_drive_t *drive) {
     outb(io + ATA_REG_COMMAND, ATA_CMD_IDENTIFY); // ata_identify command
 
     u8 status = 0;
+    bool timed_out = true;
     for (u32 timeout = 0; timeout < 1000000; timeout++) {
         status = inb(io + ATA_REG_STATUS);
 
-        if (status == 0 || status == 0xFF) 
+        if (status == 0 || status == 0xFF) {
+            spin_unlock(&channel->lock);
             return ATA_PROBE_NONE;
-
-        if (status & ATA_SR_BSY) 
-            continue;
-        
-        if (status & ATA_SR_DF)
-            return ATA_PROBE_DEVICE_FAULT;
-
-        if (status & ATA_SR_DRQ) {
-            break;
         }
-    }
-    
 
-    if (status & ATA_SR_DRQ) {
+        if (status & ATA_SR_BSY)
+            continue;
+            
+        timed_out = false;
+        break;
+    }
+
+    if (timed_out) {
+        spin_unlock(&channel->lock);
+        return ATA_PROBE_TIMEOUT;
+    }
+
+    if (status & ATA_SR_DF) {
+        spin_unlock(&channel->lock);
+        return ATA_PROBE_DEVICE_FAULT;
+    }
+
+    if (!(status & ATA_SR_ERR) && (status & ATA_SR_DRQ)) {
         for (int i = 0; i < 256; i++) 
             words[i] = inw(io + ATA_REG_DATA);
-        
-        for (int i = 0; i < 256; i++) {
-            u16 word = words[i];
-
-            destination[i << 1] = (char)(word >> 8);
-        }
     }
 }
