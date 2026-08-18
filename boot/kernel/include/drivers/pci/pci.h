@@ -1,14 +1,43 @@
-#ifndef PCI_h
-#define PCI_h
+#ifndef PCI_H
+#define PCI_H
 
 #include "uint_definitions.h"
 
-#define PCI_STATUS_SUCCESS 0
-#define PCI_STATUS_NOT_PRESENT 1
-#define PCI_STATUS_UNSUPPORTED_HEADER 2
-#define PCI_STATUS_INVALID_ADDRESS 3
-#define PCI_STATUS_TOO_MANY_DEVICES 4
+#define PCI_STATUS_SUCCESS              0
+#define PCI_STATUS_NOT_PRESENT          1
+#define PCI_STATUS_UNSUPPORTED_HEADER   2
+#define PCI_STATUS_INVALID_ADDRESS      3
+#define PCI_STATUS_TOO_MANY_DEVICES     4
+#define PCI_STATUS_UNSUPPORTED          5
+#define PCI_STATUS_NOT_FOUND            6
+#define PCI_STATUS_BAD_BAR              7
+
 #define PCI_PATH_MAX_DEVICES 32
+
+#define PCI_COMMAND_IO_SPACE        (1u << 0)
+#define PCI_COMMAND_MEMORY_SPACE    (1u << 1)
+#define PCI_COMMAND_BUS_MASTER      (1u << 2)
+#define PCI_COMMAND_INTX_DISABLE    (1u << 10)
+#define PCI_STATUS_CAPABILITIES     (1u << 4)
+
+#define PCI_BAR_MEMORY 0
+#define PCI_BAR_IO     1
+
+typedef struct {
+    u16 segment;
+    u8 bus;
+    u8 device;
+    u8 function;
+} pci_address_t;
+
+typedef struct {
+    u64 address;
+    u64 size;
+    u8 type;
+    u8 prefetchable;
+    u8 is_64bit;
+    u8 bar_index;
+} pci_bar_t;
 
 typedef struct {
     u16 command;
@@ -91,6 +120,7 @@ typedef struct {
 typedef struct {
     int PCI_status;
     int PCI_Type;
+    u16 Segment;
     u8 Bus;
     u8 Device;
     u8 Function;
@@ -110,8 +140,36 @@ typedef struct {
     PCI_ret Devices[PCI_PATH_MAX_DEVICES];
 } PCI_PATH_RET;
 
-u32 PCI_read(u8 bus, u8 device, u8 function, u8 offset, u8 size);
+typedef void (*pci_enumerate_callback_t)(const PCI_ret *device, void *context);
+
+/* Segment-aware configuration access used by new drivers. */
+int pci_config_read(pci_address_t address, u16 offset, u8 size, u32 *value);
+int pci_config_write(pci_address_t address, u16 offset, u8 size, u32 value);
+u8 pci_read8(pci_address_t address, u16 offset);
+u16 pci_read16(pci_address_t address, u16 offset);
+u32 pci_read32(pci_address_t address, u16 offset);
+int pci_write8(pci_address_t address, u16 offset, u8 value);
+int pci_write16(pci_address_t address, u16 offset, u16 value);
+int pci_write32(pci_address_t address, u16 offset, u32 value);
+
+/* Compatibility accessors address PCI segment zero. */
+u32 PCI_read(u8 bus, u8 device, u8 function, u16 offset, u8 size);
+void PCI_write(u8 bus, u8 device, u8 function, u16 offset, u8 size, u32 value);
+
+PCI_ret pci_get_info(pci_address_t address);
 PCI_ret PCI_get_info(u8 bus, u8 device, u8 function);
+int pci_enumerate(pci_enumerate_callback_t callback, void *context);
+
+int pci_find_capability(pci_address_t address, u8 capability_id, u16 *offset);
+int pci_find_extended_capability(pci_address_t address, u16 capability_id,
+                                 u16 *offset);
+int pci_set_command_bits(pci_address_t address, u16 set, u16 clear);
+int pci_enable_device(pci_address_t address);
+int pci_enable_bus_mastering(pci_address_t address);
+int pci_disable_bus_mastering(pci_address_t address);
+int pci_read_bar(pci_address_t address, u8 bar_index, int probe_size,
+                 pci_bar_t *bar);
+
 PCI_PATH_RET Discover_BootDevice(u64 path_addr, int size);
 int PCI_list(void);
 void pci_init(void);
