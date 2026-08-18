@@ -11,7 +11,6 @@
 EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
-    u64 *PML4 = (u64 *)KernelPML4;
     if (pages == 0) {
         ret.Attribute = 2;
         return ret;
@@ -32,7 +31,7 @@ EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
             PageCount--;
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             fill_bitmap(count_tar, match_count, bitmap);
-            create_mapping(count_virt, count_tar<<12, match_count, 0x03, PML4);
+            create_mapping(count_virt, count_tar<<12, match_count, 0x03, KernelPML4);
             count_virt += (match_count << 12);
             match_count = 0;
             while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) count++;
@@ -40,8 +39,8 @@ EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
         }
     }
     fill_bitmap(count_tar, match_count, bitmap);
-    create_mapping(count_virt, count_tar<<12, match_count, 0x03, PML4);
-    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(virtual_address, PML4);
+    create_mapping(count_virt, count_tar<<12, match_count, 0x03, KernelPML4);
+    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(virtual_address, KernelPML4);
     ret.PhysicalStart = lookup.physical_address;
     ret.VirtualStart = virtual_address;
     ret.Attribute = 0;
@@ -52,11 +51,10 @@ EFI_MEMORY_DESCRIPTOR kmalloc(u64 virtual_address, u64 pages) {
 }
 
 void kfree(EFI_MEMORY_DESCRIPTOR allocation) {
-    u64 *PML4 = (u64 *)KernelPML4;
     while (allocation.NumberOfPages > 0) {
         EFI_MEMORY_DESCRIPTOR frame = {0};
         frame.VirtualStart = allocation.VirtualStart;
-        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, PML4);
+        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, KernelPML4);
         frame.PhysicalStart = lookup.physical_address;
         if (lookup.Page_Type == 0) {
             frame.NumberOfPages = 1;

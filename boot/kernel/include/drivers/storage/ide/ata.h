@@ -62,8 +62,7 @@ bool ata_poll_drq(ata_drive_t *drive);
 bool ata_reset_channel(u16 control_port);
 void ata_select_drive(u16 io_base, 
 u16 control_port, bool slave);
-bool ata_identify(ata_drive_t *drive, u16 identify[256]);
-bool atapi_identify(ata_drive_t *drive, u16 identify[256]);
+ata_probe_t ata_probe_device(ata_drive_t *drive);
 ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_count);
 void ata_write(ata_drive_t *drive, u64 lba, void *buffer, u8 count);
 void ata_read(ata_drive_t *drive, u64 lba, void *buffer, u8 count);

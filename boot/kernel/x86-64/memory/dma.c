@@ -10,7 +10,6 @@
 
 
 u64 allocate_dma(u64 size) {
-    u64 *PML4 = (u64 *)KernelPML4;
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     if (dma_header == NULL) {
         EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
@@ -32,7 +31,7 @@ u64 allocate_dma(u64 size) {
         EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
         if (frame.Attribute != 0) return 1;
         frame.VirtualStart = DMA_BASE;
-        create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, PML4);
+        create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, KernelPML4);
         flush_pages(DMA_BASE, pages);
         entries++;
         dma_header->SizeInPages--;
@@ -124,7 +123,7 @@ u64 allocate_dma(u64 size) {
     EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
     if (allocation.Attribute != 0) return 1;
     allocation.VirtualStart = free_base;
-    create_mapping(free_base, allocation.PhysicalStart, pages, 0x03, PML4);
+    create_mapping(free_base, allocation.PhysicalStart, pages, 0x03, KernelPML4);
     flush_pages(free_base, pages);
     dma_descriptor *header = 
         (dma_descriptor *)(allocation.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
@@ -142,14 +141,13 @@ u64 allocate_dma(u64 size) {
 
 
 void free_dma(u64 Base) {
-    u64 *PML4 = (u64 *)KernelPML4;
     dma_descriptor *ptr = (dma_descriptor *)find_descriptorBase(Base);
     dma_entry *pool_entry = ptr->home_entry;
     int entries_used = ptr->status;
     EFI_MEMORY_DESCRIPTOR allocation = {0};
     allocation.VirtualStart = Base;
     allocation.NumberOfPages = ptr->SizeInPages;
-    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, PML4);
+    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, KernelPML4);
     allocation.PhysicalStart = lookup.physical_address;
     free_frame(allocation);
 

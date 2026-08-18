@@ -261,8 +261,8 @@ void pci_init(void) {
             create_mapping(PCI_BASE+size_mapped,
                 entries[i].BaseAddress, 
                 page_count, 
-                0x13, 
-            (u64 *)KernelPML4);
+                0x13,
+                KernelPML4);
             flush_pages(PCI_BASE+size_mapped, page_count);
             printf("PhysicalBase = 0x%lx  VirtualBase = 0x%lx\n", entries[i].BaseAddress, 
                 PCI_BASE+size_mapped);

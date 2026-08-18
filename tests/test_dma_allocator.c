@@ -18,7 +18,7 @@
 #include "x86-64/memory/dma_internal.h"
 #include "x86-64/memory/dma.h"
 
-u64 KernelPML4;
+u64 *KernelPML4;
 
 typedef struct {
     u64 virtual_address;

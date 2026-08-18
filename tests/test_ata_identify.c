@@ -78,9 +78,10 @@ void outb(u16 port, u8 byte) {
         return;
     if (byte == ATA_CMD_IDENTIFY)
         mock_command = MOCK_COMMAND_ATA;
-    else if (byte == ATA_CMD_IDENTIFY_PACKET)
+    else if (byte == ATA_CMD_IDENTIFY_PACKET) {
         mock_command = MOCK_COMMAND_ATAPI;
-    else if (byte == ATA_CMD_WRITE || byte == ATA_CMD_WRITE_EXT) {
+        mock_completion_status = ATA_SR_DRQ | ATA_SR_DRDY;
+    } else if (byte == ATA_CMD_WRITE || byte == ATA_CMD_WRITE_EXT) {
         mock_command = MOCK_COMMAND_WRITE;
         mock_write_command = byte;
         mock_completion_status = ATA_SR_DRQ | ATA_SR_DRDY;
@@ -142,8 +143,7 @@ static void test_ata_lba48_identification(void) {
     set_identify_string(27, 20, "MOCK ATA DISK");
 
     ata_drive_t drive = new_drive();
-    u16 identify[256];
-    assert(ata_identify(&drive, identify));
+    assert(ata_probe_device(&drive) == ATA_PROBE_ATA);
     assert(drive.type == ATA_DEVICE_ATA);
     assert(drive.supports_lba28);
     assert(drive.supports_lba48);
@@ -160,29 +160,19 @@ static void test_ata_lba28_fallback(void) {
     mock_identify[60] = 0xBEEF;
     mock_identify[61] = 0x0002;
     ata_drive_t drive = new_drive();
-    u16 identify[256];
-    assert(ata_identify(&drive, identify));
+    assert(ata_probe_device(&drive) == ATA_PROBE_ATA);
     assert(!drive.supports_lba48);
     assert(drive.sector_count == UINT64_C(0x2BEEF));
 }
 
-static void test_ata_detects_atapi_without_reading_data(void) {
-    mock_reset(0x14, 0xEB);
-    mock_completion_status = ATA_SR_ERR;
-    ata_drive_t drive = new_drive();
-    u16 identify[256];
-    assert(!ata_identify(&drive, identify));
-    assert(drive.type == ATA_DEVICE_ATAPI);
-    assert(mock_data_reads == 0);
-}
-
 static void test_atapi_identification(void) {
     mock_reset(0x14, 0xEB);
+    mock_completion_status = ATA_SR_ERR;
+    mock_identify[0] = 1u << 15;
     set_identify_string(10, 10, "SERIAL-CD");
     set_identify_string(27, 20, "MOCK ATAPI CDROM");
     ata_drive_t drive = new_drive();
-    u16 identify[256];
-    assert(atapi_identify(&drive, identify));
+    assert(ata_probe_device(&drive) == ATA_PROBE_ATAPI);
     assert(drive.type == ATA_DEVICE_ATAPI);
     assert(!drive.supports_lba28 && !drive.supports_lba48);
     assert(drive.sector_count == 0);
@@ -191,19 +181,38 @@ static void test_atapi_identification(void) {
     assert(mock_data_reads == 256);
 }
 
-static void test_atapi_rejects_ata_and_command_error(void) {
+static void test_probe_rejects_invalid_atapi_signature(void) {
     mock_reset(0x00, 0x00);
-    ata_drive_t drive = new_drive();
-    u16 identify[256];
-    assert(!atapi_identify(&drive, identify));
-    assert(mock_command == MOCK_COMMAND_NONE);
-
-    mock_reset(0x14, 0xEB);
     mock_completion_status = ATA_SR_ERR;
-    drive = new_drive();
-    assert(!atapi_identify(&drive, identify));
+    ata_drive_t drive = new_drive();
+    assert(ata_probe_device(&drive) == ATA_PROBE_PROTOCOL_ERROR);
     assert(drive.type == ATA_DEVICE_NONE);
     assert(mock_data_reads == 0);
+}
+
+static void test_probe_error_paths(void) {
+    assert(ata_probe_device(NULL) == ATA_PROBE_PROTOCOL_ERROR);
+
+    mock_reset(0x00, 0x00);
+    mock_completion_status = 0;
+    ata_drive_t drive = new_drive();
+    assert(ata_probe_device(&drive) == ATA_PROBE_NONE);
+    assert(drive.type == ATA_DEVICE_NONE);
+    assert(drive.channel->lock.locked == 0);
+
+    mock_reset(0x00, 0x00);
+    mock_completion_status = ATA_SR_DF;
+    drive = new_drive();
+    assert(ata_probe_device(&drive) == ATA_PROBE_DEVICE_FAULT);
+    assert(drive.type == ATA_DEVICE_NONE);
+    assert(drive.channel->lock.locked == 0);
+
+    mock_reset(0x00, 0x00);
+    mock_completion_status = ATA_SR_DRDY;
+    drive = new_drive();
+    assert(ata_probe_device(&drive) == ATA_PROBE_PROTOCOL_ERROR);
+    assert(drive.type == ATA_DEVICE_NONE);
+    assert(drive.channel->lock.locked == 0);
 }
 
 static void test_channel_reset(void) {
@@ -291,9 +300,9 @@ static void test_ata_lba48_read(void) {
 int main(void) {
     test_ata_lba48_identification();
     test_ata_lba28_fallback();
-    test_ata_detects_atapi_without_reading_data();
     test_atapi_identification();
-    test_atapi_rejects_ata_and_command_error();
+    test_probe_rejects_invalid_atapi_signature();
+    test_probe_error_paths();
     test_channel_reset();
     test_ata_lba28_write_and_flush();
     test_ata_lba48_write_and_flush();

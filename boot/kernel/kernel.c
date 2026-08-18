@@ -112,8 +112,6 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
     int *ptr = (int *)alloc.VirtualStart;
     *ptr = 1;
 
-    u64 *PML4 = (u64 *)KernelPML4;
-    
     EFI_MEMORY_DESCRIPTOR alloc1 = kmalloc((info64->kernel_end & ~0xfff)+0x2000, 1);
     if (*ptr == 1 && addr != alloc1.PhysicalStart) {
         printf("kmalloc: [");
@@ -127,7 +125,7 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
         printf("ERR");
         Set_GlobalTextColor(LightGray);
         printf("]\n");
-        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(alloc.VirtualStart, PML4);
+        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(alloc.VirtualStart, KernelPML4);
         printf("error_status: %lu  physical_start: 0x%lx  virtual_start: 0x%lx pages: 0x%lu  lookup: %d\n",
              alloc1.Attribute, alloc1.PhysicalStart, alloc1.VirtualStart, alloc1.NumberOfPages, lookup.status);
     }
@@ -167,7 +165,7 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
     APIC_base = discover_APIC();
 
 
-    create_mapping(APIC_base, APIC_base-BASE, 1, 0x13, PML4);
+    create_mapping(APIC_base, APIC_base-BASE, 1, 0x13, KernelPML4);
 
     flush_pages(APIC_base, 1);
 
@@ -224,7 +222,7 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
         }
     }
 
-    create_mapping(IO_APIC, IO_APIC-BASE, 1, 0x13, PML4);
+    create_mapping(IO_APIC, IO_APIC-BASE, 1, 0x13, KernelPML4);
 
     flush_pages(IO_APIC, 1);
 

@@ -24,10 +24,6 @@ typedef struct {
 
 int GbPageSupport = 0;
 
-u64 PML4_base = 0;
-
-
-
 u64 alloc_pages(u64 pages) {
     if (pages == 0) {
         return 0;
@@ -56,6 +52,9 @@ void flush_pages(u64 virtual_address, u64 pages) {
 }
 
 void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
+    if (PML4 == 0 || pages == 0)
+        return;
+
     u64 virtual_end = virtual_address + (4096 * pages);
     while (virtual_address < virtual_end) {
         u64 size = virtual_end - virtual_address;
@@ -122,8 +121,19 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
     }
 }
 
+
+void destroy_mapping(u64 virtual_address, u64 pages, u64 *PML4) {
+
+
+}
+
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     PAGING_LOOKUP_DESCRIPTOR ret = {0};
+    if (PML4 == 0) {
+        ret.status = 5;
+        return ret;
+    }
+
     int pt_index = (virtual_address >> 12) & 511;
     int pd_index = (virtual_address >> 21) & 511;
     int pdpt_index = (virtual_address >> 30) & 511;
@@ -178,7 +188,7 @@ typedef struct {
     EFI_MEMORY_DESCRIPTOR *memory_map;
 } PAGING_SETUP_DESCRIPTOR;
 
-u64 KernelPML4 = 0;
+u64 *KernelPML4 = 0;
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
@@ -196,9 +206,10 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
                    ps.info64->descriptor_size, ps.info64->kernel_start,
                    ps.info64->kernel_end, ps.info64->bitmap_size);
     qemu_debug_print("[paging] allocator initialized\n");
-    PML4_base = alloc_pages(1);
+    KernelPML4 = (u64 *)(uintptr_t)alloc_pages(1);
+    if (KernelPML4 == 0)
+        return;
     qemu_debug_print("[paging] PML4 allocated\n");
-    u64 *PML4 = (u64 *)PML4_base;
     qemu_debug_print("[paging] conventional memory mapped\n");
     for (u64 i = 0; i < (ps.info64->memory_map_size / ps.info64->descriptor_size); i++) {
         u8 *ptr = (u8 *)ps.memory_map;
@@ -207,21 +218,21 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
             continue;
 
         if (desc->Type == EfiMemoryMappedIO || desc->Type == EfiMemoryMappedIOPortSpace) {
-            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, PML4);
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x13, KernelPML4);
         } else if (desc->Type == EfiConventionalMemory || desc->Type == EfiPersistentMemory) {
-            create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
+            create_mapping(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, KernelPML4);
         } else if (desc->Type == EfiReservedMemoryType) {
-            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, KernelPML4);
         } else if (desc->Type == EfiACPIReclaimMemory || desc->Type == EfiACPIMemoryNVS) {
-            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, PML4);
+            create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, KernelPML4);
         }
     }
     qemu_debug_print("[paging] firmware memory mapped\n");
 
-    create_mapping(BASE+0xE0000, 0xE0000, 32, 0x03, PML4);
+    create_mapping(BASE+0xE0000, 0xE0000, 32, 0x03, KernelPML4);
     qemu_debug_print("[paging] mapped bios legacy area\n");
 
-    create_mapping(fb_virtual, ps.info64->framebuffer_base, (((ps.info32->vertical_resolution*ps.info32->pixels_per_scanline*4)+4095)>>12), 0x13, PML4);
+    create_mapping(fb_virtual, ps.info64->framebuffer_base, (((ps.info32->vertical_resolution*ps.info32->pixels_per_scanline*4)+4095)>>12), 0x13, KernelPML4);
     qemu_debug_print("[paging] framebuffer mapped\n");
     ps.info64->framebuffer_base = fb_virtual;
 
@@ -230,15 +241,15 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
 
 
     u64 pages = ((stack - ps.info64->kernel_start) >> 12) - 65;
-    create_mapping(kernel_virtual, ps.info64->kernel_start, pages, 0x03, PML4);
+    create_mapping(kernel_virtual, ps.info64->kernel_start, pages, 0x03, KernelPML4);
 
-    create_mapping(kernel_virtual+((pages+1)<<12), ps.info64->kernel_start+((pages+1)<<12), 64, 0x03, PML4);
+    create_mapping(kernel_virtual+((pages+1)<<12), ps.info64->kernel_start+((pages+1)<<12), 64, 0x03, KernelPML4);
 
     qemu_debug_print("[paging] kernel mapped\n");
 
-    create_mapping(kernel_virtual+(stack-ps.info64->kernel_start), stack, ((ps.info64->bitmap_size + 4095) >> 12), 0x03, PML4);
+    create_mapping(kernel_virtual+(stack-ps.info64->kernel_start), stack, ((ps.info64->bitmap_size + 4095) >> 12), 0x03, KernelPML4);
 
-    create_mapping(kernel_virtual+(mmp-ps.info64->kernel_start), mmp, (((ps.info64->memory_map_size+ps.info32->info_size) + 4095)>>12), 0x03, PML4);
+    create_mapping(kernel_virtual+(mmp-ps.info64->kernel_start), mmp, (((ps.info64->memory_map_size+ps.info32->info_size) + 4095)>>12), 0x03, KernelPML4);
 
     ps.info64->device_path =
         kernel_virtual + (ps.info64->device_path - ps.info64->kernel_start);
@@ -257,8 +268,6 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     BOOT_INFO32 *ib = (BOOT_INFO32 *)ib_addr;
     BOOT_INFO64 *ib64 = (BOOT_INFO64 *)ib64_addr;
 
-
-    KernelPML4 = PML4_base;
     qemu_debug_print("[paging] loading CR3\n");
     enable_paging(KernelPML4);
     qemu_debug_print("[paging] CR3 loaded\n");
