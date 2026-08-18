@@ -24,109 +24,6 @@ typedef struct {
 
 int GbPageSupport = 0;
 
-u64 alloc_pages(u64 pages) {
-    if (pages == 0) {
-        return 0;
-    }
-    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
-    u8 *region = (u8 *)alloc.PhysicalStart;
-    for (u64 i = 0; i < (pages << 12); i++) {
-        region[i] = 0;
-    }
-    return alloc.PhysicalStart;
-}
-
-void free_pages(u64 address, u64 pages) {
-    EFI_MEMORY_DESCRIPTOR free = {0, address, address, pages, 0};
-    free_frame(free);
-}
-
-void flush_pages(u64 virtual_address, u64 pages) {
-    u64 virtual_end = virtual_address + (4096 * pages);
-
-    while (virtual_address < virtual_end)
-    {
-        asm volatile("invlpg (%0)" :: "r"(virtual_address) : "memory");
-        virtual_address += 4096;
-    }
-}
-
-void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
-    if (PML4 == 0 || pages == 0)
-        return;
-
-    u64 virtual_end = virtual_address + (4096 * pages);
-    while (virtual_address < virtual_end) {
-        u64 size = virtual_end - virtual_address;
-        int mb_enable = (virtual_address & 0x1fffff) | (physical_address & 0x1fffff);
-        int gb_enable = (virtual_address & 0x3fffffff) | (physical_address & 0x3fffffff);
-        u64 gb_count = size / 0x40000000;
-        u64 mb_count = size / 0x200000;
-        u64 kb_count = pages;
-        int pt_index = (virtual_address >> 12) & 511;
-        int pd_index = (virtual_address >> 21) & 511;
-        int pdpt_index = (virtual_address >> 30) & 511;
-        int pml4_index = (virtual_address >> 39) & 511;
-        if (PML4[pml4_index] == 0) {
-            PML4[pml4_index] = alloc_pages(1) | (attributes & 0x07); // alloc pages zero intiallizes
-        }
-        u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
-        if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
-            if ((PDPT[pdpt_index] & 0x80) == 0 && (PDPT[pdpt_index] & 1) == 1) {
-                free_pages(((PDPT[pdpt_index] >> 12) << 12), 1);
-            }
-            if ((gb_count + pdpt_index) >= 512) {
-                gb_count = 512 - pdpt_index;
-            }
-            for (u64 i = 0; i < gb_count; i++) {
-                PDPT[pdpt_index+i] = physical_address | (attributes | 0x80);
-                physical_address += 0x40000000;
-                virtual_address += 0x40000000;
-                pages -= 262144;
-            }
-        } else {
-            if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) != 0) {
-                PDPT[pdpt_index] = alloc_pages(1) | (attributes & 0x07);
-            }
-            u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
-            if (mb_enable == 0 && mb_count > 0) {
-                if ((PD[pd_index] & 0x80) == 0 && (PD[pd_index] & 1) == 1) {
-                    free_pages(((PD[pd_index] >> 12) << 12), 1);
-                }
-                if ((mb_count + pd_index) >= 512) {
-                    mb_count = 512 - pd_index;
-                }
-                for (u64 i = 0; i < mb_count; i++) {
-                    PD[pd_index+i] = physical_address | (attributes | 0x80);
-                    physical_address += 0x200000;
-                    virtual_address += 0x200000;
-                    pages -= 512;
-                }
-            } else {
-                if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) != 0) {
-                    PD[pd_index] = alloc_pages(1) | (attributes & 0x07);
-                }
-                u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
-                if ((kb_count + pt_index) >= 512) {
-                    kb_count = 512 - pt_index;
-                }
-                for (u64 i = 0; i < kb_count; i++) {
-                    PT[pt_index+i] = physical_address | attributes;
-                    physical_address += 4096;
-                    virtual_address += 4096;
-                    pages--;
-                }
-            }
-        }
-    }
-}
-
-
-void destroy_mapping(u64 virtual_address, u64 pages, u64 *PML4) {
-
-
-}
-
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     PAGING_LOOKUP_DESCRIPTOR ret = {0};
     if (PML4 == 0) {
@@ -180,6 +77,242 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     }
 
 }
+
+
+u64 alloc_pages(u64 pages) {
+    if (pages == 0) {
+        return 0;
+    }
+    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
+    u8 *region = (u8 *)alloc.PhysicalStart;
+    for (u64 i = 0; i < (pages << 12); i++) {
+        region[i] = 0;
+    }
+    return alloc.PhysicalStart;
+}
+
+void free_pages(u64 address, u64 pages) {
+    EFI_MEMORY_DESCRIPTOR free = {0, address, address, pages, 0};
+    free_frame(free);
+}
+
+void flush_pages(u64 virtual_address, u64 pages) {
+    u64 virtual_end = virtual_address + (4096 * pages);
+
+    while (virtual_address < virtual_end)
+    {
+        asm volatile("invlpg (%0)" :: "r"(virtual_address) : "memory");
+        virtual_address += 4096;
+    }
+}
+
+void free_pdpt(const u64 *PDPT) {
+    if (PDPT == 0)
+        return;
+
+    if (!(*PDPT & 0x80) && (*PDPT & 1)) {
+        u64 *PD = (u64 *)(*PDPT & ~0xFFFULL);
+        for (int i = 0; i < 512; i++) {
+            if (!(PD[i] & 0x80) && (PD[i] & 1)) {
+                free_pages((PD[i] & ~0xFFFULL), 1);
+            } else {
+                PD[i] = 0;
+            }
+        }
+        free_pages((u64)PD, 1);
+    } 
+} 
+
+static u64 find_address(u64 pt_index, u64 pd_index, u64 pdpt_index, u64 pml4_index) {
+    u64 virtual_address =
+            ((u64)(pml4_index & 0x1FF) << 39) |
+          ((u64)(pdpt_index & 0x1FF) << 30) |
+          ((u64)(pd_index & 0x1FF) << 21) |
+          ((u64)(pt_index & 0x1FF) << 12);
+
+    if (virtual_address & (1ULL << 47))
+      virtual_address |= 0xFFFF000000000000ULL;
+
+    return virtual_address;
+}
+
+void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4) {
+    if (PML4 == 0 || pages == 0)
+        return;
+
+    u64 virtual_end = virtual_address + (4096 * pages);
+    while (virtual_address < virtual_end) {
+        u64 size = virtual_end - virtual_address;
+        int mb_enable = (virtual_address & 0x1fffff) | (physical_address & 0x1fffff);
+        int gb_enable = (virtual_address & 0x3fffffff) | (physical_address & 0x3fffffff);
+        u64 gb_count = size / 0x40000000;
+        u64 mb_count = size / 0x200000;
+        u64 kb_count = pages;
+        int pt_index = (virtual_address >> 12) & 511;
+        int pd_index = (virtual_address >> 21) & 511;
+        int pdpt_index = (virtual_address >> 30) & 511;
+        int pml4_index = (virtual_address >> 39) & 511;
+        if (PML4[pml4_index] == 0) {
+            PML4[pml4_index] = alloc_pages(1) | (attributes & 0x07); // alloc pages zero intiallizes
+        }
+        u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
+        if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
+            if ((gb_count + pdpt_index) >= 512) {
+                gb_count = 512 - pdpt_index;
+            }
+            for (u64 i = 0; i < gb_count; i++) {
+                if ((PDPT[pdpt_index+i] & 0x80) == 0 && (PDPT[pdpt_index+i] & 1) == 1) {
+                    free_pdpt(&PDPT[pdpt_index+i]);
+                }
+                PDPT[pdpt_index+i] = physical_address | (attributes | 0x80);
+                physical_address += 0x40000000;
+                virtual_address += 0x40000000;
+                pages -= 262144;
+            }
+        } else {
+            if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) != 0) {
+                PDPT[pdpt_index] = alloc_pages(1) | (attributes & 0x07);
+            }
+            u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
+            if (mb_enable == 0 && mb_count > 0) {
+                if ((mb_count + pd_index) >= 512) {
+                    mb_count = 512 - pd_index;
+                }
+                for (u64 i = 0; i < mb_count; i++) {
+                    if ((PD[pd_index+i] & 0x80) == 0 && (PD[pd_index+i] & 1) == 1) {
+                        free_pages(((PD[pd_index+i] >> 12) << 12), 1);
+                    }
+                    PD[pd_index+i] = physical_address | (attributes | 0x80);
+                    physical_address += 0x200000;
+                    virtual_address += 0x200000;
+                    pages -= 512;
+                }
+            } else {
+                if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) != 0) {
+                    PD[pd_index] = alloc_pages(1) | (attributes & 0x07);
+                }
+                u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
+                if ((kb_count + pt_index) >= 512) {
+                    kb_count = 512 - pt_index;
+                }
+                for (u64 i = 0; i < kb_count; i++) {
+                    PT[pt_index+i] = physical_address | attributes;
+                    physical_address += 4096;
+                    virtual_address += 4096;
+                    pages--;
+                }
+            }
+        }
+    }
+}
+
+
+void destroy_mapping(u64 virtual_address, u64 pages, u64 *PML4) {
+    if (PML4 == 0 || pages == 0)
+        return;
+
+    u64 virtual_end = virtual_address + (4096 * pages);
+    while (virtual_address < virtual_end) {
+        u64 size = virtual_end - virtual_address;
+        int mb_enable = virtual_address & 0x1fffff;
+        int gb_enable = virtual_address & 0x3fffffff;
+        u64 gb_count = size / 0x40000000;
+        u64 mb_count = size / 0x200000;
+        u64 kb_count = pages;
+        int pt_index = (virtual_address >> 12) & 511;
+        int pd_index = (virtual_address >> 21) & 511;
+        int pdpt_index = (virtual_address >> 30) & 511;
+        int pml4_index = (virtual_address >> 39) & 511;
+        if (PML4[pml4_index] == 0) 
+            return;
+
+        u64 *PDPT = (u64 *)(PML4[pml4_index] & ~0xFFFULL);
+        if (PDPT[pdpt_index] == 0)
+            return;
+        if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
+            if ((gb_count + pdpt_index) >= 512) {
+                gb_count = 512 - pdpt_index;
+            }
+            for (u64 i = 0; i < gb_count; i++) {
+                if ((PDPT[pdpt_index+i] & 0x80) == 0 && (PDPT[pdpt_index+i] & 1) == 1) {
+                    free_pdpt(&PDPT[pdpt_index+i]);
+                }
+                PDPT[pdpt_index+i] = 0;
+                virtual_address += 0x40000000;
+                pages -= 262144;
+            }
+        } else {
+            if (PDPT[pdpt_index] == 0) {
+                return;
+            } else if ((PDPT[pdpt_index] & 0x80) && (gb_enable != 0 || pages < 262144)) {
+                u64 align = 0;
+                u64 hphys = PDPT[pdpt_index] & ~0xFFFULL;
+                u64 hvirt = find_address(0, 0, pdpt_index, pml4_index);
+                PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(hvirt, PML4);
+                u64 offset = virtual_address & ((1ULL << 30) - 1);
+                u64 physical_address = hphys + offset;
+                if (hvirt < virtual_address) {
+                    align = ((virtual_address - hvirt) >> 12);
+                    create_mapping(hvirt, hphys, align, lookup.attributes, PML4);
+                }
+                u64 available = 262144 - align;
+                u64 pages_here = pages < available ? pages : available;
+                u64 suffix = available - pages_here;
+                create_mapping(virtual_address, physical_address, pages_here, 
+                lookup.attributes, PML4);
+                create_mapping((virtual_address+(pages_here<<12)), (physical_address+(pages_here<<12)),
+                suffix, lookup.attributes, PML4);
+            }
+            u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
+            if (mb_enable == 0 && mb_count > 0) {
+                if ((mb_count + pd_index) >= 512) {
+                    mb_count = 512 - pd_index;
+                }
+                for (u64 i = 0; i < mb_count; i++) {
+                    if ((PD[pd_index+i] & 0x80) == 0 && (PD[pd_index+i] & 1) == 1) {
+                        free_pages(((PD[pd_index+i] >> 12) << 12), 1); 
+                    }
+                    PD[pd_index+i] = 0;
+                    virtual_address += 0x200000;
+                    pages -= 512;
+                }
+            } else {
+                if (PD[pd_index] == 0) {
+                    return;
+                } else if ((PD[pd_index] & 0x80) && (mb_enable != 0 || pages < 512)) {
+                    u64 align = 0;
+                    u64 hphys = PD[pd_index] & ~0xFFFULL;
+                    u64 hvirt = find_address(0, pd_index, pdpt_index, pml4_index);
+                    PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(hvirt, PML4);
+                    u64 offset = virtual_address & ((1ULL << 21) - 1);
+                    u64 physical_address = hphys + offset;
+                    if (hvirt < virtual_address) {
+                        align = ((virtual_address - hvirt) >> 12);
+                        create_mapping(hvirt, hphys, align, lookup.attributes, PML4);
+                    }
+                    u64 available = 512 - align;
+                    u64 pages_here = pages < available ? pages : available;
+                    u64 suffix = available - pages_here;
+
+                    create_mapping(virtual_address, physical_address, pages_here, 
+                    lookup.attributes, PML4);
+                    create_mapping((virtual_address+(pages_here<<12)), (physical_address+(pages_here<<12)),
+                    suffix, lookup.attributes, PML4);
+                }
+                u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
+                if ((kb_count + pt_index) >= 512) {
+                    kb_count = 512 - pt_index;
+                }
+                for (u64 i = 0; i < kb_count; i++) {
+                    PT[pt_index+i] = 0;
+                    virtual_address += 4096;
+                    pages--;
+                }
+            }
+        }
+    }
+}
+
 
 typedef struct {
     BOOT_INFO64 *info64;
