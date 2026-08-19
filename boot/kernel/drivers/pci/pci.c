@@ -474,14 +474,21 @@ int pci_read_bar(pci_address_t address, u8 bar_index, int probe_size,
     u16 command = pci_read16(address, 0x04);
     pci_write16(address, 0x04,
                 command & ~(PCI_COMMAND_IO_SPACE | PCI_COMMAND_MEMORY_SPACE));
+
+    /* A 64-bit BAR is one register split across two config dwords.  Both
+       halves must contain all ones before either half of the size mask is
+       read. */
     pci_write32(address, offset, 0xffffffff);
+    if (bar->is_64bit)
+        pci_write32(address, offset + 4, 0xffffffff);
+
     u32 size_low = pci_read32(address, offset);
     u32 size_high = 0;
-    if (bar->is_64bit) {
-        pci_write32(address, offset + 4, 0xffffffff);
+    if (bar->is_64bit)
         size_high = pci_read32(address, offset + 4);
+
+    if (bar->is_64bit)
         pci_write32(address, offset + 4, high);
-    }
     pci_write32(address, offset, low);
     pci_write16(address, 0x04, command);
 

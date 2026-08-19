@@ -1,12 +1,33 @@
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "drivers/display/vga.h"
 #include "x86-64/lowlevel.h"
 #include "x86-64/paging.h"
+#include "drivers/pci/path.h"
+#include "drivers/pci/pci.h"
+#include "drivers/pci/pci_names.h"
 
 
-extern u64 xhci_base;
+#define TIMEOUT 1000000
 
-typedef struct __attribute__((packed)) {
+#define XHCI_CMD_HCRST (1u << 1)
+#define XHCI_STS_HCH (1u << 0)
+#define XHCI_STS_CNR (1u << 11)
+
+typedef struct {
+    bool found;
+    pci_address_t pci_address;
+    pci_bar_t bar;
+} xhci_controller_t;
+
+
+u64 xhci_base = 0;
+
+xhci_controller_t xhci_controller = {0};
+
+
+
+typedef struct {
     uint8_t  caplength;
     uint8_t  reserved;
     uint16_t hciversion;
@@ -24,7 +45,7 @@ typedef struct __attribute__((packed)) {
 } xhci_cap_regs;
 
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint32_t usbcmd;        
     uint32_t usbsts;        
     uint32_t pagesize;      
@@ -37,7 +58,89 @@ typedef struct __attribute__((packed)) {
     uint32_t rsvd2[241];
 } xhci_op_regs;
 
-void xchi_init(void) {
+
+static void xhci_find_callback(const PCI_ret *device, void *context) {
+    xhci_controller_t *controller = context;
+
+    if (controller->found ||
+        device->PCI_status != PCI_STATUS_SUCCESS)
+        return;
+
+
+    if (device->common.class_code != 0x0C ||
+        device->common.subclass != 0x03 ||
+        device->common.prog_if != 0x30)
+        return;
+
+
+    controller->pci_address = (pci_address_t) {
+        .segment  = device->Segment,
+        .bus      = device->Bus,
+        .device   = device->Device,
+        .function = device->Function,
+    };
+
+    controller->found = true;
+
+}
+
+
+bool xhci_discover(xhci_controller_t *controller) {
+    *controller = (xhci_controller_t){0};
+
+    pci_enumerate(xhci_find_callback, controller);
+
+    if (!controller->found) {
+        printf("xHCI: no controller found\n");
+        return false;
+    }
+
+    printf("xHCI found at %u:%u:%u.%u\n",
+            (unsigned int)controller->pci_address.segment,
+            (unsigned int)controller->pci_address.bus,
+            (unsigned int)controller->pci_address.device,
+            (unsigned int)controller->pci_address.function);
+
+    return true;
+}
+
+
+
+
+static bool xhci_wait_clear(volatile u32 *reg, u32 mask) {
+    u32 attempts = TIMEOUT;
+
+    while (attempts--) {
+        if ((*reg & mask) == 0)
+            return true;
+
+        __asm__ __volatile__("pause");
+    }
+
+    return false;
+}
+
+
+
+static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
+    u32 attempts = TIMEOUT;
+
+    while (attempts--) {
+        if ((*reg & mask) == mask)
+            return true;
+
+        __asm__ __volatile__("pause");
+    }
+
+    return false;
+}
+
+
+
+
+
+
+int xhci_reset(void) {
     volatile xhci_cap_regs *xhci_cap;
     xhci_cap = (volatile xhci_cap_regs *)xhci_base;
 
@@ -56,26 +159,72 @@ void xchi_init(void) {
     volatile xhci_op_regs *op = (volatile xhci_op_regs *)
           (xhci_base + xhci_cap->caplength);
 
-    volatile uint32_t xhci_doorbells = (volatile uint32_t *)
-            (xhci_base + xhci_cap->dboff);
-
-    volatile uint8_t xhci_runtime = (volatile uint8_t *)
-            (xhci_base + xhci_cap->rtsoff);
-
-    
-    while (op->usbsts & (1 << 11));
+    if (!xhci_wait_clear(&op->usbsts, XHCI_STS_CNR)) {
+        printf("xHCI: controller stayed not ready\n");
+        return 1;
+    }
 
     op->usbcmd &= ~1;
 
-    while (!(op->usbsts & 1));
+    if (!xhci_wait_set(&op->usbsts, XHCI_STS_HCH)) {
+        printf("xHCI: controller failed to halt\n");
+        return 1;
+    }
 
     op->usbcmd |= (1 << 1);
 
-    while (op->usbcmd & (1 << 1));
+    if (!xhci_wait_clear(&op->usbcmd, XHCI_CMD_HCRST)) {
+        printf("xHCI: controller reset timed out\n");
+        return 1;
+    }
 
-    while (op->usbsts & (1 << 11));
+    if (!xhci_wait_clear(&op->usbsts, XHCI_STS_CNR)) {
+        printf("xHCI: controller stayed not ready after reset\n");
+        return 1;
+    }
 
-    
+    printf("xHCI: controller halted and reset\n");
 
+    return 0;
+}
+
+
+
+int xhci_init(void) {
+    xhci_controller_t *controller = &xhci_controller;
+
+    bool ret = xhci_discover(controller);
+
+    if (ret == false)
+        return 1;
+
+    if (pci_read_bar(controller->pci_address, 0, 1, &controller->bar) != PCI_STATUS_SUCCESS) {
+        printf("xHCI: failed to read BAR0\n");
+        return 1;
+    }
+
+    if (controller->bar.type != PCI_BAR_MEMORY ||
+        controller->bar.address == 0 || controller->bar.size == 0) {
+        printf("xHCI: invalid BAR0\n");
+        return 1;
+    }
+
+    u64 page_offset = controller->bar.address & 0xfffULL;
+    u64 pages = (page_offset + controller->bar.size + 0xfffULL) >> 12;
+
+    printf("xHCI MMIO physical address: 0x%lx\n", controller->bar.address);
+
+    u64 physical = controller->bar.address & ~0xfffULL;
+    u64 virtual = BASE + physical;
+
+    printf("Mapping xHCI...\n");
+
+    create_mapping(virtual, physical, pages, 0x13, KernelPML4);
+
+    flush_pages(virtual, pages);
+
+    xhci_base = virtual + page_offset;
+
+    return xhci_reset();
     
 }

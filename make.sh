@@ -37,6 +37,7 @@ gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/idt.c -o idt.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/handlers.c -o handlers.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/apic.c -o apic.o
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/xhci.c -o xhci.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o

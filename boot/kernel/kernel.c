@@ -16,6 +16,7 @@
 #include "drivers/pci/pci_names.h"
 #include "drivers/dev.h"
 #include "boot_info.h"
+#include "drivers/xhci.h"
 
 #define RGB 0
 #define BGR 1
@@ -292,7 +293,14 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
                (unsigned int)boot_path.DeviceCount);
     }
 
-    cpu_info();
+    int xhci_status = xhci_init();
+
+    if (xhci_status == 1) {
+        printf("xHCI initialization failed\n");
+    } else if (xhci_status == 0) {
+        printf("xHCI initialization successful\n");
+    }
+
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
          info64->kernel_start, info64->kernel_entry, info64->kernel_end, info64->framebuffer_base, APIC_base, IO_APIC);
     printf("the clock:");
