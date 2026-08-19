@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "drivers/display/vga.h"
 #include "x86-64/acpi.h"
@@ -6,6 +7,8 @@
 #include "x86-64/spinlock.h"
 #include "drivers/pci/pci.h"
 #include "drivers/pci/path.h"
+#include "drivers/pci/pci_names.h"
+#include "drivers/dev.h"
 
 #define PCI_MAX_ECAM_REGIONS 32
 #define PCI_CONFIG_LEGACY_SIZE 256
@@ -34,6 +37,9 @@ typedef struct {
 
 u8 Express_enabled = 0;
 int BusCount = 0;
+
+device_vendors devices = {0};
+
 
 static pci_ecam_region_t ecam_regions[PCI_MAX_ECAM_REGIONS];
 static u32 ecam_region_count;
@@ -272,6 +278,98 @@ int pci_enumerate(pci_enumerate_callback_t callback, void *context) {
             count += enumerate_bus(0, (u8)bus, callback, context);
     }
     return count;
+}
+
+void print_pci_device(const PCI_ret *device, void *context) {
+    (void)context;
+
+    if (device->PCI_status != PCI_STATUS_SUCCESS)
+          return;
+
+    const char *vendor =
+          PCI_vendor_name(device->vendor_id);
+
+    const char *device_name =
+          PCI_device_name(device->vendor_id, device->device_id);
+
+    printf("%u:%u:%u.%u  0x%ux:0x%ux\n",
+             (unsigned int)device->Segment,
+             (unsigned int)device->Bus,
+             (unsigned int)device->Device,
+             (unsigned int)device->Function,
+             (unsigned int)device->vendor_id,
+             (unsigned int)device->device_id);
+
+    printf("    vendor: %s\n", vendor);
+    printf("    device: %s\n", device_name);
+
+}
+
+void pci_print_devices(void) {
+    int count = pci_enumerate(print_pci_device, 0);
+    printf("%d PCI devices found\n", count);
+}
+
+
+
+void detect_pci_device(const PCI_ret *device, void *context) {
+      (void)context;
+
+      if (device->PCI_status != PCI_STATUS_SUCCESS)
+          return;
+
+      u8 class    = device->common.class_code;
+      u8 subclass = device->common.subclass;
+      u8 prog_if  = device->common.prog_if;
+
+      
+      if (class == 0x01 && subclass == 0x06 && prog_if == 0x01) {
+          printf("AHCI controller at %u:%u:%u.%u\n",
+                 device->Segment, device->Bus,
+                 device->Device, device->Function);
+                devices.AHCI = true;
+       }
+
+    
+      else if (class == 0x01 && subclass == 0x01) {
+          printf("IDE/ATA controller at %u:%u:%u.%u\n",
+                 device->Segment, device->Bus,
+                 device->Device, device->Function);
+                 devices.ATA = true;
+      }
+
+
+      else if (class == 0x01 && subclass == 0x08 && prog_if == 0x02) {
+          printf("NVMe controller at %u:%u:%u.%u\n",
+                 device->Segment, device->Bus,
+                 device->Device, device->Function);
+                 devices.NVMe = true;
+      }
+
+      else if (class == 0x0C && subclass == 0x03) {
+          if (prog_if == 0x00) {
+              printf("UHCI USB controller\n");
+              devices.USB = UHCI;
+          }
+          else if (prog_if == 0x10) {
+              printf("OHCI USB controller\n");
+              devices.USB = OHCI;
+          }
+          else if (prog_if == 0x20) {
+              printf("EHCI USB 2 controller\n");
+              devices.USB = EHCI;
+          }
+          else if (prog_if == 0x30) {
+              printf("xHCI USB controller\n");
+              devices.USB = xHCI;
+          }
+          else
+              printf("Unknown USB controller, prog-if=0x%ux\n", prog_if);
+      }
+}
+
+void pci_detect_devices(void) {
+    pci_enumerate(detect_pci_device, 0);
 }
 
 int PCI_list(void) {

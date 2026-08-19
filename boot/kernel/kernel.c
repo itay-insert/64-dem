@@ -14,6 +14,7 @@
 #include "x86-64/apic.h"
 #include "drivers/pci/pci.h"
 #include "drivers/pci/pci_names.h"
+#include "drivers/dev.h"
 #include "boot_info.h"
 
 #define RGB 0
@@ -262,6 +263,8 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
     printf("interrupts enabled!\n");
 
     pci_init();
+
+    pci_detect_devices();
 
     PCI_PATH_RET boot_path =
         Discover_BootDevice(info64->device_path, info32->device_path_size);

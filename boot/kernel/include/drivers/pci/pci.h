@@ -2,6 +2,7 @@
 #define PCI_H
 
 #include "uint_definitions.h"
+#include "drivers/dev.h"
 
 #define PCI_STATUS_SUCCESS              0
 #define PCI_STATUS_NOT_PRESENT          1
@@ -140,6 +141,7 @@ typedef struct {
     PCI_ret Devices[PCI_PATH_MAX_DEVICES];
 } PCI_PATH_RET;
 
+
 typedef void (*pci_enumerate_callback_t)(const PCI_ret *device, void *context);
 
 /* Segment-aware configuration access used by new drivers. */
@@ -171,6 +173,9 @@ int pci_read_bar(pci_address_t address, u8 bar_index, int probe_size,
                  pci_bar_t *bar);
 
 PCI_PATH_RET Discover_BootDevice(u64 path_addr, int size);
+void print_pci_device(const PCI_ret *device, void *context);
+void pci_print_devices(void);
+void pci_detect_devices(void);
 int PCI_list(void);
 void pci_init(void);
 
