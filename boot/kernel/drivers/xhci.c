@@ -228,10 +228,19 @@ int allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
 int xhci_init(void) {
     xhci_controller_t *controller = &xhci_controller;
 
-    bool ret = xhci_discover(controller);
-
-    if (ret == false)
+    if (!xhci_discover(controller))
         return 1;
+
+    if (pci_enable_device(controller->pci_address) != PCI_STATUS_SUCCESS) {
+        printf("xHCI: failed to enable device\n");
+        return 1;
+    }
+
+    if (pci_enable_bus_mastering(controller->pci_address) != PCI_STATUS_SUCCESS) {
+        printf("xHCI: failed to enable bus mastering\n");
+        return 1;
+    }
+
 
     if (pci_read_bar(controller->pci_address, 0, 1, &controller->bar) != PCI_STATUS_SUCCESS) {
         printf("xHCI: failed to read BAR0\n");
@@ -265,7 +274,7 @@ int xhci_init(void) {
     if (rests != 0)
         return 1;
 
-
+   
     volatile xhci_cap_regs *cap;
     cap = (volatile xhci_cap_regs *)xhci_base;
 
@@ -335,5 +344,13 @@ int xhci_init(void) {
 
     op->config = (op->config & ~0xffu) | enabled_slots;
 
+    u32 hccparams1 = cap->hccparams1;
+    u32 xecp = (hccparams1 >> 16) & 0xFFFF;
+
+    volatile u32 *ext_cap =
+        (volatile u32 *)(xhci_base + ((u64)xecp << 2));
+
+
+        
     return 0;
 }
