@@ -3,7 +3,14 @@
 
 #include "uint_definitions.h"
 
-u64 allocate_dma(u64 size);
+typedef struct {
+    int status;
+    u64 SizeInPages;
+    u64 virtual_address;
+    u64 physical_address;
+} dma_ret;
+
+dma_ret allocate_dma(u64 size);
 void free_dma(u64 base);
 
 #endif

@@ -9,11 +9,16 @@
 
 
 
-u64 allocate_dma(u64 size) {
+dma_ret allocate_dma(u64 size) {
+    dma_ret ret = {0};
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
+    ret.SizeInPages = pages;
     if (dma_header == NULL) {
         EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
-        if (allocation.Attribute != 0) return 1;
+        if (allocation.Attribute != 0) {
+            ret.status = 1;
+            return ret;
+        }
         dma_top += 0x1000;
         dma_header = (dma_entry *)DMA_POOL;
         dma_header->status = Header;
@@ -29,7 +34,10 @@ u64 allocate_dma(u64 size) {
         dma_start->status = Used;
         dma_latest = dma_start;
         EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
-        if (frame.Attribute != 0) return 1;
+        if (frame.Attribute != 0) {
+            ret.status = 1;
+            return ret;
+        }
         frame.VirtualStart = DMA_BASE;
         create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, KernelPML4);
         flush_pages(DMA_BASE, pages);
@@ -42,7 +50,11 @@ u64 allocate_dma(u64 size) {
         header->SizeInPages = pages;
         header->home_entry = dma_start;
 
-        return frame.VirtualStart;
+        ret.status = 0;
+        ret.physical_address = frame.PhysicalStart;
+        ret.virtual_address = frame.VirtualStart;
+
+        return ret;
     }
 
     u64 free_pages = 0;
@@ -75,7 +87,10 @@ u64 allocate_dma(u64 size) {
         while (entries_limit == NoEntriesLeft) {
             if (entry->next_entry == NULL) {
                 EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, 1);
-                if (allocation.Attribute != 0) return 1;
+                if (allocation.Attribute != 0) {
+                    ret.status = 1;
+                    return ret;
+                }
                 dma_entry *new_page = (dma_entry *)allocation.VirtualStart;
                 dma_top += 0x1000;
                 metadata_pages++;
@@ -121,7 +136,10 @@ u64 allocate_dma(u64 size) {
     
 
     EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
-    if (allocation.Attribute != 0) return 1;
+    if (allocation.Attribute != 0) {
+        ret.status = 1;
+        return ret;
+    }
     allocation.VirtualStart = free_base;
     create_mapping(free_base, allocation.PhysicalStart, pages, 0x03, KernelPML4);
     flush_pages(free_base, pages);
@@ -133,7 +151,11 @@ u64 allocate_dma(u64 size) {
     header->SizeInPages = pages;
     header->home_entry = free_entry;
 
-    return allocation.VirtualStart;
+    ret.status = 0;
+    ret.physical_address = allocation.PhysicalStart;
+    ret.virtual_address = allocation.VirtualStart;
+
+    return ret;
 
 }
 

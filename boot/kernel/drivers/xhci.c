@@ -3,6 +3,7 @@
 #include "drivers/display/vga.h"
 #include "x86-64/lowlevel.h"
 #include "x86-64/paging.h"
+#include "x86-64/memory/memory.h"
 #include "drivers/pci/path.h"
 #include "drivers/pci/pci.h"
 #include "drivers/pci/pci_names.h"
@@ -22,6 +23,9 @@ typedef struct {
 
 
 u64 xhci_base = 0;
+u64 *scratch_pad = 0;
+u64 *dcbaa = 0;
+u64 scratchpad_physical = 0;
 
 xhci_controller_t xhci_controller = {0};
 
@@ -139,7 +143,6 @@ static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
 
 
 
-
 int xhci_reset(void) {
     volatile xhci_cap_regs *xhci_cap;
     xhci_cap = (volatile xhci_cap_regs *)xhci_base;
@@ -189,6 +192,38 @@ int xhci_reset(void) {
 }
 
 
+int allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
+    dma_ret scratchpad = allocate_dma((u64)scratchpad_count * sizeof(u64));
+
+    u64 bytes = scratchpad.SizeInPages * 4096;
+    u64 end = scratchpad.physical_address + bytes;
+
+    if (scratchpad.status != 0 || (!addr_64 && (end < scratchpad.physical_address || end > 0x100000000ULL)))
+        return 1;
+
+
+    scratch_pad = (u64 *)scratchpad.virtual_address;
+    scratchpad_physical = scratchpad.physical_address;
+
+    memset(scratch_pad, 0, (size_t)(scratchpad_count * sizeof(u64)));
+
+    for (u32 i = 0; i < scratchpad_count; i++) {
+        dma_ret buffer = allocate_dma(4096);
+
+        bytes = buffer.SizeInPages * 4096;
+        end = buffer.physical_address + bytes;
+
+        if (buffer.status != 0 || (!addr_64 && (end < buffer.physical_address || end > 0x100000000ULL)))
+         return 1;
+
+        memset((void *)buffer.virtual_address, 0, 4096);
+
+        scratch_pad[i] = buffer.physical_address;
+    }
+
+    return 0;
+}
+
 
 int xhci_init(void) {
     xhci_controller_t *controller = &xhci_controller;
@@ -225,6 +260,80 @@ int xhci_init(void) {
 
     xhci_base = virtual + page_offset;
 
-    return xhci_reset();
+    int rests = xhci_reset();
+
+    if (rests != 0)
+        return 1;
+
+
+    volatile xhci_cap_regs *cap;
+    cap = (volatile xhci_cap_regs *)xhci_base;
+
+    volatile xhci_op_regs *op = (volatile xhci_op_regs *)
+        (xhci_base + cap->caplength);
+
+    u32 hcs1 = cap->hcsparams1;
+    u32 hcs2 = cap->hcsparams2;
+    u32 hcc1 = cap->hccparams1;
+
+    u8 max_slots = hcs1 & 0xff;
+    u16 max_intrs = (hcs1 >> 8) & 0x7ff;
+    u8 max_ports = (hcs1 >> 24) & 0xff;
+    bool context_64 = (hcc1 & (1u << 2)) != 0; // CSZ
+    bool addr_64 = (hcc1 & 1u) != 0; // AC64
+
+
+    if (!(op->pagesize & 1)) {
+        printf("xHCI: 4 KiB pages unsupported\n");
+        return 1;
+    }
+
+    u32 hi = (hcs2 >> 21) & 0x1f;
+    u32 lo = (hcs2 >> 27) & 0x1f;
+    u32 scratchpad_count = (hi << 5) | lo;
+
+    if (scratchpad_count > 0) {
+        int alsts = allocate_scracthpad(scratchpad_count, addr_64);
+
+        if (alsts != 0) {
+            printf("xHCI: failed to allocate scracthpad\n");
+            return 1;
+        }
+
+        printf("xHCI: allocated scracthpad\n");
+
+    }
+
+    u8 enabled_slots = max_slots < 8 ? max_slots : 8;
+    u64 dcbaa_size = ((u64)enabled_slots + 1) * sizeof(u64);
+
+    dma_ret dcbaa_array = allocate_dma(dcbaa_size);
+
+    u64 bytes = dcbaa_array.SizeInPages * 4096;
+    u64 end = dcbaa_array.physical_address + bytes;
+
+    if (dcbaa_array.status != 0 || (!addr_64 && (end < dcbaa_array.physical_address || end > 0x100000000ULL))) {
+        printf("xHCI: failed to allocate dcbaa\n");
+        return 1;
+    }
+
+    dcbaa = (u64 *)dcbaa_array.virtual_address;
+
+    memset(dcbaa, 0, dcbaa_size);
     
+    if (scratchpad_count > 0)
+        dcbaa[0] = scratchpad_physical;
+    else
+        dcbaa[0] = 0;
+
+
+    printf("xHCI: allocated dcbaa\n");
+
+    op->dcbaap = dcbaa_array.physical_address;
+
+    printf("xHCI: programmed the DCBAAP\n");
+
+    op->config = (op->config & ~0xffu) | enabled_slots;
+
+    return 0;
 }
