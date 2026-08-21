@@ -15,6 +15,12 @@
 #define XHCI_STS_HCH (1u << 0)
 #define XHCI_STS_CNR (1u << 11)
 
+
+#define XHCI_EXT_CAP_LEGACY 1
+#define XHCI_LEGACY_BIOS_OWNED (1u << 16)
+#define XHCI_LEGACY_OS_OWNED (1u << 24)
+
+
 typedef struct {
     bool found;
     pci_address_t pci_address;
@@ -222,6 +228,30 @@ int allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
     }
 
     return 0;
+}
+
+static volatile u32 *xhci_find_extended_capability(volatile xhci_cap_regs *cap, 
+u8 wanted_id) {
+    u32 offset = (cap->hccparams1 >> 16) & 0xFFFF;
+
+    while (offset != 0) {
+        volatile u32 *entry = 
+            (volatile u32 *)(xhci_base + (u64)(offset << 2));
+
+        u32 header = entry[0];
+        u8 id = header & 0xff;
+        u8 next = (header >> 8) & 0xff;
+
+        if (id == wanted_id)
+            return entry;
+
+        if (next == 0)
+            break;
+
+        offset += next;
+
+    }
+    return NULL;
 }
 
 
