@@ -1,2 +1,3 @@
 kernel.asm
 BOOTX64.asm
+bios-disk.img
