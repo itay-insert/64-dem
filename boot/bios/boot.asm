@@ -94,7 +94,7 @@ _start:
         mov cx, 1
         call _bios_disk_services
         mov dl, [boot_drive] ; hope bios didn't destroy it
-        mov si, boot_drive
+        mov si, _disk_services
         jmp 0x1000:0x0000
 
     error:
@@ -170,6 +170,10 @@ _open_root:
 folder db 'BOOT       '
 file db 'STAGE2  BIN'
 
+_disk_services:
+dw _bios_disk_services
+dw _convert_cluster_to_lba
+code_seg dw 0 
 boot_drive db 0
 partition_start dd 0
 sectors_per_cluster db 0

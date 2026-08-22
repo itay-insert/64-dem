@@ -2,7 +2,7 @@
 #include "uint_definitions.h"
 #include "x86-64/lowlevel.h"
 #include "drivers/display/vga.h"
-#include "drivers/rtc.h"
+#include "drivers/timers/rtc.h"
 #include "x86-64/ports.h"
 #include "x86-64/memory/memory.h"
 #include "x86-64/paging.h"

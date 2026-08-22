@@ -20,6 +20,7 @@
 #define XHCI_LEGACY_BIOS_OWNED (1u << 16)
 #define XHCI_LEGACY_OS_OWNED (1u << 24)
 
+#define XHCI_LEGACY_SMI_ENABLES ((1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15))
 
 typedef struct {
     bool found;
@@ -255,6 +256,44 @@ u8 wanted_id) {
 }
 
 
+static bool xhci_take_ownership(volatile xhci_cap_regs *cap) {
+    volatile u32 *legacy = xhci_find_extended_capability(cap, XHCI_EXT_CAP_LEGACY);
+
+    if (legacy == NULL) {
+        printf("xHCI: no legacy ownership capabillity\n");
+        return true;
+    }
+
+    printf("xHCI: USBLEGSUP before ownership request: 0x%ux\n", legacy[0]);
+
+    u32 support = legacy[0]; // legacy[0] represents legacy support
+    support |= XHCI_LEGACY_OS_OWNED;
+    legacy[0] = support;
+
+    printf("xHCI: USBLEGSUP after ownership request: 0x%ux\n", legacy[0]);
+
+    if (!xhci_wait_set(&legacy[0],  XHCI_LEGACY_OS_OWNED)) {
+        printf("xHCI: Ownership take not accepted\n");
+        return false;
+    }
+
+    printf("xHCI: USBLEGSUP after wait set: 0x%ux\n", legacy[0]);
+
+    if  (!xhci_wait_clear(&legacy[0], XHCI_LEGACY_OS_OWNED)) {
+        printf("xHCI: Ownership handoff timeout\n");
+        return false;
+    }
+
+    printf("xHCI: USBLEGSUP after ownership accquired: 0x%ux\n", legacy[0]);
+
+    u32 ctlsts = legacy[1];
+    ctlsts |= XHCI_LEGACY_SMI_ENABLES;
+    legacy[1] = ctlsts;
+
+    printf("xHCI: Ownership accquired from BIOS\n");
+    return true;
+}
+
 int xhci_init(void) {
     xhci_controller_t *controller = &xhci_controller;
 
@@ -298,15 +337,17 @@ int xhci_init(void) {
     flush_pages(virtual, pages);
 
     xhci_base = virtual + page_offset;
-
-    int rests = xhci_reset();
-
-    if (rests != 0)
-        return 1;
-
    
     volatile xhci_cap_regs *cap;
     cap = (volatile xhci_cap_regs *)xhci_base;
+
+    if (!xhci_take_ownership(cap)) 
+        return 1;
+
+    if (xhci_reset() != 0) {
+        printf("xHCI: failed to reset\n");
+        return 1;
+    }
 
     volatile xhci_op_regs *op = (volatile xhci_op_regs *)
         (xhci_base + cap->caplength);
