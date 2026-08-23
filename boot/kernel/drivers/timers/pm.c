@@ -8,4 +8,40 @@
 #define PM_TIMER_FREQUENCY 3579545ULL
 #define PM_TIMER_MASK      0x00ffffffu
 
+#define BYTE 0
+#define WORD 1
+#define DWORD 2
 
+u64 PM_base = 0;
+
+typedef struct {
+    void (*write)(u64, u8, u32);
+    u32 (*read)(u64, u8);
+} __attribute__((packed)) pmctl;
+
+void write_mmio(u64 offset, u8 type, u32 value) {
+    switch (type)
+    {
+        case BYTE:
+            u8 val = (u8)value;
+            volatile u8 *ptr = (u8 *)(PM_base + offset);
+            break;
+
+        case WORD:
+            u16 val = (u16)value;
+            volatile u16 *ptr = (u16 *)(PM_base + offset);
+            break;
+
+        default:
+            u32 val = value;
+            volatile u32 *ptr = (u32 *)(PM_base + offset);
+            break;
+    }
+
+    *ptr = val;     
+}
+
+
+int pm_init(PM_ret desc) {
+
+} 
