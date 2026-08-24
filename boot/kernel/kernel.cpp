@@ -17,6 +17,7 @@
 #include "drivers/dev.h"
 #include "boot_info.h"
 #include "drivers/xhci.h"
+#include "drivers/timers/timer.hpp"
 
 
 #define RGB 0
@@ -263,6 +264,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                boot_path.PCI_status,
                (unsigned int)boot_path.DeviceCount);
     }
+
+    Timer timer;
 
     int xhci_status = xhci_init();
 
