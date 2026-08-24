@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include "x86-64/paging.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 #define Free 0
 #define Used 1
@@ -34,5 +37,7 @@ extern u64 dma_top;
 
 dma_entry *find_header(dma_entry *entry);
 u64 find_descriptorBase(u64 Base);
+
+KERNEL_EXTERN_C_END
 
 #endif

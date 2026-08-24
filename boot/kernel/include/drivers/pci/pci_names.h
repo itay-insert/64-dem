@@ -2,6 +2,9 @@
 #define PCI_NAMES_H
 
 #include "uint_definitions.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 typedef struct {
     u16 vendor_id;
@@ -22,5 +25,7 @@ extern const u64 pci_device_name_count;
 
 const char *PCI_vendor_name(u16 vendor_id);
 const char *PCI_device_name(u16 vendor_id, u16 device_id);
+
+KERNEL_EXTERN_C_END
 
 #endif

@@ -4,6 +4,10 @@
 #ifndef RTC_H
 #define RTC_H
 
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
+
 u8 rtc_read(u8 rtc_reg);
 
 typedef struct {
@@ -13,4 +17,6 @@ typedef struct {
 
 rtc_data get_dateAndTime(void);
 void clock(void);
+
+KERNEL_EXTERN_C_END
 #endif

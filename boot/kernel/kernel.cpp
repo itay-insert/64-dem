@@ -18,6 +18,7 @@
 #include "boot_info.h"
 #include "drivers/xhci.h"
 
+
 #define RGB 0
 #define BGR 1
 
@@ -31,7 +32,7 @@ u64 APIC_base = 0;
 
 u64 IO_APIC = 0;
 
-void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
+extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     qemu_debug_print("[kernel] entered kernel_main\n");
 
     if (paging_enabled == 0) {
@@ -230,36 +231,6 @@ void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY
 
     APIC_init();
 
-    ACPI_ret ret = ACPI_discovery("FACP");
-
-    const char *types[] = {
-        "MMIO",
-        "Port i/o",
-    };
-
-    if (ret.status == 1) {
-        printf("error ");
-    } else if (ret.status == 0) {
-        printf("PM_address = 0x%lx   ", ret.simple_timer.io_base);
-        printf("PM_type: ");
-        printf(types[ret.simple_timer.code]);
-    
-        printf(" ");
-    }
-
-
-    ret = ACPI_discovery("HPET");
-
-    if (ret.status == 1) {
-        printf("error ");
-    } else if (ret.status == 0) {
-        printf("HPET_address = 0x%lx   ", ret.simple_timer.io_base);
-        printf("HPET_type: ");
-        printf(types[ret.simple_timer.code]);
-
-        printf(" ");
-    }
-    
     enable_interrupts();
     printf("interrupts enabled!\n");
 

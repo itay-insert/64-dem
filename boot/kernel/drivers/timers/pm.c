@@ -19,6 +19,8 @@ typedef struct {
     u32 (*read)(u64, u8);
 } __attribute__((packed)) pmctl;
 
+pmctl PM_functions = {0};
+
 
 void write_mmio(u64 offset, u8 type, u32 value) {
     switch (type) {
@@ -108,6 +110,18 @@ u32 read_io(u64 offset, u8 type) {
 }
 
 
-int pm_init(PM_ret desc) {
-
+void pm_init(PM_ret desc) {
+    if (desc.code == 1) {
+        PM_base = desc.io_base;
+        PM_functions.write = write_io;
+        PM_functions.read = read_io;
+        return;
+    } else if (desc.code == 0) {
+        PM_base = desc.io_base + BASE;
+        create_mapping(PM_base, desc.io_base, 1, 0x13, KernelPML4);
+        flush_pages(PM_base, 1);
+        PM_functions.write = write_mmio;
+        PM_functions.read = read_mmio;
+        return;
+    }
 } 

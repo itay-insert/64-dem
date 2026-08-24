@@ -2,6 +2,9 @@
 #define TSS_H
 
 #include <stdint.h>
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 struct tss64 {
       uint32_t reserved0;
@@ -27,5 +30,6 @@ struct tss64 {
 extern struct tss64 tss;
 void tss_init(void);
 
+KERNEL_EXTERN_C_END
 
 #endif

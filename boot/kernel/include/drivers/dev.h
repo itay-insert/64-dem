@@ -3,7 +3,9 @@
 
 #include <stdbool.h>
 #include "drivers/devdef.h"
+#include "c_compat.h"
 
+KERNEL_EXTERN_C_BEGIN
 
 typedef struct {
     bool ATA;
@@ -14,5 +16,7 @@ typedef struct {
 
 
 extern device_vendors devices;
+
+KERNEL_EXTERN_C_END
 
 #endif

@@ -5,6 +5,10 @@
 #ifndef LOWLEVEL_H
 #define LOWLEVEL_H
 
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
+
 u64 stack_get(void);
 int check_1gb_PageSupport(void);
 void enable_paging(const u64 *PML4);
@@ -30,5 +34,7 @@ u16 MMIO_read16(u64 base, u64 offset);
 void MMIO_write16(u64 base, u64 offset, u16 value);
 u8 MMIO_read8(u64 base, u64 offset);
 void MMIO_write8(u64 base, u64 offset, u8 value);
+
+KERNEL_EXTERN_C_END
 
 #endif

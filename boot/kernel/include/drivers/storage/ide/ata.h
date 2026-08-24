@@ -7,6 +7,9 @@
 #include "drivers/storage/ide/atadef.h"
 
 #include "x86-64/spinlock.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 typedef enum {
     ATA_PROBE_NONE,
@@ -66,5 +69,7 @@ ata_probe_t ata_probe_device(ata_drive_t *drive);
 ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_count);
 void ata_write(ata_drive_t *drive, u64 lba, void *buffer, u8 count);
 void ata_read(ata_drive_t *drive, u64 lba, void *buffer, u8 count);
+
+KERNEL_EXTERN_C_END
 
 #endif

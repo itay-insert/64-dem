@@ -5,6 +5,9 @@
 #include "uint_definitions.h"
 #include "x86-64/efi_memory_types.h"
 #include "boot_info.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 #define fb_virtual 0xffffa00000000000
 #define kernel_virtual 0xffff800000000000
@@ -40,5 +43,6 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4);
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps);
 
+KERNEL_EXTERN_C_END
 
 #endif

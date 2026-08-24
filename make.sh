@@ -12,7 +12,8 @@ nasm -f elf64 kernel/entry.asm -o entry.o
 nasm -f elf64 kernel/x86-64/lowlevel.asm -o lowlevel.o
 nasm -f elf64 kernel/x86-64/cpuid.asm -o cpuid.o
 nasm -f elf64 kernel/x86-64/interrupts.asm -o interrupts.o
-gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/kernel.c -o kernel.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/kernel.cpp -o kernel.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/display/font.c -o font.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/display/vga.c -o vga.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/timers/rtc.c -o rtc.o

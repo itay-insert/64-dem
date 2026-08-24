@@ -2,6 +2,9 @@
 #define DMA_H
 
 #include "uint_definitions.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 typedef struct {
     int status;
@@ -12,5 +15,7 @@ typedef struct {
 
 dma_ret allocate_dma(u64 size);
 void free_dma(u64 base);
+
+KERNEL_EXTERN_C_END
 
 #endif

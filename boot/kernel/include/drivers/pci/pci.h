@@ -3,6 +3,9 @@
 
 #include "uint_definitions.h"
 #include "drivers/dev.h"
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
 
 #define PCI_STATUS_SUCCESS              0
 #define PCI_STATUS_NOT_PRESENT          1
@@ -178,5 +181,7 @@ void pci_print_devices(void);
 void pci_detect_devices(void);
 int PCI_list(void);
 void pci_init(void);
+
+KERNEL_EXTERN_C_END
 
 #endif

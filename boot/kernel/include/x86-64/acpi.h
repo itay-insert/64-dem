@@ -2,6 +2,10 @@
 #ifndef ACPI_H
 #define ACPI_H
 
+#include "c_compat.h"
+
+KERNEL_EXTERN_C_BEGIN
+
 
 typedef struct {
     char signature[8];
@@ -162,5 +166,7 @@ typedef struct {
 u64 find_rsdp_legacy(void);
 void rsdp_init(u64 rsdp_base);
 ACPI_ret ACPI_discovery(const char *signature);
+
+KERNEL_EXTERN_C_END
 
 #endif

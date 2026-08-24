@@ -1,6 +1,8 @@
 #ifndef STORAGE_H
 #define STORAGE_H
 
+#include "uint_definitions.h"
+
 typedef struct {
     u64 ops;
     u64 driver_data;
