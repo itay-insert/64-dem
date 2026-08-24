@@ -89,13 +89,13 @@ _start:
         call _convert_cluster_to_lba
         cmp byte [enable], 2
         jb _search_for_stage2
-        xor bx, bx
-        mov di, 0x1000
+        mov bx, 0x8000
+        xor di, di
         mov cx, 1
         call _bios_disk_services
         mov dl, [boot_drive] ; hope bios didn't destroy it
         mov si, _disk_services
-        jmp 0x1000:0x0000
+        jmp 0x8000
 
     error:
         mov ah, 0x0E
