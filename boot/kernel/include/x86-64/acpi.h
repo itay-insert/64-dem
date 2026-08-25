@@ -6,6 +6,8 @@
 
 KERNEL_EXTERN_C_BEGIN
 
+#define MMIO 0
+#define IO 1
 
 typedef struct {
     char signature[8];

@@ -373,7 +373,7 @@ text_data printf(const char *str, ...) {
 				}
 				
 				case 'w':
-					print_byte_hex((u16)va_arg(args, int));
+					print_word_hex((u16)va_arg(args, int));
 					break;
 				
 				default:
