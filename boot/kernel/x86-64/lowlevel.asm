@@ -6,7 +6,7 @@ extern IO_APIC
 
 global stack_get
 global check_1gb_PageSupport
-global enable_paging
+global reload_cr3
 global kernel_trampoline
 global load_gdt
 global discover_APIC
@@ -51,13 +51,9 @@ movzx eax, al
 pop rbx
 ret
 
-
-
-enable_paging:
-mov rax, rdi
-mov cr3, rax
+reload_cr3:
+mov cr3, rdi
 ret
-
 
 kernel_trampoline:
 mov rax, r8

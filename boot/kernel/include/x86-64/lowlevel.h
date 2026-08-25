@@ -11,7 +11,7 @@ KERNEL_EXTERN_C_BEGIN
 
 u64 stack_get(void);
 int check_1gb_PageSupport(void);
-void enable_paging(const u64 *PML4);
+void reload_cr3(const u64 *PML4);
 void kernel_trampoline(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                        EFI_MEMORY_DESCRIPTOR *memory_map, u64 entry);
 void load_gdt(u64 addr);

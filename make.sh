@@ -46,5 +46,6 @@ ld -T kernel/link.ld -o kernel.elf *.o
 rm *.o
 
 nasm -f bin bios/stage2.asm -o stage2.bin
+nasm -f bin bios/stage3.asm -o stage3.bin
 
 cd ..

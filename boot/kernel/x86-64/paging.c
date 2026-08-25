@@ -402,7 +402,7 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     BOOT_INFO64 *ib64 = (BOOT_INFO64 *)ib64_addr;
 
     qemu_debug_print("[paging] loading CR3\n");
-    enable_paging(KernelPML4);
+    reload_cr3(KernelPML4);
     qemu_debug_print("[paging] CR3 loaded\n");
 
     qemu_debug_print("[paging] jumping to virtual kernel\n");
