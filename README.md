@@ -59,3 +59,37 @@ The visualizer builds a temporary trap-enabled copy of `BOOTX64.efi`; the
 ordinary bootloader image used by `run-qemu.sh` is not modified. When execution
 reaches the kernel's fixed higher-half mapping, the display automatically
 switches from bootloader symbols to kernel symbols.
+
+For the legacy BIOS boot path, use the separate real-mode visualizer:
+
+```sh
+./bios-visual-debugger.sh --hz 5
+```
+
+It runs `bios_qemu.sh`, fast-forwards the PC through the BIOS firmware to the
+first boot-sector instruction at `0000:7c00`, and initially pauses there. The
+Space, `s`, `+`/`-`, `r`, and `q` run, single-step, change speed, refresh, and
+quit. Press `b` to enter a breakpoint; QEMU then runs at full speed until it is
+hit. A centered entry box accepts a physical/virtual address (`7c80`), `CS:IP`
+(`1000:0040`), or a stage-qualified assembly label
+(`stage3:end_of_chain`). The register and instruction views automatically
+follow transitions between 16-bit real mode, 16/32-bit protected mode, and
+64-bit long mode. The fetched machine-code view marks the live instruction with
+`PC>`. Up/Down browse earlier or later instructions without executing them, and
+fall back to byte-wise memory browsing outside known instruction ranges, including
+below `0x7c00`; `r` returns the view to the live PC. The machine-code pane uses
+all available terminal rows. Source code is not displayed; NASM metadata is
+retained internally for named breakpoints and instruction boundaries. Pass
+`--run` to begin stepping as soon as the boot sector is reached, or `--headless`
+to suppress QEMU's display.
+
+The stack pane displays raw stack slots and annotates values that match known
+bootloader labels as possible return addresses. `SP>`, `ESP>`, or `RSP>` marks
+the live pointer. `W`/`S` browse raw memory in both directions above and below
+it without executing code; `->` marks the independent browsing cursor. Since
+`S` is used for stack navigation, `N` performs a single-instruction step.
+
+Addresses are rendered as `segment:offset` in real mode, padded 32-bit flat
+addresses in protected mode without paging, and padded 64-bit addresses in long
+mode. Protected- and long-mode addresses are identified as virtual whenever
+paging is active.
