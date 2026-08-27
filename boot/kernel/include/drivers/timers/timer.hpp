@@ -2,11 +2,15 @@
 #include "x86-64/acpi.h"
 
 
+
+
+
 class SimpleTimer {
     public:
         u64 Timer_base;
         int Mode;
-        void Timer_init(PM_ret desc, const char *sign);
+        char signature[5];
+        void Timer_init(PM_ret desc, const char *name, const char *sign);
 };
 
 class Timer {

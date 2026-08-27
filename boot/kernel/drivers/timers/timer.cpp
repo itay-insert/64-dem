@@ -2,23 +2,24 @@
 #include "x86-64/ports.h"
 #include "x86-64/paging.h"
 #include "x86-64/acpi.h"
-#include "memory.h"
+#include "x86-64/memory/memory.h"
 #include "drivers/display/vga.h"
 #include "drivers/timers/timer.hpp"
 
 
-void SimpleTimer::Timer_init(PM_ret desc, const char *sign) {
+void SimpleTimer::Timer_init(PM_ret desc, const char *name, const char *sign) {
     u64 addr = desc.io_base;
     Mode = desc.code;
     if (Mode == MMIO) {
         Timer_base = addr + BASE;
         create_mapping(Timer_base, addr, 1, 0x13, KernelPML4);
         flush_pages(Timer_base, 1);
-        printf("Kernel: %s is MMIO, mapped to virtual address: 0x%lx\n", sign, Timer_base);
+        printf("Kernel: %s is MMIO, mapped to virtual address: 0x%lx\n", name, Timer_base);
     } else {
         Timer_base = addr;
-        printf("Kernel: %s is port IO, starts at IO address: 0x%w\n", sign, (u16)Timer_base);
+        printf("Kernel: %s is port IO, starts at IO address: 0x%w\n", name, (u16)Timer_base);
     }
+    strcpy(signature, sign);
 }
 
 
@@ -42,7 +43,7 @@ Timer::Timer() {
         if (ret.status != 0) {
             printf("Kernel: %s not found\n", names[i]);
         } else {
-            timers[instances-1].Timer_init(ret.simple_timer, names[i]);
+            timers[instances-1].Timer_init(ret.simple_timer, names[i], signs[i]);
         }
     }
     
