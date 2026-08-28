@@ -8,7 +8,7 @@
 KERNEL_EXTERN_C_BEGIN
 
 
-typedef struct heap_entry heap_entry
+typedef struct heap_entry heap_entry;
 
 struct heap_entry {
     int status;
