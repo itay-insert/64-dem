@@ -7,7 +7,7 @@
 
 KERNEL_EXTERN_C_BEGIN
 
-EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages);
+EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes);
 void vfree(EFI_MEMORY_DESCRIPTOR allocation);
 
 KERNEL_EXTERN_C_END

@@ -8,7 +8,7 @@
 
 
 
-EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages) {
+EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
     if (pages == 0) {
@@ -31,7 +31,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages) {
             PageCount--;
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             fill_bitmap(count_tar, match_count, bitmap);
-            create_mapping(count_virt, count_tar<<12, match_count, 0x03, KernelPML4);
+            create_mapping(count_virt, count_tar<<12, match_count, attributes, KernelPML4);
             count_virt += (match_count << 12);
             match_count = 0;
             while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) count++;
@@ -39,7 +39,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages) {
         }
     }
     fill_bitmap(count_tar, match_count, bitmap);
-    create_mapping(count_virt, count_tar<<12, match_count, 0x03, KernelPML4);
+    create_mapping(count_virt, count_tar<<12, match_count, attributes, KernelPML4);
     PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(virtual_address, KernelPML4);
     ret.PhysicalStart = lookup.physical_address;
     ret.VirtualStart = virtual_address;

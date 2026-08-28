@@ -7,6 +7,15 @@
 
 KERNEL_EXTERN_C_BEGIN
 
+enum HeapStatus {
+    Free = 0,
+    Used = 1,
+    Header = 2,
+};
+
+
+#define NoEntriesLeft 0
+
 
 typedef struct heap_entry heap_entry;
 
@@ -18,16 +27,20 @@ struct heap_entry {
     heap_entry *next_entry;
 } __attribute__((packed));
 
-typedef struct {
-    char sign[8];
-    int status;
-    u64 SizeInBytes;
-    dma_entry *home_entry;
-} __attribute__((packed)) malloc_descriptor;
 
+extern int entries;
 
+extern heap_entry *heap_header;
+extern heap_entry *heap_start;
 
+extern heap_entry *heap_latest;
 
+extern int limit;
+extern int metadata_pages;
+
+extern u64 heap_top;
+
+extern u64 free_kbase;
 
 KERNEL_EXTERN_C_END
 

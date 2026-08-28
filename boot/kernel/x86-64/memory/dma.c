@@ -14,7 +14,7 @@ dma_ret allocate_dma(u64 size) {
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     ret.SizeInPages = pages;
     if (dma_header == NULL) {
-        EFI_MEMORY_DESCRIPTOR allocation = vmalloc(DMA_POOL, 1);
+        EFI_MEMORY_DESCRIPTOR allocation = vmalloc(DMA_POOL, 1, 0x03);
         if (allocation.Attribute != 0) {
             ret.status = 1;
             return ret;
@@ -86,7 +86,7 @@ dma_ret allocate_dma(u64 size) {
         int entries_limit = (int)entry->SizeInPages;
         while (entries_limit == NoEntriesLeft) {
             if (entry->next_entry == NULL) {
-                EFI_MEMORY_DESCRIPTOR allocation = vmalloc(dma_top, 1);
+                EFI_MEMORY_DESCRIPTOR allocation = vmalloc(dma_top, 1, 0x03);
                 if (allocation.Attribute != 0) {
                     ret.status = 1;
                     return ret;

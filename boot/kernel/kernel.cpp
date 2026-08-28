@@ -111,12 +111,12 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf("]\n");
     }
 
-    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
+    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1, 0x03);
     addr = alloc.PhysicalStart;
     int *ptr = (int *)alloc.VirtualStart;
     *ptr = 1;
 
-    EFI_MEMORY_DESCRIPTOR alloc1 = vmalloc((info64->kernel_end & ~0xfff)+0x2000, 1);
+    EFI_MEMORY_DESCRIPTOR alloc1 = vmalloc((info64->kernel_end & ~0xfff)+0x2000, 1, 0x03);
     if (*ptr == 1 && addr != alloc1.PhysicalStart) {
         printf("vmalloc: [");
         Set_GlobalTextColor(Green);
@@ -139,7 +139,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     vfree(alloc1);
     vfree(alloc);
 
-    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
+    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1, 0x03);
     if (alloc.PhysicalStart < addr) {
         printf("vfree: [");
         Set_GlobalTextColor(Green);
