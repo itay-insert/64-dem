@@ -111,20 +111,20 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf("]\n");
     }
 
-    alloc = kmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
+    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
     addr = alloc.PhysicalStart;
     int *ptr = (int *)alloc.VirtualStart;
     *ptr = 1;
 
-    EFI_MEMORY_DESCRIPTOR alloc1 = kmalloc((info64->kernel_end & ~0xfff)+0x2000, 1);
+    EFI_MEMORY_DESCRIPTOR alloc1 = vmalloc((info64->kernel_end & ~0xfff)+0x2000, 1);
     if (*ptr == 1 && addr != alloc1.PhysicalStart) {
-        printf("kmalloc: [");
+        printf("vmalloc: [");
         Set_GlobalTextColor(Green);
         printf("OK");
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     } else {
-        printf("kmalloc: [");
+        printf("vmalloc: [");
         Set_GlobalTextColor(Red);
         printf("ERR");
         Set_GlobalTextColor(LightGray);
@@ -136,25 +136,25 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     addr = alloc1.PhysicalStart;
 
-    kfree(alloc1);
-    kfree(alloc);
+    vfree(alloc1);
+    vfree(alloc);
 
-    alloc = kmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
+    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1);
     if (alloc.PhysicalStart < addr) {
-        printf("kfree: [");
+        printf("vfree: [");
         Set_GlobalTextColor(Green);
         printf("OK");
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     } else {
-        printf("kfree: [");
+        printf("vfree: [");
         Set_GlobalTextColor(Red);
         printf("ERR");
         Set_GlobalTextColor(LightGray);
         printf("]\n");
     }
     
-    kfree(alloc);
+    vfree(alloc);
 
     if (info32->pixel_mode == RGB) {
         printf("Pixel format: RGB\n");
@@ -265,7 +265,6 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                (unsigned int)boot_path.DeviceCount);
     }
 
-    Timer timer;
 
     int xhci_status = xhci_init();
 

@@ -15,7 +15,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     boot/kernel/x86-64/memory/memhlp.c \
     boot/kernel/x86-64/memory/alloc.c \
     boot/kernel/x86-64/memory/maphlp.c \
-    boot/kernel/x86-64/memory/kalloc.c \
+    boot/kernel/x86-64/memory/virtual_allocator.c \
     boot/kernel/x86-64/memory/dmadef.c \
     boot/kernel/x86-64/memory/dmahlp.c \
     boot/kernel/x86-64/memory/dma.c \

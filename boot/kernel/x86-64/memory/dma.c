@@ -3,7 +3,7 @@
 #include "x86-64/paging.h"
 #include "x86-64/memory/memory_helpers.h"
 #include "x86-64/memory/frame_allocator.h"
-#include "x86-64/memory/kernel_allocator.h"
+#include "x86-64/memory/virtual_allocator.h"
 #include "x86-64/memory/dma.h"
 #include "x86-64/memory/dma_internal.h"
 
@@ -14,7 +14,7 @@ dma_ret allocate_dma(u64 size) {
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     ret.SizeInPages = pages;
     if (dma_header == NULL) {
-        EFI_MEMORY_DESCRIPTOR allocation = kmalloc(DMA_POOL, 1);
+        EFI_MEMORY_DESCRIPTOR allocation = vmalloc(DMA_POOL, 1);
         if (allocation.Attribute != 0) {
             ret.status = 1;
             return ret;
@@ -86,7 +86,7 @@ dma_ret allocate_dma(u64 size) {
         int entries_limit = (int)entry->SizeInPages;
         while (entries_limit == NoEntriesLeft) {
             if (entry->next_entry == NULL) {
-                EFI_MEMORY_DESCRIPTOR allocation = kmalloc(dma_top, 1);
+                EFI_MEMORY_DESCRIPTOR allocation = vmalloc(dma_top, 1);
                 if (allocation.Attribute != 0) {
                     ret.status = 1;
                     return ret;
@@ -205,12 +205,13 @@ void free_dma(u64 Base) {
             metadata_pages--;
             dma_top -= 0x1000;
             entries = (metadata_pages + 1) * limit;
-            kfree(allocation);
+            vfree(allocation);
         }
 
     }
 
-   
+   destroy_mapping(Base, ptr->SizeInPages, KernelPML4);
+   flush_pages(Base, ptr->SizeInPages);
 
 
 }

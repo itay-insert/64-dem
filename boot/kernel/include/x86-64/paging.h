@@ -19,6 +19,9 @@ KERNEL_EXTERN_C_BEGIN
 #ifndef DMA_POOL
 #define DMA_POOL 0xffffa10000000000
 #endif
+#ifndef HEAP
+#define HEAP 0xffffb00000000000
+#endif
 
 typedef struct {
     u64 physical_address;
@@ -40,6 +43,7 @@ extern u64 *KernelPML4;
 
 void flush_pages(u64 virtual_address, u64 pages);
 void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4);
+void destroy_mapping(u64 virtual_address, u64 pages, u64 *PML4);
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4);
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps);
 

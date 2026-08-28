@@ -17,20 +17,22 @@ u64 calculate_pages(EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 
     return pages;
 }
 
+
+
 int memcmp(const void *ptr1, const void *ptr2, size_t count) {
     const uint8_t *a = (const uint8_t*)ptr1;
     const uint8_t *b = (const uint8_t*)ptr2;
 
-    for (size_t i = 0; i < count; i++)
-    {
-        if (a[i] != b[i])
-        {
+    for (size_t i = 0; i < count; i++) {
+        if (a[i] != b[i]) {
             return a[i] - b[i];
         }
     }
 
     return 0;
 }
+
+
 
 void *memset(void *ptr, int value, size_t num) {
     unsigned char val = (unsigned char)value;
@@ -46,6 +48,8 @@ void *memset(void *ptr, int value, size_t num) {
     return ptr;
 }
 
+
+
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
@@ -56,6 +60,8 @@ void *memcpy(void *dest, const void *src, size_t n) {
     
     return dest;
 }
+
+
 
 char *strcpy(char *dest, const char *src) {
     char *org = dest;

@@ -5,6 +5,9 @@
 #include "x86-64/memory/memory.h"
 #include "drivers/display/vga.h"
 #include "drivers/timers/timer.hpp"
+#include "drivers/timers/pm.hpp"
+#include "drivers/timers/hpet.hpp"
+
 
 
 void SimpleTimer::Timer_init(PM_ret desc, const char *name, const char *sign) {
@@ -35,7 +38,6 @@ Timer::Timer() {
         "HPET"
     };
 
-    instances = 0;
     
     for (int i = 0; i < 2; i++) {
         ACPI_ret ret = ACPI_discovery(signs[i]);
@@ -43,7 +45,13 @@ Timer::Timer() {
         if (ret.status != 0) {
             printf("Kernel: %s not found\n", names[i]);
         } else {
-            timers[instances-1].Timer_init(ret.simple_timer, names[i], signs[i]);
+            if (memcmp(signs[i], "FACP", 4) == 0) {
+                PMTimer pm;            
+                Src = &pm;    
+            } else if (memcmp(signs[i], "HPET", 4) == 0) {
+                HPET hpet;
+                Src = &hpet;
+            } 
         }
     }
     
