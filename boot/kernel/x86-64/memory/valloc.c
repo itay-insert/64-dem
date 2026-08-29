@@ -5,14 +5,17 @@
 #include "x86-64/memory/frame_allocator.h"
 #include "x86-64/memory/memory_mapping.h"
 #include "x86-64/memory/virtual_allocator.h"
+#include "x86-64/spinlock.h"
 
-
+extern spinlock_t bitmap_lock;
 
 EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
+    spin_lock(&bitmap_lock);
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
     if (pages == 0) {
         ret.Attribute = 2;
+        spin_unlock(&bitmap_lock);
         return ret;
     }
     u64 count = former_count;
@@ -22,6 +25,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     u64 PageCount = pages;
     if (run_simulation(count, PageCount, bitmap) == 1) {
         ret.Attribute = 1;
+        spin_unlock(&bitmap_lock);
         return ret;
     }
     while (PageCount > 0) {
@@ -47,6 +51,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     ret.NumberOfPages = pages;
     flush_pages(virtual_address, pages);
     former_count = count;
+    spin_unlock(&bitmap_lock);
     return ret;
 }
 

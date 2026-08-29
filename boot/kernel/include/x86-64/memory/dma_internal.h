@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include "x86-64/paging.h"
 #include "c_compat.h"
+#include "x86-64/spinlock.h"
 
 KERNEL_EXTERN_C_BEGIN
 
@@ -34,6 +35,7 @@ extern dma_entry *dma_latest;
 extern int limit;
 extern int metadata_pages;
 extern u64 dma_top;
+extern spinlock_t dma_lock;
 
 dma_entry *find_header(dma_entry *entry);
 u64 find_descriptorBase(u64 Base);

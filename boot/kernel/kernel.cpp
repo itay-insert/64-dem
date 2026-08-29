@@ -17,7 +17,6 @@
 #include "drivers/dev.h"
 #include "boot_info.h"
 #include "drivers/xhci.h"
-#include "drivers/timers/timer.hpp"
 
 
 #define RGB 0

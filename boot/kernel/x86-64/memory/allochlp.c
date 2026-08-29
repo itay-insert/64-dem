@@ -7,6 +7,8 @@
 #include "x86-64/memory/malloc_internal.h"
 
 
-int create_entry(u64 size, u64 base, u16 attributes, int Status) {
-    
+heap_entry *create_entry(u64 size, u64 base, u16 attributes, int Status) {
+    if (heap_header->SizeInBytes != NoEntriesLeft && heap_header->next_entry == NULL) {
+        
+    }
 }

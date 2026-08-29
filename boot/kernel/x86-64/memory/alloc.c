@@ -3,11 +3,12 @@
 #include "x86-64/paging.h"
 #include "x86-64/memory/memory_helpers.h"
 #include "x86-64/memory/frame_allocator.h"
-
+#include "x86-64/spinlock.h"
 
 
 u64 bitmap_base = 0;
 u64 bitmapSize = 0;
+spinlock_t bitmap_lock = {0};
 
 
 void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_map_size, u64 DescriptorSize, u64 kernel_start, u64 kernel_end, u64 bitmap_size) {
@@ -100,10 +101,12 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
 u64 former_count = 0;
 
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
+    spin_lock(&bitmap_lock);
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
     if (PageCount == 0) {
         ret.Attribute = 2; // 0 = success, 1 = error: not enough memory, 2 = error: invalid parameter
+        spin_unlock(&bitmap_lock);
         return ret;
     }
     u64 count = former_count;
@@ -112,6 +115,7 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     while (match_count < PageCount) {
         if ((count>>3) >= bitmapSize) {
             ret.Attribute = 1;
+            spin_unlock(&bitmap_lock);
             return ret;
         } 
         if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 0) {
@@ -123,6 +127,7 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
                 count++;
                 if ((count>>3) >= bitmapSize) {
                     ret.Attribute = 1;
+                    spin_unlock(&bitmap_lock);
                     return ret;
                 }
             }
@@ -159,12 +164,15 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     }
     bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
 
+    spin_unlock(&bitmap_lock);
     return ret;
 }
 
 
 
 void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
+    spin_lock(&bitmap_lock);
+
     u8 *bitmap = (u8 *)bitmap_base;
     u64 count = frame.PhysicalStart >> 12;
     u64 PageCount = frame.NumberOfPages;
@@ -193,4 +201,5 @@ void free_frame(EFI_MEMORY_DESCRIPTOR frame) {
     }
     bitmap[count>>3] &= (u8)~(0xff << (8 - onePage_count));
 
+    spin_unlock(&bitmap_lock);
 }

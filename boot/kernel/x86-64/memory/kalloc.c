@@ -9,11 +9,14 @@
 
 
 void *kmalloc(size_t size) {
+    spin_lock(&heap_lock);
 
     if (heap_header == NULL) {
         EFI_MEMORY_DESCRIPTOR allocation = vmalloc(HEAP, 1, 0x03);
-        if (allocation.Attribute != 0)   
-            return NULL;  // check allocation failure, return NULL for failure
+        if (allocation.Attribute != 0)  {
+            spin_unlock(&heap_lock);
+            return NULL;
+        }   // check allocation failure, return NULL for failure
         
         heap_top += 0x1000;
         heap_header = (heap_entry *)HEAP;
@@ -30,8 +33,10 @@ void *kmalloc(size_t size) {
         heap_start->status = Used;
         heap_start->attributes = 0x03;
         EFI_MEMORY_DESCRIPTOR allocation = vmalloc(free_kbase, ((size + 4095) >> 12), 0x03);
-        if (allocation.Attribute != 0)
+        if (allocation.Attribute != 0) {
+            spin_unlock(&heap_lock);
             return NULL;
+        }
         heap_start->virtual_base = allocation.VirtualStart;
         heap_start->SizeInBytes = size;
         free_kbase += size;
@@ -52,7 +57,7 @@ void *kmalloc(size_t size) {
         } else
             heap_start->next_entry = NULL;
         
-
+        spin_unlock(&heap_lock);
         return (void *)heap_start->virtual_base;
     }
 
@@ -63,6 +68,7 @@ void *kmalloc(size_t size) {
         if (entry->status == Free && entry->SizeInBytes >= size && entry->attributes == 0x03) {
             if (entry->SizeInBytes == size) {
                 entry->status = Used;
+                spin_unlock(&heap_lock);
                 return (void *)entry->virtual_base;
             } else if (entry->SizeInBytes > size) {
                 u64 rem = entry->SizeInBytes - size; // rem stands for "remainder"
@@ -70,4 +76,7 @@ void *kmalloc(size_t size) {
             }
         }
     }
+
+
+    spin_unlock(&heap_lock);
 }

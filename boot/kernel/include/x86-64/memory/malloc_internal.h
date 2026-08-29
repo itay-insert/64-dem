@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include "x86-64/paging.h"
 #include "c_compat.h"
+#include "x86-64/spinlock.h"
 
 KERNEL_EXTERN_C_BEGIN
 
@@ -41,6 +42,8 @@ extern int metadata_pages;
 extern u64 heap_top;
 
 extern u64 free_kbase;
+
+extern spinlock_t heap_lock;
 
 KERNEL_EXTERN_C_END
 

@@ -10,6 +10,8 @@
 
 
 dma_ret allocate_dma(u64 size) {
+    spin_lock(&dma_lock);
+
     dma_ret ret = {0};
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     ret.SizeInPages = pages;
@@ -17,6 +19,7 @@ dma_ret allocate_dma(u64 size) {
         EFI_MEMORY_DESCRIPTOR allocation = vmalloc(DMA_POOL, 1, 0x03);
         if (allocation.Attribute != 0) {
             ret.status = 1;
+            spin_unlock(&dma_lock);
             return ret;
         }
         dma_top += 0x1000;
@@ -36,6 +39,7 @@ dma_ret allocate_dma(u64 size) {
         EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
         if (frame.Attribute != 0) {
             ret.status = 1;
+            spin_unlock(&dma_lock);
             return ret;
         }
         frame.VirtualStart = DMA_BASE;
@@ -54,6 +58,7 @@ dma_ret allocate_dma(u64 size) {
         ret.physical_address = frame.PhysicalStart;
         ret.virtual_address = frame.VirtualStart;
 
+        spin_unlock(&dma_lock);
         return ret;
     }
 
@@ -89,6 +94,7 @@ dma_ret allocate_dma(u64 size) {
                 EFI_MEMORY_DESCRIPTOR allocation = vmalloc(dma_top, 1, 0x03);
                 if (allocation.Attribute != 0) {
                     ret.status = 1;
+                    spin_unlock(&dma_lock);
                     return ret;
                 }
                 dma_entry *new_page = (dma_entry *)allocation.VirtualStart;
@@ -138,6 +144,7 @@ dma_ret allocate_dma(u64 size) {
     EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
     if (allocation.Attribute != 0) {
         ret.status = 1;
+        spin_unlock(&dma_lock);
         return ret;
     }
     allocation.VirtualStart = free_base;
@@ -155,14 +162,16 @@ dma_ret allocate_dma(u64 size) {
     ret.physical_address = allocation.PhysicalStart;
     ret.virtual_address = allocation.VirtualStart;
 
+    spin_unlock(&dma_lock);
     return ret;
-
 }
 
 
 
 
 void free_dma(u64 Base) {
+    spin_lock(&dma_lock);
+
     dma_descriptor *ptr = (dma_descriptor *)find_descriptorBase(Base);
     dma_entry *pool_entry = ptr->home_entry;
     int entries_used = ptr->status;
@@ -210,8 +219,8 @@ void free_dma(u64 Base) {
 
     }
 
-   destroy_mapping(Base, ptr->SizeInPages, KernelPML4);
-   flush_pages(Base, ptr->SizeInPages);
+    destroy_mapping(Base, ptr->SizeInPages, KernelPML4);
+    flush_pages(Base, ptr->SizeInPages);
 
-
+    spin_unlock(&dma_lock);
 }

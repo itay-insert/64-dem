@@ -1,4 +1,5 @@
 #include "x86-64/memory/malloc_internal.h"
+#include "x86-64/spinlock.h"
 
 
 int entries = 0;
@@ -14,3 +15,5 @@ int metadata_pages = 0;
 u64 heap_top = HEAP;
 
 u64 free_kbase = 0;
+
+spinlock_t heap_lock = {0};
