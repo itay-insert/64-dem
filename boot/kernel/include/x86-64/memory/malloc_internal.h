@@ -30,20 +30,17 @@ struct heap_entry {
 
 
 extern int entries;
-
 extern heap_entry *heap_header;
 extern heap_entry *heap_start;
-
 extern heap_entry *heap_latest;
-
 extern int limit;
 extern int metadata_pages;
-
 extern u64 heap_top;
-
 extern u64 free_kbase;
-
 extern spinlock_t heap_lock;
+
+
+heap_entry *find_new_entry(void);
 
 KERNEL_EXTERN_C_END
 

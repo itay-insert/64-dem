@@ -8,7 +8,22 @@
 
 
 
+
+
+
+static inline u64 entry_init(heap_entry *entry) {
+    memset(entry->virtual_base, 0, entry->SizeInBytes);
+    heap_entry *hd = entry->virtual_base + sizeof(heap_entry);
+    hd->attributes = entry->attributes;
+    hd->virtual_base = entry->virtual_base;
+    hd->SizeInBytes = entry->SizeInBytes;
+    hd->status = entry->status;
+    hd->next_entry = entry;
+    return (entry->virtual_base + sizeof(heap_entry));
+}
+
 void *kmalloc(size_t size) {
+    u64 sz = size + sizeof(heap_entry);
     spin_lock(&heap_lock);
 
     if (heap_header == NULL) {
@@ -32,14 +47,14 @@ void *kmalloc(size_t size) {
         heap_start = (heap_entry *)((u8 *)heap_header + sizeof(heap_entry));   // create the first entry if it doesn't exist
         heap_start->status = Used;
         heap_start->attributes = 0x03;
-        EFI_MEMORY_DESCRIPTOR allocation = vmalloc(free_kbase, ((size + 4095) >> 12), 0x03);
+        EFI_MEMORY_DESCRIPTOR allocation = vmalloc(free_kbase, ((sz + 4095) >> 12), 0x03);
         if (allocation.Attribute != 0) {
             spin_unlock(&heap_lock);
             return NULL;
         }
         heap_start->virtual_base = allocation.VirtualStart;
-        heap_start->SizeInBytes = size;
-        free_kbase += size;
+        heap_start->SizeInBytes = sz;
+        free_kbase += sz;
         entries++;
         heap_header->SizeInBytes--;
         heap_latest = heap_start;
@@ -58,6 +73,7 @@ void *kmalloc(size_t size) {
             heap_start->next_entry = NULL;
         
         spin_unlock(&heap_lock);
+        memset()
         return (void *)heap_start->virtual_base;
     }
 
@@ -65,18 +81,20 @@ void *kmalloc(size_t size) {
     heap_entry *entry = heap_start;
     heap_entry *free_entry = NULL;
     while (entry != NULL) {
-        if (entry->status == Free && entry->SizeInBytes >= size && entry->attributes == 0x03) {
-            if (entry->SizeInBytes == size) {
+        if (entry->status == Free && entry->SizeInBytes >= sz && entry->attributes == 0x03) {
+            if (entry->SizeInBytes == sz) {
                 entry->status = Used;
                 spin_unlock(&heap_lock);
                 return (void *)entry->virtual_base;
-            } else if (entry->SizeInBytes > size) {
-                u64 rem = entry->SizeInBytes - size; // rem stands for "remainder"
-                u64 nb = entry->virtual_base + entry->SizeInBytes //
+            } else if (entry->SizeInBytes > sz) {
+                u64 rem = entry->SizeInBytes - sz; // rem stands for "remainder"
+                u64 nb = entry->virtual_base + (entry->SizeInBytes - rem); // nb stands for new virtual base
+                entry->SizeInBytes -= rem;
+                entry->status = Used;
+                
             }
         }
     }
-
 
     spin_unlock(&heap_lock);
 }

@@ -27,6 +27,7 @@ dma_ret allocate_dma(u64 size) {
         dma_header->SizeInPages = (4096 / sizeof(dma_entry)) - 1;
         limit = (int)dma_header->SizeInPages;
         dma_header->next_entry = NULL;
+        spin_unlock(&dma_lock);
     }
 
     if (entries == 0) {
