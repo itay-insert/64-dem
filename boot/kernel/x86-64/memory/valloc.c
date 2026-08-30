@@ -10,12 +10,10 @@
 extern spinlock_t bitmap_lock;
 
 EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
-    spin_lock(&bitmap_lock);
     EFI_MEMORY_DESCRIPTOR ret = {0};
     u8 *bitmap = (u8 *)bitmap_base;
     if (pages == 0) {
         ret.Attribute = 2;
-        spin_unlock(&bitmap_lock);
         return ret;
     }
     u64 count = former_count;
@@ -23,6 +21,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     u64 count_virt = virtual_address;
     u64 match_count = 0;
     u64 PageCount = pages;
+    spin_lock(&dma_lock);
     if (run_simulation(count, PageCount, bitmap) == 1) {
         ret.Attribute = 1;
         spin_unlock(&bitmap_lock);
@@ -35,14 +34,17 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
             PageCount--;
         } else if (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) {
             fill_bitmap(count_tar, match_count, bitmap);
+            spin_unlock(&bitmap_lock);
             create_mapping(count_virt, count_tar<<12, match_count, attributes, KernelPML4);
             count_virt += (match_count << 12);
             match_count = 0;
+            spin_lock(&bitmap_lock);
             while (check_byte(bitmap[count>>3], (u8)count & 0x7, 1) == 1) count++;
             count_tar = count;
         }
     }
     fill_bitmap(count_tar, match_count, bitmap);
+    spin_unlock(&bitmap_lock);
     create_mapping(count_virt, count_tar<<12, match_count, attributes, KernelPML4);
     PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(virtual_address, KernelPML4);
     ret.PhysicalStart = lookup.physical_address;
@@ -51,7 +53,6 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     ret.NumberOfPages = pages;
     flush_pages(virtual_address, pages);
     former_count = count;
-    spin_unlock(&bitmap_lock);
     return ret;
 }
 

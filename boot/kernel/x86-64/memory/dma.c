@@ -10,12 +10,11 @@
 
 
 dma_ret allocate_dma(u64 size) {
-    spin_lock(&dma_lock);
-
     dma_ret ret = {0};
     u64 pages = (size + sizeof(dma_descriptor) + 4095) >> 12;
     ret.SizeInPages = pages;
     if (dma_header == NULL) {
+        spin_lock(&dma_lock);
         EFI_MEMORY_DESCRIPTOR allocation = vmalloc(DMA_POOL, 1, 0x03);
         if (allocation.Attribute != 0) {
             ret.status = 1;
@@ -31,22 +30,23 @@ dma_ret allocate_dma(u64 size) {
     }
 
     if (entries == 0) {
+        spin_lock(&dma_lock);
         dma_start = (dma_entry *)((u8 *)dma_header + sizeof(dma_entry));
         dma_start->next_entry = NULL;
         dma_start->SizeInPages = pages;
         dma_start->status = Used;
         dma_latest = dma_start;
+        entries++;
+        dma_header->SizeInPages--;
+        spin_unlock(&dma_lock);
         EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
         if (frame.Attribute != 0) {
             ret.status = 1;
-            spin_unlock(&dma_lock);
             return ret;
         }
         frame.VirtualStart = DMA_BASE;
         create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, KernelPML4);
         flush_pages(DMA_BASE, pages);
-        entries++;
-        dma_header->SizeInPages--;
         dma_descriptor *header = 
             (dma_descriptor *)(frame.VirtualStart+((pages<<12)-sizeof(dma_descriptor)));
         memcpy(header->sign, "DMA_POOL", 8);
@@ -58,7 +58,6 @@ dma_ret allocate_dma(u64 size) {
         ret.physical_address = frame.PhysicalStart;
         ret.virtual_address = frame.VirtualStart;
 
-        spin_unlock(&dma_lock);
         return ret;
     }
 
@@ -67,6 +66,7 @@ dma_ret allocate_dma(u64 size) {
     u64 cursor = DMA_BASE;
     dma_entry *entry = dma_start;
     dma_entry *free_entry = NULL;
+    spin_lock(&dma_lock);
     while (entry != NULL) {
         if (entry->status == Free) {
             if (free_entry == NULL) {
@@ -141,10 +141,10 @@ dma_ret allocate_dma(u64 size) {
     }
     
 
+    spin_unlock(&dma_lock);
     EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
     if (allocation.Attribute != 0) {
         ret.status = 1;
-        spin_unlock(&dma_lock);
         return ret;
     }
     allocation.VirtualStart = free_base;
@@ -162,7 +162,6 @@ dma_ret allocate_dma(u64 size) {
     ret.physical_address = allocation.PhysicalStart;
     ret.virtual_address = allocation.VirtualStart;
 
-    spin_unlock(&dma_lock);
     return ret;
 }
 
