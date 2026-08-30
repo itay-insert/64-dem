@@ -21,7 +21,7 @@ EFI_MEMORY_DESCRIPTOR vmalloc(u64 virtual_address, u64 pages, u16 attributes) {
     u64 count_virt = virtual_address;
     u64 match_count = 0;
     u64 PageCount = pages;
-    spin_lock(&dma_lock);
+    spin_lock(&bitmap_lock);
     if (run_simulation(count, PageCount, bitmap) == 1) {
         ret.Attribute = 1;
         spin_unlock(&bitmap_lock);
