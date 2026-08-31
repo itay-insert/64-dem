@@ -7,12 +7,12 @@
 #include "boot_info.h"
 
 
-#define fb_virtual 0xffffa00000000000
-#define kernel_virtual 0xffff800000000000
-#define BASE 0xffff900000000000
-#define PCI_BASE 0xffffa010e0000000
-#define DMA_BASE 0xffffa0ffc0000000
-#define DMA_POOL 0xffffa10000000000
+#define fb_virtual 0xffffa00000000000  // framebuffer
+#define kernel_virtual 0xffff800000000000  // kernel code and data
+#define BASE 0xffff900000000000 // mapping MMIO devices using BASE+MMIOphystart
+#define PCI_BASE 0xffffa010e0000000 // mapping the PCIe to here
+#define DMA_BASE 0xffffa0ffc0000000 // special place where dma allocations start
+#define DMA_POOL 0xffffa10000000000 // special place to track dma allocations
 
 
 typedef struct {

@@ -8,44 +8,44 @@
 
 KERNEL_EXTERN_C_BEGIN
 
-enum HeapStatus {
-    Free = 0,
-    Used = 1,
-    Header = 2,
-};
-
 
 #define NoEntriesLeft 0
 
-typedef struct header hp_header;
+typedef struct header va_hd;
 
 struct header {
     u64 free_entries;
-    hp_header *next_page;
+    va_hd *next_page;
 } __attribute__((packed));
 
-typedef struct heap_entry heap_entry;
+typedef struct va_node va_node;
 
-struct heap_entry {
+struct va_node {
     u64 virtual_base;
-    u64 pages;
-    u64 max_pages;
-    heap_entry *right;
-    heap_entry  *left;
+    u64 length;
+    u64 max_length;
+    u16 attributes;
+    va_node *va_right;
+    va_node  *va_left;
 } __attribute__((packed));
 
+
+typedef struct {
+    int status;
+    u64 base;
+    u64 pages;
+    u16 attributes;
+} va_ret;
 
 extern int entries;
-extern heap_entry *heap_header;
-extern heap_entry *heap_start;
-extern heap_entry *heap_latest;
+extern va_hd *va_header;
+extern va_node *va_start;
+extern va_node *va_latest;
 extern int limit;
 extern int metadata_pages;
-extern u64 heap_top;
-extern spinlock_t heap_lock;
+extern u64 va_top;
+extern spinlock_t va_lock;
 
-
-heap_entry *find_new_entry(void);
 
 KERNEL_EXTERN_C_END
 

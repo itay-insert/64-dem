@@ -19,8 +19,8 @@ KERNEL_EXTERN_C_BEGIN
 #ifndef DMA_POOL
 #define DMA_POOL 0xffffa10000000000
 #endif
-#ifndef HEAP
-#define HEAP 0xffffb00000000000
+#ifndef VA_TREE
+#define VA_TREE 0xffffb00000000000
 #endif
 
 typedef struct {

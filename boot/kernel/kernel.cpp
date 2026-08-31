@@ -32,6 +32,8 @@ u64 APIC_base = 0;
 
 u64 IO_APIC = 0;
 
+u64 Kernel_end = 0;
+
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     qemu_debug_print("[kernel] entered kernel_main\n");
 
@@ -43,6 +45,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         PAGING_SETUP_DESCRIPTOR ps = {info64, info32, bitmap, memory_map};
         SetupPaging(ps);
     }
+    Kernel_end = info64->kernel_end;
     qemu_debug_print("[kernel] paging setup complete\n");
     vga_init(info64->framebuffer_base, info32->horizontal_resolution, info32->vertical_resolution, info32->pixels_per_scanline, info32->pixel_mode);
     qemu_debug_print("[kernel] VGA initialized\n");

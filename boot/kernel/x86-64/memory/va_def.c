@@ -4,14 +4,14 @@
 
 int entries = 0;
 
-heap_entry *heap_header = NULL;
-heap_entry *heap_start = NULL;
+va_hd *va_header = NULL;
+va_node *va_start = NULL;
 
-heap_entry *heap_latest = NULL;
+va_node *va_latest = NULL;
 
 int limit = 0;
 int metadata_pages = 0;
 
-u64 heap_top = HEAP;
+u64 va_top = VA_TREE;
 
-spinlock_t heap_lock = {0};
+spinlock_t va_lock = {0};
