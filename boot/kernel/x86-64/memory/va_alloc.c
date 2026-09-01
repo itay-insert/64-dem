@@ -130,7 +130,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
             va_node *left_side = entry->va_left;
             va_node *right_side = entry->va_right;
 
-            if (left_side->length >= rsz) {
+            if (left_side->max_length >= rsz) {
                 entry = left_side;
             } else if (right_side->max_length >= rsz) {
                 entry = right_side;
