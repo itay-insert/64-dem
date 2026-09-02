@@ -27,6 +27,7 @@ struct va_node {
     u16 attributes;
     va_node *va_right;
     va_node  *va_left;
+    va_node *Parent;
 } __attribute__((packed));
 
 
@@ -39,7 +40,8 @@ typedef struct {
 
 extern int entries;
 extern va_hd *va_header;
-extern va_node *va_start;
+extern va_node *va_kstart;
+extern va_node *va_ustart;
 extern va_node *va_latest;
 extern int limit;
 extern int metadata_pages;

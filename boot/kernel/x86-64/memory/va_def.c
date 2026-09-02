@@ -5,8 +5,8 @@
 int entries = 0;
 
 va_hd *va_header = NULL;
-va_node *va_start = NULL;
-
+va_node *va_kstart = NULL;
+va_node *va_ustart = NULL;
 va_node *va_latest = NULL;
 
 int limit = 0;

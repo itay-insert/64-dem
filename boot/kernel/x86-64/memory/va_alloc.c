@@ -21,6 +21,7 @@ extern u64 Kernel_end;
 typedef enum {
     left = 0,
     right = 1,
+    NoParent = 2,
 };
 
 static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
@@ -37,7 +38,7 @@ static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
             new_hd->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
             new_hd->next_page = NULL;
             hd->next_page = new_hd;
-            entry = (va_node *)((u8 *)va_hd + sizeof(va_hd));
+            entry = (va_node *)((u8 *)new_hd + sizeof(va_hd));
         }
         hd = hd->next_page;
     }
@@ -46,8 +47,17 @@ static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
         entry = (va_node *)((u8 *)va_latest + sizeof(va_node));
     }
 
-    Parent->va_right = Pos == right ? entry : NULL;
-    Parent->va_left = Pos == left ? entry : NULL;
+    entry->va_right = NULL;
+    entry->va_left = NULL;
+
+    entry->Parent = Parent;
+
+
+    if (Pos == right) {
+        Parent->va_right = entry;
+    } else if (Pos == left) {
+        Parent->va_left = entry;
+    }
 
     va_latest = entry;
     entries++;
@@ -56,8 +66,14 @@ static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
     return entry;
 }
 
+
+
 va_ret va_alloc(u64 pages, u16 attributes) {
     va_ret ret = {0};
+    if (pages == 0) {
+        ret.status = 1;
+        return ret;
+    }
     spin_lock(&va_lock);
 
     if (va_header == NULL) {
@@ -74,33 +90,38 @@ va_ret va_alloc(u64 pages, u16 attributes) {
     }
 
     if (entries == 0) {
-        va_start = (va_node *)((u8 *)va_header + sizeof(va_node));
-        va_start->attributes = 0x03;
-        va_start->virtual_base = (Kernel_end + 4095) & ~0xFFF;
-        va_start->length = (END - va_start->virtual_base) + 1;
-        va_latest = va_start;
-        va_node *right_node = find_new_entry(right, va_start);
+        va_kstart = (va_node *)((u8 *)va_header + sizeof(va_hd));
+        entries++;
+        va_header->free_entries--;
+        va_kstart->va_left = NULL;
+        va_kstart->va_right = NULL;
+        va_kstart->Parent = NULL;
+        va_kstart->attributes = 0x03; // for kernel
+        va_kstart->virtual_base = (Kernel_end + 4095) & ~0xFFF;
+        va_kstart->length = (END - va_kstart->virtual_base) + 1;
+        va_latest = va_kstart;
+        va_node *right_node = find_new_entry(right, va_kstart);
         right_node->virtual_base = KERNEL_SPACE;
         right_node->attributes = 0x03;
         right_node->length = (SPACE_END - KERNEL_SPACE) + 1;
-        va_node *left_node = find_new_entry(left, va_start);
-        left_node->virtual_base = USER_SPACE;
-        left_node->attributes = 0x07;
-        left_node->length = (USER_END - USER_SPACE) + 1;
-        left_node->max_length = left_node->length;
         right_node->max_length = right_node->length;
-        va_start->max_length = left_node->max_length;
+        va_kstart->max_length = right_node->max_length;
+        va_ustart = find_new_entry(NoParent, NULL);
+        va_ustart->attributes = 0x07;  // for user
+        va_ustart->virtual_base = USER_SPACE;
+        va_ustart->length = (USER_END - USER_SPACE) + 1;
+        va_ustart->max_length = va_ustart->length;
+
     }
 
 
     va_node *entry = NULL;
 
     u64 rsz = pages << 12;
-    if (!USR) {
-        entry = va_start->va_right;
-    } else {
-        entry = va_start->va_left;
-    }
+    
+    entry = USR ? va_ustart : va_kstart;
+
+    
 
     while (1) {
 
@@ -112,8 +133,13 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 return ret;
             }
     
-            if (entry->length == entry->max_length) 
+            
+            if (entry->max_length == entry->length) {
                 entry->max_length -= rsz;
+            }
+
+           
+                
         
             entry->length -= rsz;
 
@@ -127,18 +153,49 @@ va_ret va_alloc(u64 pages, u16 attributes) {
             ret.status = 0;
             return ret;
         } else if (entry->max_length >= rsz) {
-            va_node *left_side = entry->va_left;
-            va_node *right_side = entry->va_right;
 
-            if (left_side->max_length >= rsz) {
-                entry = left_side;
-            } else if (right_side->max_length >= rsz) {
-                entry = right_side;
-            } else {
+            if (entry->va_left == NULL && entry->va_right == NULL) {
                 spin_unlock(&va_lock);
                 ret.status = 1;
                 return ret;
+            } else if (entry->va_left == NULL || entry->va_right == NULL) {
+                if (entry->va_right != NULL) {
+                    va_node *right_side = entry->va_right;
+                    if (right_side->max_length >= rsz) {
+                        entry = right_side;
+                    } else {
+                        spin_unlock(&va_lock);
+                        ret.status = 1;
+                        return ret;
+                    }
+                } else if (entry->va_left != NULL) {
+                    va_node *left_side = entry->va_left;
+                    if (left_side->max_length >= rsz) {
+                        entry = left_side;
+                    } else {
+                        spin_unlock(&va_lock);
+                        ret.status = 1;
+                        return ret;
+                    }
+                }
+            } else {
+                va_node *left_side = entry->va_left;
+                va_node *right_side = entry->va_right;
+
+                if (left_side->max_length >= rsz) {
+                    entry = left_side;
+                } else if (right_side->max_length >= rsz) {
+                    entry = right_side;
+                } else {
+                    spin_unlock(&va_lock);
+                    ret.status = 1;
+                    return ret;
+                }
             }
+        } else {
+            spin_unlock(&va_lock);
+            ret.status = 1;
+            return ret;
         }
 
     }
