@@ -66,7 +66,44 @@ static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
     return entry;
 }
 
+static inline void UpdateParents(va_node *entry) {
+    while (entry != NULL) {
+        u64 max = entry->length;
+        
+        if (entry->va_left != NULL && entry->va_left->max_length > max) {
+            max = entry->va_left->max_length;
+        }
 
+        if (entry->va_right != NULL && entry->va_right->max_length > max) {
+            max = entry->va_right->max_length;
+        }
+
+        entry->max_length = max;
+        entry = entry->Parent;
+    }
+}
+
+static inline va_node *find_fit(va_node *entry, u64 size) {
+    while (entry != NULL) {
+        if (entry->length >= size) 
+            return entry;
+
+
+        if (entry->va_left != NULL && 
+            entry->va_left->max_length >= size) {
+                entry = entry->va_left;
+                continue;
+        } 
+
+        if (entry->va_right != NULL &&
+        entry->va_right->max_length >= size) {
+            entry = entry->va_right;
+            continue;
+        }
+
+        return NULL;
+    }
+}
 
 va_ret va_alloc(u64 pages, u16 attributes) {
     va_ret ret = {0};
@@ -115,89 +152,31 @@ va_ret va_alloc(u64 pages, u16 attributes) {
     }
 
 
-    va_node *entry = NULL;
-
     u64 rsz = pages << 12;
     
-    entry = USR ? va_ustart : va_kstart;
+    va_node *entry = find_fit(USR ? va_ustart : va_kstart, rsz);
+    if (entry == NULL) {
+        spin_unlock(&va_lock);
+        ret.status = 1;
+        return ret;
+    }    
 
-    
-
-    while (1) {
-
-        if (entry->length >= rsz) {
-            EFI_MEMORY_DESCRIPTOR alloc = vmalloc(entry->virtual_base, pages, attributes);
-            if (alloc.Attribute != 0) {
-                spin_unlock(&va_lock);
-                ret.status = 1;
-                return ret;
-            }
-    
-            
-            if (entry->max_length == entry->length) {
-                entry->max_length -= rsz;
-            }
-
-           
-                
-        
-            entry->length -= rsz;
-
-            entry->virtual_base += rsz;
-
-            spin_unlock(&va_lock);
-
-            ret.base = alloc.VirtualStart;
-            ret.pages = pages;
-            ret.attributes = attributes;
-            ret.status = 0;
-            return ret;
-        } else if (entry->max_length >= rsz) {
-
-            if (entry->va_left == NULL && entry->va_right == NULL) {
-                spin_unlock(&va_lock);
-                ret.status = 1;
-                return ret;
-            } else if (entry->va_left == NULL || entry->va_right == NULL) {
-                if (entry->va_right != NULL) {
-                    va_node *right_side = entry->va_right;
-                    if (right_side->max_length >= rsz) {
-                        entry = right_side;
-                    } else {
-                        spin_unlock(&va_lock);
-                        ret.status = 1;
-                        return ret;
-                    }
-                } else if (entry->va_left != NULL) {
-                    va_node *left_side = entry->va_left;
-                    if (left_side->max_length >= rsz) {
-                        entry = left_side;
-                    } else {
-                        spin_unlock(&va_lock);
-                        ret.status = 1;
-                        return ret;
-                    }
-                }
-            } else {
-                va_node *left_side = entry->va_left;
-                va_node *right_side = entry->va_right;
-
-                if (left_side->max_length >= rsz) {
-                    entry = left_side;
-                } else if (right_side->max_length >= rsz) {
-                    entry = right_side;
-                } else {
-                    spin_unlock(&va_lock);
-                    ret.status = 1;
-                    return ret;
-                }
-            }
-        } else {
-            spin_unlock(&va_lock);
-            ret.status = 1;
-            return ret;
-        }
-
+    EFI_MEMORY_DESCRIPTOR alloc = vmalloc(entry->virtual_base, pages, attributes);
+    if (alloc.Attribute != 0) {
+        spin_unlock(&va_lock);
+        ret.status = 1;
+        return ret;
     }
+
+    ret.attributes = attributes;
+    ret.base = alloc.VirtualStart;
+    ret.pages = pages;
+    ret.status = 0;
+
+    
+
+    
+
+    
     
 }
