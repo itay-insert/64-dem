@@ -22,7 +22,7 @@ typedef enum {
     left = 0,
     right = 1,
     NoParent = 2,
-};
+} va_labels;
 
 static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
     va_node *entry = NULL;
@@ -102,7 +102,10 @@ static inline va_node *find_fit(va_node *entry, u64 size) {
         }
 
         return NULL;
+
     }
+
+    return NULL;
 }
 
 va_ret va_alloc(u64 pages, u16 attributes) {
@@ -173,10 +176,13 @@ va_ret va_alloc(u64 pages, u16 attributes) {
     ret.pages = pages;
     ret.status = 0;
 
+    entry->virtual_base += rsz;
+    entry->length -= rsz;
+    UpdateParents(entry);
     
 
-    
+    spin_unlock(&va_lock);
 
-    
+    return ret;
     
 }

@@ -15,7 +15,7 @@ cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     boot/kernel/x86-64/memory/memhlp.c \
     boot/kernel/x86-64/memory/alloc.c \
     boot/kernel/x86-64/memory/maphlp.c \
-    boot/kernel/x86-64/memory/virtual_allocator.c \
+    boot/kernel/x86-64/memory/valloc.c \
     boot/kernel/x86-64/memory/dmadef.c \
     boot/kernel/x86-64/memory/dmahlp.c \
     boot/kernel/x86-64/memory/dma.c \
@@ -27,3 +27,11 @@ cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     $kernel_includes tests/test_ata_identify.c \
     -o /tmp/64-dem-test-ata
 /tmp/64-dem-test-ata
+
+cc -std=c11 -Wall -Wextra -Werror -Wno-error -O1 -g \
+    -fsanitize=undefined -DVA_TREE=0x300000000ULL \
+    $kernel_includes tests/test_va_alloc.c \
+    boot/kernel/x86-64/memory/va_alloc.c \
+    boot/kernel/x86-64/memory/va_def.c \
+    -o /tmp/64-dem-test-va-alloc
+/tmp/64-dem-test-va-alloc

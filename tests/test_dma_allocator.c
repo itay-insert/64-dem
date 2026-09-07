@@ -48,6 +48,12 @@ void flush_pages(u64 virtual_address, u64 pages) {
     (void)pages;
 }
 
+void destroy_mapping(u64 virtual_address, u64 pages, u64 *pml4) {
+    (void)virtual_address;
+    (void)pages;
+    (void)pml4;
+}
+
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *pml4) {
     (void)pml4;
     PAGING_LOOKUP_DESCRIPTOR result = {0};
