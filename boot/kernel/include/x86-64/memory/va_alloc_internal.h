@@ -39,6 +39,7 @@ typedef struct {
 } va_ret;
 
 extern int entries;
+extern int max;
 extern va_hd *va_header;
 extern va_node *va_kstart;
 extern va_node *va_ustart;

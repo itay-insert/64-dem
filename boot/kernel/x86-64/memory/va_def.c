@@ -3,6 +3,7 @@
 
 
 int entries = 0;
+int max = 0;
 
 va_hd *va_header = NULL;
 va_node *va_kstart = NULL;
