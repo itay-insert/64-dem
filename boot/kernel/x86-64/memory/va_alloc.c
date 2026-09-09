@@ -200,21 +200,26 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                     entry->Parent->va_right = NULL;
             }
             
-            if (entry == va_latest) {
-                va_latest = entry->Parent;
-                if (pg_hd->free_entries == max && metadata_pages > 0) {
-                    EFI_MEMORY_DESCRIPTOR alloc = {0};
-                    u64 adr = (u64)((u8 *)pg_hd - 0x1000);
-                    va_hd *parhd = (va_hd *)adr;
-                    parhd->next_page = pg_hd->next_page;
-                    alloc.NumberOfPages = 1;
-                    alloc.VirtualStart = (u64)pg_hd;
-                    vfree(alloc);
-                    metadata_pages--;
-                    va_top -= 0x1000;
-                }
-            }
+            
+
+
+            if (pg_hd->free_entries == max && metadata_pages > 0 && va_latest == entry) {
+                EFI_MEMORY_DESCRIPTOR alloc = {0};
+                u64 adr = (u64)((u8 *)pg_hd - 0x1000);
+                va_hd *parhd = (va_hd *)adr;
+                parhd->next_page = pg_hd->next_page;
+                alloc.NumberOfPages = 1;
+                alloc.VirtualStart = (u64)pg_hd;
+                vfree(alloc);
+                metadata_pages--;
+                va_top -= 0x1000;
+                u64 base = (u64)(((u8 *)parhd + sizeof(va_hd)) + (sizeof(va_node) * 
+                (max - (int)parhd->free_entries - 1) < 0 ? 0 : (mac - (int)parhd->free_entries - 1)));
+                va_latest = (va_node *)base;
+            } 
+
         }
+                    
     } else {
         entry->virtual_base += rsz;
         entry->length -= rsz;
