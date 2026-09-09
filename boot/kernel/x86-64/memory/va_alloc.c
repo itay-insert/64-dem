@@ -214,7 +214,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 metadata_pages--;
                 va_top -= 0x1000;
                 u64 base = (u64)(((u8 *)parhd + sizeof(va_hd)) + (sizeof(va_node) * 
-                (max - (int)parhd->free_entries - 1) < 0 ? 0 : (mac - (int)parhd->free_entries - 1)));
+                (max - (int)parhd->free_entries - 1) < 0 ? 0 : (max - (int)parhd->free_entries - 1)));
                 va_latest = (va_node *)base;
             } 
 
