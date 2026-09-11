@@ -24,6 +24,9 @@ typedef enum {
     NoParent = 2,
 } va_labels;
 
+va_node *last_ustart = NULL;
+va_node *last_kstart = NULL;
+
 static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
     va_node *entry = NULL;
     va_hd *hd = va_header;
@@ -36,6 +39,7 @@ static inline va_node *find_new_entry(u8 Pos, va_node *Parent) {
             va_top += 0x1000;
             metadata_pages++;
             new_hd->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
+            new_hd->unused_entries = 0;
             new_hd->next_page = NULL;
             hd->next_page = new_hd;
             entry = (va_node *)((u8 *)new_hd + sizeof(va_hd));
@@ -135,6 +139,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
         va_header->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
         max = (int)va_header->free_entries;
         va_header->next_page = NULL;
+        va_header->unused_entries = 0;
     }
 
     if (entries == 0) {
@@ -159,7 +164,8 @@ va_ret va_alloc(u64 pages, u16 attributes) {
         va_ustart->virtual_base = USER_SPACE;
         va_ustart->length = (USER_END - USER_SPACE) + 1;
         va_ustart->max_length = va_ustart->length;
-
+        last_kstart = va_kstart;
+        last_ustart = va_ustart;
     }
 
 
@@ -198,12 +204,11 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                     entry->Parent->va_left = NULL;
                 else if (entry->Parent->va_right == entry) 
                     entry->Parent->va_right = NULL;
+
+                entry->Parent = NULL;
             }
-            
-            
 
-
-            if (pg_hd->free_entries == max && metadata_pages > 0 && va_latest == entry) {
+            if (pg_hd->free_entries == max && metadata_pages > 0 && va_latest == entry && pg_hd->unused_entries == 0) {
                 EFI_MEMORY_DESCRIPTOR alloc = {0};
                 u64 adr = (u64)((u8 *)pg_hd - 0x1000);
                 va_hd *parhd = (va_hd *)adr;
@@ -216,7 +221,9 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 u64 base = (u64)(((u8 *)parhd + sizeof(va_hd)) + (sizeof(va_node) * 
                 (max - (int)parhd->free_entries - 1) < 0 ? 0 : (max - (int)parhd->free_entries - 1)));
                 va_latest = (va_node *)base;
-            } 
+            } else {
+                pg_hd->unused_entries++;
+            }
 
         }
                     
@@ -234,4 +241,29 @@ va_ret va_alloc(u64 pages, u16 attributes) {
 }
 
 
+void va_free(va_ret desc) {
+    if (desc.status != 0 || desc.pages == 0)
+        return;
+
+    spin_lock(&va_lock);
+    va_hd *pghd = va_header;
+    va_node *entry = NULL;
+    va_node *last = desc.attributes & 4 ? last_ustart : last_kstart;
+    while (pghd != NULL) {
+        int entries = ((max + pghd->unused_entries) - (int)pghd->free_entries);
+        va_node *src = (va_node *)((u8 *)pghd + sizeof(va_hd));
+        for (int i = 0; i < entries; i++) {
+            if (src->length == 0 && src->Parent == NULL && src->va_left == NULL && src->va_right == NULL) {
+                src->length = desc.pages << 12;
+                src->attributes = desc.attributes;
+                src->
+            }
+
+
+        }
+    }
+    
+
+    spin_unlock(&va_lock);
+}
 

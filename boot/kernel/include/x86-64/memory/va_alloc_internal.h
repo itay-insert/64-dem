@@ -15,6 +15,7 @@ typedef struct header va_hd;
 
 struct header {
     u64 free_entries;
+    u64 unused_entries;
     va_hd *next_page;
 } __attribute__((packed));
 
