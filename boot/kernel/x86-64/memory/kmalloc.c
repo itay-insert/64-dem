@@ -71,8 +71,12 @@ static inline slabobj *createSlab() {
         hd->next_page = new_hd;
         latest = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         
+    } else {
+        latest = (slabobj *)((u8 *)latest + sizeof(slabobj));
+        
     }
 
+    return latest;
 } 
 
 
@@ -96,6 +100,16 @@ void *kmalloc(u64 Size) {
 
 
     if (Size < 4096) {
+        slabobj *slab = createSlab();
+        if (slab == NULL) {
+            spin_unlock(&klock);
+            return NULL;
+        }
 
+        u64 addr = va_alloc(1, 0x03);
+        memset(slab, 0, sizeof(slabobj));
+        slab->PageBase = addr;
+        slab->FreeObs = 64;
+        slab->next_object = NULL;
     }
 }
