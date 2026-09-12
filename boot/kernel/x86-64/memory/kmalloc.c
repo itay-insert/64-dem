@@ -80,6 +80,13 @@ static inline slabobj *createSlab() {
 } 
 
 
+static inline u64 find_objs(int req, const u8 *buff, u64 base) {
+     int zc = 0;
+     for (int i = 0; i < 64; i++) {
+          if (buff[i] == 0) zc++;
+          else if (buff[i] == 1) zc = 0;
+     
+
 void *kmalloc(u64 Size) {
     Size = Size + sizeof(k_header);
     spin_lock(&klock);
