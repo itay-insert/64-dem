@@ -26,6 +26,7 @@ struct va_node {
     u64 length;
     u64 max_length;
     u16 attributes;
+    u8 UsedNodes;
     va_node *va_right;
     va_node  *va_left;
     va_node *Parent;
@@ -39,14 +40,14 @@ typedef struct {
     u16 attributes;
 } va_ret;
 
-extern int entries;
+extern int va_entries;
 extern int max;
 extern va_hd *va_header;
 extern va_node *va_kstart;
 extern va_node *va_ustart;
 extern va_node *va_latest;
-extern int limit;
-extern int metadata_pages;
+extern int va_limit;
+extern int va_metadata_pages;
 extern u64 va_top;
 extern spinlock_t va_lock;
 

@@ -76,12 +76,12 @@ static void reset_allocator(void) {
     bitmap_base = (u64)bitmap;
     bitmapSize = sizeof(bitmap);
     former_count = 0;
-    entries = 0;
+    dma_entries = 0;
     dma_header = NULL;
     dma_start = NULL;
     dma_latest = NULL;
-    limit = 0;
-    metadata_pages = 0;
+    dma_limit = 0;
+    dma_metadata_pages = 0;
     dma_top = DMA_POOL;
     mapping_count = 0;
     memset((void *)DMA_BASE, 0, TEST_REGION_SIZE);
@@ -183,7 +183,7 @@ static void test_metadata_grows_past_one_page(void) {
             abort();
         }
     }
-    assert(metadata_pages == 1);
+    assert(dma_metadata_pages == 1);
     for (size_t i = 0; i < 300; i++) free_dma(allocations[i].virtual_address);
     dma_ret replacement = allocate_dma(1);
     assert(replacement.status == 0);

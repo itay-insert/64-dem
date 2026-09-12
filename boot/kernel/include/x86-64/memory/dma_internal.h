@@ -28,12 +28,12 @@ typedef struct {
     dma_entry *home_entry;
 } __attribute__((packed)) dma_descriptor;
 
-extern int entries;
+extern int dma_entries;
 extern dma_entry *dma_header;
 extern dma_entry *dma_start;
 extern dma_entry *dma_latest;
-extern int limit;
-extern int metadata_pages;
+extern int dma_limit;
+extern int dma_metadata_pages;
 extern u64 dma_top;
 extern spinlock_t dma_lock;
 

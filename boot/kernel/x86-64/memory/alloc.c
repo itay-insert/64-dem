@@ -8,6 +8,7 @@
 
 u64 bitmap_base = 0;
 u64 bitmapSize = 0;
+u64 allocator_usable_pages = 0;
 spinlock_t bitmap_lock = {0};
 
 
@@ -70,6 +71,15 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
             bitmap[count>>3] |= (u8)(0xff << (8 - onePage_count));
         } 
     }
+    allocator_usable_pages = 0;
+    for (u64 i = 0; i < bitmap_size; i++) {
+        u8 value = bitmap[i];
+        for (u8 bit = 0; bit < 8; bit++) {
+            if ((value & (1U << bit)) == 0)
+                allocator_usable_pages++;
+        }
+    }
+
     u64 PageCount = (kernel_end - kernel_start + 4095) >> 12;
     count = kernel_start >> 12;
     if ((count & 7) > 0) {

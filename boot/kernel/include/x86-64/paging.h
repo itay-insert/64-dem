@@ -40,6 +40,7 @@ typedef struct {
 
 extern int GbPageSupport;
 extern u64 *KernelPML4;
+extern u64 paging_allocated_pages;
 
 void flush_pages(u64 virtual_address, u64 pages);
 void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 attributes, u64 *PML4);

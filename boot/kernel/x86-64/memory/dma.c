@@ -25,19 +25,19 @@ dma_ret allocate_dma(u64 size) {
         dma_header = (dma_entry *)DMA_POOL;
         dma_header->status = Header;
         dma_header->SizeInPages = (4096 / sizeof(dma_entry)) - 1;
-        limit = (int)dma_header->SizeInPages;
+        dma_limit = (int)dma_header->SizeInPages;
         dma_header->next_entry = NULL;
         spin_unlock(&dma_lock);
     }
 
-    if (entries == 0) {
+    if (dma_entries == 0) {
         spin_lock(&dma_lock);
         dma_start = (dma_entry *)((u8 *)dma_header + sizeof(dma_entry));
         dma_start->next_entry = NULL;
         dma_start->SizeInPages = pages;
         dma_start->status = Used;
         dma_latest = dma_start;
-        entries++;
+        dma_entries++;
         dma_header->SizeInPages--;
         spin_unlock(&dma_lock);
         EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
@@ -100,10 +100,10 @@ dma_ret allocate_dma(u64 size) {
                 }
                 dma_entry *new_page = (dma_entry *)allocation.VirtualStart;
                 dma_top += 0x1000;
-                metadata_pages++;
+                dma_metadata_pages++;
                 new_page->status = Header;
                 new_page->next_entry = NULL;
-                new_page->SizeInPages = limit;
+                new_page->SizeInPages = dma_limit;
                 entry->next_entry = new_page;
                 dma_latest->next_entry = (dma_entry *)((u8 *)new_page + sizeof(dma_entry));
                 dma_latest = dma_latest->next_entry;
@@ -112,11 +112,11 @@ dma_ret allocate_dma(u64 size) {
             entry = entry->next_entry;
             entries_limit = (int)entry->SizeInPages;
         }
-        if (entries_limit != limit || metadata_pages == 0) {
+        if (entries_limit != dma_limit || dma_metadata_pages == 0) {
             dma_latest->next_entry = (dma_entry *)((u8 *)dma_latest + sizeof(dma_entry));
             dma_latest = dma_latest->next_entry;
         }
-        entries++;
+        dma_entries++;
         entry->SizeInPages--;
         dma_latest->status = Used;
         dma_latest->SizeInPages = pages - free_pages;
@@ -192,14 +192,14 @@ void free_dma(u64 Base) {
     }
 
 
-    for (int j = metadata_pages; j > 0; j--) {
+    for (int j = dma_metadata_pages; j > 0; j--) {
         pool_entry = dma_header;
 
         for (int i = 0; i < j; i++) {
             pool_entry = pool_entry->next_entry;
         }
 
-        if (pool_entry->SizeInPages == (u64)limit) {
+        if (pool_entry->SizeInPages == (u64)dma_limit) {
             dma_entry *first_entry = (dma_entry *)((u8 *)pool_entry + sizeof(dma_entry));
             dma_entry *previous_entry = dma_start;
             while (previous_entry->next_entry != first_entry) {
@@ -211,9 +211,9 @@ void free_dma(u64 Base) {
             Header_before->next_entry = NULL;
             allocation.VirtualStart = (u64)pool_entry;
             allocation.NumberOfPages = 1;
-            metadata_pages--;
+            dma_metadata_pages--;
             dma_top -= 0x1000;
-            entries = (metadata_pages + 1) * limit;
+            dma_entries = (dma_metadata_pages + 1) * dma_limit;
             vfree(allocation);
         }
 

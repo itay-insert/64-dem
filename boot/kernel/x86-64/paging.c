@@ -1,10 +1,12 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "x86-64/efi_memory_types.h"
 #include "x86-64/lowlevel.h"
 #include "drivers/display/vga.h"
 #include "x86-64/memory/memory.h"
 #include "boot_info.h"
+#include "x86-64/spinlock.h"
 
 
 #define fb_virtual 0xffffa00000000000  // framebuffer
@@ -23,6 +25,8 @@ typedef struct {
 } PAGING_LOOKUP_DESCRIPTOR;
 
 int GbPageSupport = 0;
+u64 paging_allocated_pages = 0;
+
 
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     PAGING_LOOKUP_DESCRIPTOR ret = {0};
@@ -88,12 +92,19 @@ u64 alloc_pages(u64 pages) {
     for (u64 i = 0; i < (pages << 12); i++) {
         region[i] = 0;
     }
+    __atomic_fetch_add(&paging_allocated_pages, pages, __ATOMIC_RELAXED);
     return alloc.PhysicalStart;
 }
 
 void free_pages(u64 address, u64 pages) {
     EFI_MEMORY_DESCRIPTOR free = {0, address, address, pages, 0};
     free_frame(free);
+    u64 current = __atomic_load_n(&paging_allocated_pages, __ATOMIC_RELAXED);
+    while (current >= pages &&
+           !__atomic_compare_exchange_n(&paging_allocated_pages, &current,
+                                        current - pages, false,
+                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+    }
 }
 
 void flush_pages(u64 virtual_address, u64 pages) {
@@ -204,6 +215,7 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
             }
         }
     }
+
 }
 
 

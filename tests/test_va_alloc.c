@@ -46,13 +46,13 @@ void vfree(EFI_MEMORY_DESCRIPTOR allocation) {
 
 static void reset_allocator(void) {
     memset((void *)(uintptr_t)VA_TREE, 0, PAGE_SIZE * 2);
-    entries = 0;
+    va_entries = 0;
     va_header = NULL;
     va_kstart = NULL;
     va_ustart = NULL;
     va_latest = NULL;
-    limit = 0;
-    metadata_pages = 0;
+    va_limit = 0;
+    va_metadata_pages = 0;
     va_top = VA_TREE;
     spinlock_init(&va_lock);
     vmalloc_calls = 0;
@@ -119,7 +119,7 @@ static void test_metadata_allocation_failure_is_reported(void) {
     va_ret result = va_alloc(1, 0x03);
     assert(result.status != 0);
     assert(va_header == NULL);
-    assert(entries == 0);
+    assert(va_entries == 0);
     assert(va_lock.locked == 0);
 }
 

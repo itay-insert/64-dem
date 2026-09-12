@@ -5,5 +5,6 @@
 #include "x86-64/memory/memory_mapping.h"
 #include "x86-64/memory/virtual_allocator.h"
 #include "x86-64/memory/dma.h"
+#include "x86-64/memory/memory_diagnostics.h"
 
 #endif
