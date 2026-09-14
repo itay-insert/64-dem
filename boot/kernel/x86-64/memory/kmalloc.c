@@ -70,10 +70,21 @@ static inline slabobj *createSlab() {
         new_hd->next_page = NULL;
         hd->next_page = new_hd;
         slab_pages++;
-        latest = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
+        latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
+        latest = latest->next_object;
         
     } else {
-        latest = (slabobj *)((u8 *)latest + sizeof(slabobj));
+        slabobj *slab = start;
+        while (slab != NULL) {
+            if (slab->FreeObs == 128) {
+                return slab;
+            }
+
+            slab = slab->next_object;
+        }
+
+        latest->next_object = (slabobj *)((u8 *)latest + sizeof(slabobj));
+        latest = latest->next_object;
         
     }
 
