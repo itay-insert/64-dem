@@ -11,7 +11,7 @@ typedef struct slabobj slabobj;
 struct slabobj {
     u64 PageBase;
     int FreeObs;
-    u8 obs[64];
+    u64 Cache_2048[2];
     slabobj *next_object;
 } __attribute__((packed));
 
@@ -92,31 +92,8 @@ static inline slabobj *createSlab() {
 } 
 
 
-static inline void *find_objs(int req, u8 *buff, u64 base) {
-    int zc = 0;
-    int sc = 0;
-    for (int i = 0; i < 64; i++) {
-          if (buff[i] == 0) {
-            zc++;
-            if (zc >= req) break;
-          } else if (buff[i] == 1) {
-            zc = 0;
-            while (i < 64 && buff[i] == 1) 
-                i++;
-            base = base + (64 * i);
-            sc = i;
-
-          }
-    }
-
-    if (zc >= req) {
-        for (int i = sc; i < (sc + req); i++) {
-            buff[i] = 1;
-        }
-        return (void *)base;
-    } else {
-        return NULL;
-    }
+static inline void *find_objs(int req, u64 *buff, u64 base) {
+   
 
 }
      
@@ -153,15 +130,15 @@ void *kmalloc(u64 Size) {
             u64 addr = alloc.base;
             memset(slab, 0, sizeof(slabobj));
             slab->PageBase = addr;
-            slab->FreeObs = 64;
+            slab->FreeObs = 128;
             slab->next_object = NULL;
         }
 
         slabobj *slab = start;
         void *place = NULL;
         while (slab != NULL) {
-            int req = (int)(Size + 63) >> 6;
-            place = find_objs(req, slab->obs, slab->PageBase);
+            int req = (int)(Size + 31) >> 5;
+            place = find_objs(req, slab->Cache_2048, slab->PageBase);
             if (place != NULL) {
                 slab->FreeObs -= req;
                 break;
@@ -181,12 +158,10 @@ void *kmalloc(u64 Size) {
             u64 addr = alloc.base;
             memset(slab, 0, sizeof(slabobj));
             slab->PageBase = addr;
-            slab->FreeObs = 64;
+            slab->FreeObs = 128;
             slab->next_object = NULL;
 
-            int req = (int)(Size + 63) >> 6;
-            for (int i = 0; i < req; i++) 
-                slab->obs[i] = 1;
+          
             
             
         }
