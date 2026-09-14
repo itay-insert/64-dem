@@ -104,8 +104,12 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
              } else if (buff[1] == 0) {
                  buff[1] = Used2048;
                  base = base + 2048;
-
-             
+                 return (void *)base;
+             } else {
+                 return NULL;
+             }
+         } else if (!(req & 31)) {
+             for (int i = 0; i < 4; i++) 
              
 
 }
