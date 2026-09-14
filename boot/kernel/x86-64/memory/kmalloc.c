@@ -32,6 +32,8 @@ struct slabhd {
 } __attribute__((packed));
 
 
+#define Used2048 0xFFFFFFFFFFFFFFFFULL
+
 slabobj *start = NULL;
 slabobj *latest = NULL;
 
@@ -93,7 +95,18 @@ static inline slabobj *createSlab() {
 
 
 static inline void *find_objs(int req, u64 *buff, u64 base) {
-   
+         if (req == 0) return NULL;
+         if (!(req & 63)) {
+             req = req >> 6;
+             if (buff[0] == 0) {
+                 buff[0] = Used2048;
+                 return (void *)base;
+             } else if (buff[1] == 0) {
+                 buff[1] = Used2048;
+                 base = base + 2048;
+
+             
+             
 
 }
      
