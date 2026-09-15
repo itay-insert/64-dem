@@ -109,6 +109,7 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
                  return NULL;
              }
          } else if (!(req & 31)) {
+             req = req >> 5;
              for (int i = 0; i < 4; i++) 
              
 
