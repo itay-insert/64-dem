@@ -35,6 +35,7 @@ struct slabhd {
 #define Used2048 0xFFFFFFFFFFFFFFFFULL
 #define Used1024 0xFFFFFFFF
 
+
 slabobj *start = NULL;
 slabobj *latest = NULL;
 
@@ -99,49 +100,15 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
          if (req == 0) return NULL;
          int sc = 0;
          int zc = 0;
-         if (!(req & 63)) {
-             req = req >> 6;
-             for (int i = 0; i < 2; i++) {
-                
-                 if (buff[i] == 0) zc++;
-                 else if (buff[i] == Used2048) {
-                         zc = 0;
-                         while (i < 2 && buff[i] == Used2048) i++;
-                         base = base + (i << 11);
-                         sc = i;
-                 }
-             }
-
-             if (zc >= req) {
-                 for (int i = sc; i < (sc+req); i++) buff[i] = Used2048;
-                 return (void *)base;
-             } else return NULL;
-                 
-                         
-         } else if (!(req & 31)) {
-             req = req >> 5;
-             u32 *buff32 = (u32 *)((u64)buff);
+         int tc = req;
+         while (tc > 0) {
+             int dc = tc >> 6;
+             int rc = tc & 63;
+             if (buff[dc] 
+         }
              
-             for (int i = 0; i < 4; i++) {
-                 if (buff32[i] == 0) zc++;
-                 else if (buff32[i] == Used1024) {
-                    zc = 0;
-                    while (i < 4 && buff32[i] == Used1024) i++;
-                    base = base + (i << 10);
-                    sc = i;
-                 }
-             }
-             
-             if (zc >= req) {
-                 for (int i = sc; i < (sc+req); i++) buff32[i] = Used1024;
-                 return (void *)base;
-             } else return NULL;
-        } else if (!(req & 15)) {
-             req = req >> 4;
-             u16 *buff16 = (u16 *)((u64)buff);
-             for (int i = 0; i < 8; i++) {
-                 if (buff16[i] == 0) zc++;
-                 
+         
+         
 }
      
 
