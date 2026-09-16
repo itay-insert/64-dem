@@ -5,6 +5,7 @@
 #include "x86-64/memory/frame_allocator.h"
 #include "x86-64/memory/virtual_allocator.h"
 #include "x86-64/memory/va_alloc.h"
+#include "x86-64/lowlevel.h"
 
 typedef struct slabobj slabobj;
 
@@ -100,12 +101,17 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
          if (req == 0) return NULL;
          int sc = 0;
          int zc = 0;
-         int tc = req;
-         while (tc > 0) {
-             int dc = tc >> 6;
-             int rc = tc & 63;
-             if (buff[dc] 
-         }
+         int i = 0;
+         while (i < 128) {
+            int ind = (int)Bsf(~buff[i>>6]);
+            i = i + ind;
+            u64 tmp = buff[i>>6];
+            tmp = tmp & (Used2048 << (i & 63));
+            ind = (int)Bsf(tmp);
+            
+            
+   
+            
              
          
          
