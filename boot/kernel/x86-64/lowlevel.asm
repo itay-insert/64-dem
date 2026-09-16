@@ -28,6 +28,7 @@ global MMIO_read16
 global MMIO_write16
 global MMIO_read8
 global MMIO_write8
+global Bsf
 
 
 section .text
@@ -228,5 +229,14 @@ ret
 MMIO_write8:
 add rdi, rsi
 mov [rdi], dl
+ret
+
+Bsf:
+test rdi, rdi
+jz no_bit
+bsf rax, rdi
+ret
+no_bit:
+mov rax, 64
 ret
 
