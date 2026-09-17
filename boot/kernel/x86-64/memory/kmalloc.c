@@ -101,16 +101,17 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
          if (req == 0) return NULL;
          int sc = 0;
          int zc = 0;
+         int tc = req;
          int i = 0;
          while (i < 128) {
             int ind = (int)Bsf(~buff[i>>6]);
             i = i + ind;
             u64 tmp = buff[i>>6];
             tmp = tmp & (Used2048 << (i & 63));
-            ind = (int)Bsf(tmp);
-            
-            
-   
+            int ind2 = (int)Bsf(tmp);
+    
+            if (ind2 == 64) { // next cell
+                 tc -= (ind2 - ind);
             
              
          
