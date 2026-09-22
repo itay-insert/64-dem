@@ -278,10 +278,17 @@ _start:
 
 
     _zero_initialize:
-
+        xor eax, eax
+        rep stosb
+        ret
 
     _load_segment:
-       
+        push ecx
+        push di
+        push es
+        mov ecx, [ss:bp-16]
+        mov eax, p_vadder
+        
         call _zero_initialize
         add sp, 8
 
@@ -296,12 +303,12 @@ _start:
         push bp
         mov bp, sp
         sub sp, 16
-        mov eax, [es:di+0x04]
-        mov ebx, [es:di+0x08]
+        mov eax, [es:di+0x04]  ; p_offset
+        mov ebx, [es:di+0x08]  ; p_vaddr
         mov [ss:bp-4], eax
         mov [ss:bp-8], ebx
-        mov eax, [es:di+0x10]
-        mov ebx, [es:di+0x14]
+        mov eax, [es:di+0x10]  ; p_filesz
+        mov ebx, [es:di+0x14]  ; p_memsz
         mov [ss:bp-12], eax
         mov [ss:bp-16], ebx
         call _load_segment
