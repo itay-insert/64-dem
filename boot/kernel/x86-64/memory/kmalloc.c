@@ -195,8 +195,8 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
                for (int i = 0; i < bc; i++) 
                   map[i] = 0xFF;
 
-               sc += bc << 6;
-               req -= bc << 6;
+               sc += bc << 3;
+               req -= bc << 3;
            } else if (c > 0) {
                for (int i = sc; i < (sc+c); i++) set128(&buff[0], &buff[1], i);
                sc += c;
