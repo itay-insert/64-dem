@@ -157,11 +157,67 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
 
     if (sc == -1) 
         return NULL;
+ 
+    u64 addr = (base + (sc << 5));
 
-    for (int i = sc; i < (sc+req); i++) 
-        set128(&buff[0], &buff[1], i);
+    recheck:
     
-    return (base + (sc << 5));
+    if (!(sc & 7)) {
+        while (req > 0) {
+           int qwc = (req >> 6);
+           int dwc = (req >> 5);
+           int wc = (req >> 4);
+           int bc = (req >> 3);
+           int c = req & 7;
+           if (qwc > 0) {
+               u64 *map = (u64 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < qwc; i++) 
+                  map[i] = Used2048;
+
+               sc += qwc << 6;
+               req -= qwc << 6;
+           } else if (dwc > 0) {
+               u32 *map = (u32 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < dwc; i++) 
+                  map[i] = Used1024;
+
+               sc += dwc << 5;
+               req -= dwc << 5;
+           } else if (wc > 0) {
+               u16 *map = (u16 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < wc; i++) 
+                  map[i] = 0xFFFF;
+
+               sc += wc << 4;
+               req -= wc << 4;
+           } else if (bc > 0) {
+               u8 *map = (u8 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < bc; i++) 
+                  map[i] = 0xFF;
+
+               sc += bc << 6;
+               req -= bc << 6;
+           } else if (c > 0) {
+               for (int i = sc; i < (sc+c); i++) set128(&buff[0], &buff[1], i);
+               sc += c;
+               req -= c;
+           }
+       }
+
+    } else if ((req >> 3) | (req >> 4) | (req >> 5) | (req >> 6)) {
+        while (req > 0) {
+           set128(&buff[0], &buff[1], sc);
+           sc++;
+           req--;
+           if (!(sc & 7))
+              goto recheck;
+        }
+    } else {
+        for (int i = sc; i < (sc+req); i++) 
+            set128(&buff[0], &buff[1], i);
+    }
+    
+    return addr;
          
 }
      
