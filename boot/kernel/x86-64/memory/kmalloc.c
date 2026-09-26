@@ -96,51 +96,72 @@ static inline slabobj *createSlab() {
     return latest;
 } 
 
+static inline int Bsf128(u64 low, u64 high) {
+    int ind = (int)Bsf(low);
+    if (ind == 64) 
+        return (ind + (int)Bsf(high)); // Bsf returns 64 if no 1 bit is detected
+    return ind;
+}
+
+
+static inline void mask128(u64 *low, u64 *high, int ind) {
+    if (ind == 128) {
+        *low &= ~Used2048;
+        *high &= ~Used2048;
+        return;
+    }
+    *low = *low & ((ind >> 6) ? ~Used2048 : (Used2048 << (ind & 63)));
+    *high = *high & (Used2048 << ((ind >> 6) ? (ind - 64) : 0));
+}
+
+static inline void Or128(u64 *low, u64 *high, int ind) {
+    if (ind == 128) {
+        *low = Used2048;
+        *high = Used2048;
+        return;
+    }
+    *low = *low | ((ind >> 6) ? Used2048 : (Used2048 >> (64 - (ind & 63))));
+    *high = *high | ((ind >> 6) ? ind & 63 ? (Used2048 >> (64 - (ind - 64))) : 0 : 0);
+}
+
+static inline u64 set64(u64 Long, u8 ind) {
+    if (ind > 63)
+        return Long;
+
+    return (Long | (1ULL << ind));
+}
+
+static inline void set128(u64 *low, u64 *high, u8 ind) {
+    if (ind > 127)
+        return;
+    *low = set64(*low, ind);
+    *high = ((ind >> 6) ? set64(*high, (ind - 64)) : *high);
+}
 
 static inline void *find_objs(int req, u64 *buff, u64 base) {
-        if (req == 0) return NULL;
-        int sc = -1;
-        int zc = 0;
-        int tc = req;
-        int i = 0;
-        while (i < 128) {
-            int ind = (int)Bsf(~buff[i>>6]);
-            if ((i & 63) > ind) {
-                ind = (int)Bsf(~((buff[i>>6] >> (i & 63)) | (Used2048 << (64 - (i & 63)))));
-            }
-            i = i + ind;
-            u64 tmp = buff[i>>6];
-            tmp = tmp & (Used2048 << (i & 63));
-            int ind2 = (int)Bsf(tmp);
-
-            if (sc == -1)
-                sc = i;
-    
-            if (ind2 == 64) { // next cell
-                tc -= (ind2 - ind);
-                if (tc <= 0) 
-                    break;
-                else {
-                    i = i + (ind2 - ind);
-                    if ((buff[i>>6] & 1) != 0) {
-                        tc = req;
-                        sc = -1;
-                    }
-                }
-            } else {
-                if ((tc - (ind2 - ind)) <= 0) {
-                    tc = 0;
-                    break;
-                } else { 
-                    i = i + (ind2 - ind);
-                    sc = -1;
-                }
-            }
-
+    if (req == 0) return NULL;
+    int sc = -1;
+    int zc = 0;
+    u64 low = *buff;
+    u64 high = buff[1];
+    while (Bsf128(~low, ~high) < 128) {
+        int ind = Bsf128(~low, ~high);
+        mask128(&low, &high, ind);
+        int ind2 = Bsf128(low, high);
+        if ((ind2 - ind) >= req) {
+            sc = ind;
+            break;
         }
-            
-             
-         
+        Or128(&low, &high, ind2);
+    }
+
+    if (sc == -1) 
+        return NULL;
+
+    for (int i = sc; i < (sc+req); i++) 
+        set128(&buff[0], &buff[1], i);
+    
+    return (base + (sc << 5));
          
 }
      
