@@ -204,7 +204,7 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
            }
        }
 
-    } else if ((req >> 3) | (req >> 4) | (req >> 5) | (req >> 6)) {
+    } else if (req >> 3) {
         while (req > 0) {
            set128(&buff[0], &buff[1], sc);
            sc++;
