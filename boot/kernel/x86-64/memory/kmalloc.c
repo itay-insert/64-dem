@@ -98,20 +98,46 @@ static inline slabobj *createSlab() {
 
 
 static inline void *find_objs(int req, u64 *buff, u64 base) {
-         if (req == 0) return NULL;
-         int sc = 0;
-         int zc = 0;
-         int tc = req;
-         int i = 0;
-         while (i < 128) {
+        if (req == 0) return NULL;
+        int sc = -1;
+        int zc = 0;
+        int tc = req;
+        int i = 0;
+        while (i < 128) {
             int ind = (int)Bsf(~buff[i>>6]);
+            if ((i & 63) > ind) {
+                ind = (int)Bsf(~((buff[i>>6] >> (i & 63)) | (Used2048 << (64 - (i & 63)))));
+            }
             i = i + ind;
             u64 tmp = buff[i>>6];
             tmp = tmp & (Used2048 << (i & 63));
             int ind2 = (int)Bsf(tmp);
+
+            if (sc == -1)
+                sc = i;
     
             if (ind2 == 64) { // next cell
-                 tc -= (ind2 - ind);
+                tc -= (ind2 - ind);
+                if (tc <= 0) 
+                    break;
+                else {
+                    i = i + (ind2 - ind);
+                    if ((buff[i>>6] & 1) != 0) {
+                        tc = req;
+                        sc = -1;
+                    }
+                }
+            } else {
+                if ((tc - (ind2 - ind)) <= 0) {
+                    tc = 0;
+                    break;
+                } else { 
+                    i = i + (ind2 - ind);
+                    sc = -1;
+                }
+            }
+
+        }
             
              
          
