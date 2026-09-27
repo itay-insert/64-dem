@@ -17,6 +17,7 @@
 #include "drivers/dev.h"
 #include "boot_info.h"
 #include "drivers/xhci.h"
+#include "drivers/acpiPM.hpp"
 
 
 #define RGB 0

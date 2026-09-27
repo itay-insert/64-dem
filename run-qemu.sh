@@ -220,12 +220,12 @@ cp -- "$BOOTLOADER" "$TEMP_DIR/disk/EFI/boot/BOOTX64.efi"
 cp -- "$ROOT_DIR/boot/kernel.elf" "$TEMP_DIR/disk/boot/kernel.elf"
 
 QEMU_ARGS+=(
+    -machine q35
     -drive "format=raw,media=disk,file=fat:rw:$TEMP_DIR/disk"
     -monitor none
     -serial none
     -debugcon stdio
     -global isa-debugcon.iobase=0xe9
-    -no-reboot
 )
 
 # Port 0xE9 output is connected to this terminal while QEMU renders the GOP

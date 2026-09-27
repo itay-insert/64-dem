@@ -162,6 +162,11 @@ typedef struct {
     char signature[4];
     u64 Address;
     PM_ret simple_timer;
+    union {
+        FADT *table0;
+        MADT *table1;
+        ACPI_HPET *table2;
+    } table;
     int status;
 } ACPI_ret;
 

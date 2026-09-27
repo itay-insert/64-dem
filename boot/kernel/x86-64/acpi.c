@@ -164,6 +164,11 @@ typedef struct {
     char signature[4];
     u64 Address;
     PM_ret simple_timer;
+    union {
+        FADT *table0;
+        MADT *table1;
+        ACPI_HPET *table2;
+    } table;
     int status;
 } ACPI_ret;
 
@@ -326,16 +331,19 @@ ACPI_ret ACPI_discovery(const char *signature) {
                     case MADT_sig:
                         MADT *madt = (MADT *)table;
                         ret = handle_APICIO(madt, ret);
+                        ret.table.table1 = madt;
                         return ret;
 
                     case FACP_sig:
                         FADT *fadt = (FADT *)table;
                         ret = handle_PM_timer(fadt, ret);
+                        ret.table.table0 = fadt;
                         return ret;
                         
                     case HPET_sig:
                         ACPI_HPET *hpet = (ACPI_HPET *)table;
                         ret = handle_HPET(hpet, ret);
+                        ret.table.table2 = hpet;
                         return ret;
 
                     case MCFG_sig:
