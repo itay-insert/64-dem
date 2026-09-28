@@ -7,6 +7,8 @@
 #include "x86-64/memory/va_alloc.h"
 #include "x86-64/lowlevel.h"
 
+
+
 typedef struct slabobj slabobj;
 
 struct slabobj {
@@ -36,6 +38,13 @@ struct slabhd {
 #define Used2048 0xFFFFFFFFFFFFFFFFULL
 #define Used1024 0xFFFFFFFF
 
+#define INVALID_BASE 1
+
+typedef enum {
+    NO_ERROR = 0,
+    SIZE_TOO_MUCH = 1,
+    UNKNOWN = 2,
+} ERROR_TYPES;
 
 slabobj *start = NULL;
 slabobj *latest = NULL;
@@ -54,7 +63,7 @@ static inline slabhd *find_hd(slabobj *slab) {
     return hd;
 }
 
-static inline slabobj *createSlab() {
+static inline slabobj *createSlab(void) {
     if (start == NULL) {
         start = (slabobj *)((u8 *)shd + sizeof(slabhd));
         memset(start, 0, sizeof(slabobj));
@@ -77,19 +86,24 @@ static inline slabobj *createSlab() {
         slab_pages++;
         latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         latest = latest->next_object;
+        latest->PageBase = INVALID_BASE;
+        new_hd->free_entries--;
         
     } else {
         slabobj *slab = start;
         while (slab != NULL) {
-            if (slab->FreeObs == 128) {
+            if (slab->FreeObs == 128) 
                 return slab;
-            }
+            
 
             slab = slab->next_object;
         }
 
         latest->next_object = (slabobj *)((u8 *)latest + sizeof(slabobj));
         latest = latest->next_object;
+        latest->PageBase = INVALID_BASE;
+        hd = find_hd(latest);
+        hd->free_entries--;
         
     }
 
@@ -141,11 +155,10 @@ static inline void set128(u64 *low, u64 *high, u8 ind) {
 static inline void *find_objs(int req, u64 *buff, u64 base) {
     if (req == 0) return NULL;
     int sc = -1;
-    int zc = 0;
     u64 low = *buff;
     u64 high = buff[1];
-    while (Bsf128(~low, ~high) < 128) {
-        int ind = Bsf128(~low, ~high);
+    int ind = 0;
+    while ((ind = Bsf128(~low, ~high)) < 128) {
         mask128(&low, &high, ind);
         int ind2 = Bsf128(low, high);
         if ((ind2 - ind) >= req) {
@@ -223,6 +236,7 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
      
 
 void *kmalloc(u64 Size) {
+    bool back = false;
     Size = Size + sizeof(k_header);
     spin_lock(&klock);
 
@@ -241,25 +255,32 @@ void *kmalloc(u64 Size) {
         shd->next_page = NULL;
     }
 
-
+    slabobj *slab;
+    void *place = NULL;
     if (Size < 4096) {
+        find_slab:
+        
         if (start == NULL) {
-            slabobj *slab = createSlab();
+            slab = createSlab();
             if (slab == NULL) {
                 spin_unlock(&klock);
                 return NULL;
             }
 
             va_ret alloc = va_alloc(1, 0x03);
+            if (alloc.status != 0) {
+                spin_unlock(&klock);
+                return NULL;
+            }
             u64 addr = alloc.base;
             memset(slab, 0, sizeof(slabobj));
+            slab->next_object = NULL;
             slab->PageBase = addr;
             slab->FreeObs = 128;
-            slab->next_object = NULL;
+            start = slab;
         }
 
-        slabobj *slab = start;
-        void *place = NULL;
+        slab = start;
         while (slab != NULL) {
             int req = (int)(Size + 31) >> 5;
             place = find_objs(req, slab->Cache_2048, slab->PageBase);
@@ -277,19 +298,46 @@ void *kmalloc(u64 Size) {
                 spin_unlock(&klock);
                 return NULL;
             }
-
-            va_ret alloc = va_alloc(1, 0x03);
-            u64 addr = alloc.base;
-            memset(slab, 0, sizeof(slabobj));
-            slab->PageBase = addr;
+            if (slab->PageBase == INVALID_BASE) {
+                va_ret alloc = va_alloc(1, 0x03);
+                if (alloc.status != 0) {
+                    spin_unlock(&klock);
+                    return NULL;
+                }
+                u64 addr = alloc.base;
+                slab->PageBase = addr;
+            }
+            memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
-            slab->next_object = NULL;
-
-          
-            
-            
+            int req = (int)(Size + 31) >> 5;
+            place = find_objs(req, slab->Cache_2048, slab->PageBase);
         }
 
+        if (back) 
+            goto home;
+
         
+    } else if (!(Size & 0xFFF)) {
+        va_ret alloc = va_alloc((size>>12), 0x03);
+        if (alloc.status != 0) {
+            spin_unlock(&klock);
+            return NULL;
+        }
+        u64 addr = alloc.base;
+        place = (void *)addr;
+    } else {
+        va_ret alloc = va_alloc(((size+4095)>>12), 0x03);
+        if (alloc.status != 0) {
+            spin_unlock(&klock);
+            return NULL;
+        }
+        u64 addr = alloc.base;
+        u64 save_size = size;
+        size = size & 0xFFF;
+        back = true;
+        goto find_slab;  
+        home:
+        
+              
     }
 }
