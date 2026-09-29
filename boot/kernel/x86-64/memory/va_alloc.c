@@ -237,6 +237,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 va_latest = (va_node *)base;
             } else {
                 pg_hd->unused_entries++;
+                pg_hd->free_entries++;
             }
 
         }
@@ -335,6 +336,7 @@ void va_free(va_ret desc) {
                 attach_node(last, src);
                 UpdateParents(src);
                 pghd->unused_entries--;
+                pghd->free_entries--;
                 vfree(alloc);
                 spin_unlock(&va_lock);
                 return;
