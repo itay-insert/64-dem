@@ -237,7 +237,6 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 va_latest = (va_node *)base;
             } else {
                 pg_hd->unused_entries++;
-                pg_hd->free_entries++;
             }
 
         }
