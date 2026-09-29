@@ -575,7 +575,7 @@ void kfree(void *alloc) {
               if (miss) {
                   latest_hd->former_page->next_page = latest_hd->next_page;
               latest_hd->next_page->former_page = latest_hd->former_page;
-                  link_pages(latest_hd->former_page, latest_hd->next_object);
+                  link_pages(latest_hd->former_page, latest_hd->next_page);
               } else if (!miss) 
                   latest_hd->former_page->next_page = NULL;
               latest_hd = deallocate_slab(latest_hd);
