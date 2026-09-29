@@ -340,9 +340,9 @@ void *kmalloc(u64 Size) {
 
         place = (void *)addr;
         u64 new_addr = ((addr + size) & ~0xFFFULL);
-        if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE)
-           va_free
-        
+        if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE) {
+            va_ret desc = {O};
+            desc.
         
               
     }
