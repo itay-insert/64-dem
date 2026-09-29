@@ -389,6 +389,14 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
 }
      
 
+
+static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
+    u64 place = max - last_hd->free_entries;
+    last = (slabobj *)((u8 *)last_hd + sizeof(slabhd));
+    last = last[place];
+    return last;
+}
+
 void *kmalloc(u64 Size) {
     bool conreq = true;
     bool back = false;
@@ -543,9 +551,27 @@ void kfree(void *alloc) {
        slabobj *slab = header->slabOrg;
        clean_cache(req, slab->Cache_2048, header->sc);
        slab->FreeObs += req;
+       
+       bool miss = false;
+       slabhd *latest_hd = find_hd(latest);
+       while (latest_hd != shd) {
+          if (check_page(latest_hd)) {
+              if (miss)
+                  latest_hd->former_page->next_page = latest_hd->next_page;
+              latest_hd = deallocate_slab(latest_hd);
+              slab_pages--;
+              latest = reset_latest(latest, latest_hd);
+          } else {
+              latest_hd = latest_hd->former_page;
+              miss = true;
+          }
+       }
+
+    } else if (!(header->Size & 0xFFFULL)) {
 
 
-       slabhd 
+
+              
        
            
        
