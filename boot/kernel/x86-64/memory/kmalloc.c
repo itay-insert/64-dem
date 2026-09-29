@@ -393,7 +393,8 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
 static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
     u64 place = max - last_hd->free_entries;
     last = (slabobj *)((u8 *)last_hd + sizeof(slabhd));
-    last = &last[place];
+    last = &last[place-1];
+    last->next_object = NULL;
     return last;
 }
 
