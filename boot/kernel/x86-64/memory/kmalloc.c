@@ -343,7 +343,7 @@ void *kmalloc(u64 Size) {
         home:
 
         place = (void *)addr;
-        u64 new_addr = ((addr + size) & ~0xFFFULL);
+        u64 new_addr = ((addr + Size) & ~0xFFFULL);
         if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE) {
             va_ret desc = {O};
             desc.attributes = 0x03;
