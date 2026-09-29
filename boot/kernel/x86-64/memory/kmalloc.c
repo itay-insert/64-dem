@@ -22,6 +22,7 @@ typedef struct {
     u64 Base;
     u64 Size;
     u16 attributes;
+    int sc;
     slabobj *slabOrg;
 } __attribute__((packed)) k_header;
 
@@ -45,6 +46,11 @@ typedef enum {
     SIZE_TOO_MUCH = 1,
     UNKNOWN = 2,
 } ERROR_TYPES;
+
+typedef struct {
+    int sc;
+    void *addr;
+} search_ret;
 
 slabobj *start = NULL;
 slabobj *latest = NULL;
@@ -111,12 +117,15 @@ static inline slabobj *createSlab(void) {
     return latest;
 } 
 
+
+
 static inline int Bsf128(u64 low, u64 high) {
     int ind = (int)Bsf(low);
     if (ind == 64) 
         return (ind + (int)Bsf(high)); // Bsf returns 64 if no 1 bit is detected
     return ind;
 }
+
 
 
 static inline void mask128(u64 *low, u64 *high, int ind) {
@@ -129,6 +138,8 @@ static inline void mask128(u64 *low, u64 *high, int ind) {
     *high = *high & (Used2048 << ((ind >> 6) ? (ind - 64) : 0));
 }
 
+
+
 static inline void Or128(u64 *low, u64 *high, int ind) {
     if (ind == 128) {
         *low = Used2048;
@@ -139,12 +150,16 @@ static inline void Or128(u64 *low, u64 *high, int ind) {
     *high = *high | ((ind >> 6) ? ind & 63 ? (Used2048 >> (64 - (ind - 64))) : 0 : 0);
 }
 
+
+
 static inline u64 set64(u64 Long, u8 ind) {
     if (ind > 63)
         return Long;
 
     return (Long | (1ULL << ind));
 }
+
+
 
 static inline void set128(u64 *low, u64 *high, u8 ind) {
     if (ind > 127)
@@ -153,10 +168,18 @@ static inline void set128(u64 *low, u64 *high, u8 ind) {
     *high = ((ind >> 6) ? set64(*high, (ind - 64)) : *high);
 }
 
-static inline void *find_objs(int req, u64 *buff, u64 base, bool creq) {
-    if (req == 0) return NULL;
-    if (!creq && !(!buff[0] && !buff[1]))
-        return NULL;
+
+
+static inline search_ret find_objs(int req, u64 *buff, u64 base, bool creq) {
+    search_ret ret = {0};
+    if (req == 0) {
+       ret.addr = NULL;
+       return ret;
+    }
+    if (!creq && !(!buff[0] && !buff[1])) {
+       ret.addr = NULL;
+       return ret;
+    }
     int sc = -1;
     u64 low = *buff;
     u64 high = buff[1];
@@ -171,8 +194,12 @@ static inline void *find_objs(int req, u64 *buff, u64 base, bool creq) {
         Or128(&low, &high, ind2);
     }
 
-    if (sc == -1) 
-        return NULL;
+    if (sc == -1) {
+       ret.addr = NULL;
+       return ret;
+    }
+    
+    ret.sc = sc;
  
     u64 addr = (base + (sc << 5));
 
@@ -233,8 +260,15 @@ static inline void *find_objs(int req, u64 *buff, u64 base, bool creq) {
             set128(&buff[0], &buff[1], i);
     }
     
-    return addr;
+    ret.addr = addr;
+    return ret;
          
+}
+
+static inline void clean_cache(int req, u64 *buff, int sc) {
+      
+
+
 }
      
 
@@ -261,6 +295,7 @@ void *kmalloc(u64 Size) {
 
     slabobj *slab = NULL;
     void *place = NULL;
+    search_ret obj_ret = {0};
     if (Size < 4096) {
         find_slab:
         
@@ -287,7 +322,8 @@ void *kmalloc(u64 Size) {
         slab = start;
         while (slab != NULL) {
             int req = (int)(Size + 31) >> 5;
-            place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+            obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+            place = obj_ret.addr;
             if (place != NULL) {
                 slab->FreeObs -= req;
                 break;
@@ -314,7 +350,8 @@ void *kmalloc(u64 Size) {
             memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
             int req = (int)(Size + 31) >> 5;
-            place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+            obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+            place = obj_ret.addr;
             slab->FreeObs -= req;
         }
 
@@ -370,9 +407,19 @@ void *kmalloc(u64 Size) {
     header->Size = Size;
     header->attributes = 0x03;
     header->slabOrg = slab;
+    header->sc = obj_ret.sc;
     
     place = (void *)((u8 *)place + sizeof(k_header));
 
     spin_unlock(&klock);
     return place;
 }
+
+
+
+void kfree(void *alloc) {
+    spin_lock(&klock);
+    k_header *header = (k_header *)((u8 *)alloc - sizeof(k_header)),
+    if (header->Size < 4096) {
+       int req = (header->Size + 31) >> 5;
+       
