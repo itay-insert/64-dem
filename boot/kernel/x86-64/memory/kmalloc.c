@@ -314,6 +314,7 @@ void *kmalloc(u64 Size) {
             slab->FreeObs = 128;
             int req = (int)(Size + 31) >> 5;
             place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+            slab->FreeObs -= req;
         }
 
         if (back) 
@@ -343,7 +344,7 @@ void *kmalloc(u64 Size) {
         home:
 
         place = (void *)addr;
-        u64 new_addr = ((addr + Size) & ~0xFFFULL);
+        u64 new_addr = ((addr + save_size) & ~0xFFFULL);
         if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE) {
             va_ret desc = {O};
             desc.attributes = 0x03;
