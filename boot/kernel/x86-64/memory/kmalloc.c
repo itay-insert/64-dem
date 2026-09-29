@@ -91,7 +91,7 @@ static inline slabobj *createSlab(void) {
         new_hd->unused_entries = 0;
         new_hd->next_page = NULL;
         hd->next_page = new_hd;
-        new_hd->former_page == hd;
+        new_hd->former_page = hd;
         slab_pages++;
         latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         latest = latest->next_object;
@@ -359,7 +359,7 @@ static inline bool check_page(slabhd *hd) {
 
     if (zc == count) 
        return true;
-    else return falss;
+    else return false;
 
 }
 
@@ -393,7 +393,7 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
 static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
     u64 place = max - last_hd->free_entries;
     last = (slabobj *)((u8 *)last_hd + sizeof(slabhd));
-    last = last[place];
+    last = &last[place];
     return last;
 }
 
