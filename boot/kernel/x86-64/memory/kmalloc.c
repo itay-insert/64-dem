@@ -321,7 +321,7 @@ void *kmalloc(u64 Size) {
 
         
     } else if (!(Size & 0xFFFULL)) {
-        va_ret alloc = va_alloc((size>>12), 0x03);
+        va_ret alloc = va_alloc((Size>>12), 0x03);
         if (alloc.status != 0) {
             spin_unlock(&klock);
             return NULL;
@@ -329,7 +329,7 @@ void *kmalloc(u64 Size) {
         u64 addr = alloc.base;
         place = (void *)addr;
     } else {
-        va_ret alloc = va_alloc(((size+4095)>>12), 0x03);
+        va_ret alloc = va_alloc(((Size+4095)>>12), 0x03);
         if (alloc.status != 0) {
             spin_unlock(&klock);
             return NULL;
