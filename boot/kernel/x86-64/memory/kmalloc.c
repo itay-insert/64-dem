@@ -152,8 +152,10 @@ static inline void set128(u64 *low, u64 *high, u8 ind) {
     *high = ((ind >> 6) ? set64(*high, (ind - 64)) : *high);
 }
 
-static inline void *find_objs(int req, u64 *buff, u64 base) {
+static inline void *find_objs(int req, u64 *buff, u64 base, bool creq) {
     if (req == 0) return NULL;
+    if (!creq && !(!buff[0] && !buff[1]))
+        return NULL;
     int sc = -1;
     u64 low = *buff;
     u64 high = buff[1];
@@ -236,6 +238,7 @@ static inline void *find_objs(int req, u64 *buff, u64 base) {
      
 
 void *kmalloc(u64 Size) {
+    bool conreq = true;
     bool back = false;
     Size = Size + sizeof(k_header);
     spin_lock(&klock);
@@ -283,7 +286,7 @@ void *kmalloc(u64 Size) {
         slab = start;
         while (slab != NULL) {
             int req = (int)(Size + 31) >> 5;
-            place = find_objs(req, slab->Cache_2048, slab->PageBase);
+            place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
             if (place != NULL) {
                 slab->FreeObs -= req;
                 break;
@@ -310,7 +313,7 @@ void *kmalloc(u64 Size) {
             memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
             int req = (int)(Size + 31) >> 5;
-            place = find_objs(req, slab->Cache_2048, slab->PageBase);
+            place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
         }
 
         if (back) 
@@ -332,9 +335,10 @@ void *kmalloc(u64 Size) {
             return NULL;
         }
         u64 addr = alloc.base;
-        u64 save_size = size;
-        size = size & 0xFFFULL;
+        u64 save_size = Size;
+        Size = Size & 0xFFFULL;
         back = true;
+        conreq = false;
         goto find_slab;  
         home:
 
@@ -344,8 +348,29 @@ void *kmalloc(u64 Size) {
             va_ret desc = {O};
             desc.attributes = 0x03;
             desc.base = slab->PageBase;
-            desc.
-        
+            desc.pages = 1;
+            va_free(desc);
+        }
+
+       
+        slab->PageBase = new_addr;
+        Size = save_size;
               
     }
+
+    if (place == NULL) {
+       spin_unlock(&klock);
+       return NULL;
+    }
+
+    k_header *header = (k_header *)((u64)place);
+    header->Base = (u64)place;
+    header->Size = Size;
+    header->attributes = 0x03;
+    header->slabOrg = slab;
+    
+    place = (void *)((u8 *)place + sizeof(k_header));
+
+    spin_unlock(&klock);
+    return place;
 }
