@@ -393,7 +393,7 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
 static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
     u64 place = max - last_hd->free_entries;
     last = (slabobj *)((u8 *)last_hd + sizeof(slabhd));
-    last = &last[place];
+    last = &last[place-1];
     last->next_object = NULL;
     return last;
 }
@@ -565,7 +565,8 @@ void kfree(void *alloc) {
               }
               latest_hd = deallocate_slab(latest_hd);
               slab_pages--;
-              latest = reset_latest(latest, latest_hd);
+              if (!miss)
+                  latest = reset_latest(latest, latest_hd);
           } else {
               latest_hd = latest_hd->former_page;
               miss = true;
