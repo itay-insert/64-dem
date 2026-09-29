@@ -400,6 +400,17 @@ static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
     return last;
 }
 
+
+
+static inline void link_pages(slabhd *former, slabhd *next) {
+    u64 place = max - former->free_entries;
+    slabobj *last_slab = (slabobj *)((u8 *)former + sizeof(slabhd));
+    last_slab = &last_slab[place-1];
+    last_slab->next_object = (slabobj *)((u8 *)next + sizeof(slabhd));
+
+}
+
+
 void *kmalloc(u64 Size) {
     bool conreq = true;
     bool back = false;
