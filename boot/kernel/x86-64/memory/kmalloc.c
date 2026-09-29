@@ -255,7 +255,7 @@ void *kmalloc(u64 Size) {
         shd->next_page = NULL;
     }
 
-    slabobj *slab;
+    slabobj *slab = NULL;
     void *place = NULL;
     if (Size < 4096) {
         find_slab:
@@ -317,7 +317,7 @@ void *kmalloc(u64 Size) {
             goto home;
 
         
-    } else if (!(Size & 0xFFF)) {
+    } else if (!(Size & 0xFFFULL)) {
         va_ret alloc = va_alloc((size>>12), 0x03);
         if (alloc.status != 0) {
             spin_unlock(&klock);
@@ -333,10 +333,16 @@ void *kmalloc(u64 Size) {
         }
         u64 addr = alloc.base;
         u64 save_size = size;
-        size = size & 0xFFF;
+        size = size & 0xFFFULL;
         back = true;
         goto find_slab;  
         home:
+
+        place = (void *)addr;
+        u64 new_addr = ((addr + size) & ~0xFFFULL);
+        if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE)
+           va_free
+        
         
               
     }
