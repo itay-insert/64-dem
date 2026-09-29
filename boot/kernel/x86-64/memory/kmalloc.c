@@ -68,6 +68,7 @@ static inline slabobj *createSlab(void) {
         start = (slabobj *)((u8 *)shd + sizeof(slabhd));
         memset(start, 0, sizeof(slabobj));
         start->next_object = NULL;
+        shd->free_entries--;
         latest = start;
         return start;
     }
