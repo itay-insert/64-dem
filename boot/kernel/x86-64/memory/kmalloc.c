@@ -545,8 +545,10 @@ void *kmalloc(u64 Size) {
 
 void kfree(void *alloc) {
     spin_lock(&klock);
+    bool back = false;
     k_header *header = (k_header *)((u8 *)alloc - sizeof(k_header));
     if (header->Size < 4096) {
+       free_slab:
        int req = (header->Size + 31) >> 5;
        slabobj *slab = header->slabOrg;
        clean_cache(req, slab->Cache_2048, header->sc);
@@ -565,10 +567,32 @@ void kfree(void *alloc) {
               latest_hd = latest_hd->former_page;
               miss = true;
           }
-       }
+      }
+
+      if (back)
+         goto home;
 
     } else if (!(header->Size & 0xFFFULL)) {
+        free_aligned:
+        va_ret desc = {0};
+        desc.Base = header->Base;
+        desc.attributes = 0x03;
+        desc.pages = header->Size >> 12;
+        va_free(desc);
+    } else {
+        u64 size = header->Size;
+        header->Size = header->Size & 0xFFFULL;
+        back = true;
+        goto free_slab;
+        home:
+        header->Size = size;
+        goto free_aligned;
+   }
 
+   spin_unlock(&klock);
+
+}
+        
 
 
               
