@@ -33,6 +33,7 @@ struct slabhd {
     u64 free_entries;
     u64 unused_entries;
     slabhd *next_page;
+    slabhd *former_page;
 } __attribute__((packed));
 
 
@@ -90,6 +91,7 @@ static inline slabobj *createSlab(void) {
         new_hd->unused_entries = 0;
         new_hd->next_page = NULL;
         hd->next_page = new_hd;
+        new_hd->former_page == hd;
         slab_pages++;
         latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         latest = latest->next_object;
@@ -159,6 +161,13 @@ static inline u64 set64(u64 Long, u8 ind) {
     return (Long | (1ULL << ind));
 }
 
+static inline u64 clean64(u64 Long, u8 ind) {
+    if (ind > 63)
+        return Long;
+
+    return (Long & ~(1ULL << ind));
+}
+
 
 
 static inline void set128(u64 *low, u64 *high, u8 ind) {
@@ -166,6 +175,13 @@ static inline void set128(u64 *low, u64 *high, u8 ind) {
         return;
     *low = set64(*low, ind);
     *high = ((ind >> 6) ? set64(*high, (ind - 64)) : *high);
+}
+
+static inline void clean128(u64 *low, u64 *high, u8 ind) {
+    if (ind > 127)
+        return;
+    *low = clean64(*low, ind);
+    *high = ((ind >> 6) ? clean64(*high, (ind - 64)) : *high);
 }
 
 
@@ -267,8 +283,109 @@ static inline search_ret find_objs(int req, u64 *buff, u64 base, bool creq) {
 
 static inline void clean_cache(int req, u64 *buff, int sc) {
       
+    recheck:
+
+    if (!(sc & 7)) {
+        while (req > 0) {
+           int qwc = (req >> 6);
+           int dwc = (req >> 5);
+           int wc = (req >> 4);
+           int bc = (req >> 3);
+           int c = req & 7;
+           if (qwc > 0) {
+               u64 *map = (u64 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < qwc; i++) 
+                  map[i] = 0ULL;
+
+               sc += qwc << 6;
+               req -= qwc << 6;
+           } else if (dwc > 0) {
+               u32 *map = (u32 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < dwc; i++) 
+                  map[i] = 0ULL;
+
+               sc += dwc << 5;
+               req -= dwc << 5;
+           } else if (wc > 0) {
+               u16 *map = (u16 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < wc; i++) 
+                  map[i] = 0x0000;
+
+               sc += wc << 4;
+               req -= wc << 4;
+           } else if (bc > 0) {
+               u8 *map = (u8 *)((u8 *)buff + (sc >> 3));
+               for (int i = 0; i < bc; i++) 
+                  map[i] = 0x00;
+
+               sc += bc << 3;
+               req -= bc << 3;
+           } else if (c > 0) {
+               for (int i = sc; i < (sc+c); i++) clean128(&buff[0], &buff[1], i);
+               sc += c;
+               req -= c;
+           }
+       }
+
+    } else if (req >> 3) {
+        while (req > 0) {
+           clean128(&buff[0], &buff[1], sc);
+           sc++;
+           req--;
+           if (!(sc & 7))
+              goto recheck;
+        }
+    } else {
+        for (int i = sc; i < (sc+req); i++) 
+            clean128(&buff[0], &buff[1], i);
+    }
 
 
+}
+
+
+
+
+
+static inline bool check_page(slabhd *hd) {
+    u64 count = max - hd->free_entries;
+    u64 zc = 0;
+    slabobj *slab = (slabobj *)((u8 *)hd + sizeof(slabhd));
+    for (u64 i = 0; i < count; i++) {
+        if (slab->FreeObs == 128) 
+            zc++;
+        slab = (slabobj *)((u8 *)slab + sizeof(slabobj));
+    }
+
+    if (zc == count) 
+       return true;
+    else return falss;
+
+}
+
+
+
+
+static inline slabhd *deallocate_slab(slabhd *hd) {
+    slabhd *former_page = hd->former_page;
+    u64 count = max - hd->free_entries;
+    slabobj *slab = (slabobj *)((u8 *)hd + sizeof(slabhd));
+    for (u64 i = 0; i < count; i++) {
+        va_ret desc = {0};
+        desc.Base = slab->PageBase;
+        desc.attributes = 0x03;
+        desc.pages = 1;
+        va_free(desc);
+        slab = (slabobj *)((u8 *)slab + sizeof(slabobj));
+    }
+
+    va_ret desc = {0};
+    desc.Base = (u64)hd;
+    desc.attributes = 0x03;
+    desc.pages = 1;
+    va_free(desc);
+    
+    return former_page;
 }
      
 
@@ -291,6 +408,7 @@ void *kmalloc(u64 Size) {
         shd->free_entries = (4096 - sizeof(slabhd)) / sizeof(slabobj);
         max = shd->free_entries;
         shd->next_page = NULL;
+        shd->former_page = NULL;
     }
 
     slabobj *slab = NULL;
@@ -419,7 +537,15 @@ void *kmalloc(u64 Size) {
 
 void kfree(void *alloc) {
     spin_lock(&klock);
-    k_header *header = (k_header *)((u8 *)alloc - sizeof(k_header)),
+    k_header *header = (k_header *)((u8 *)alloc - sizeof(k_header));
     if (header->Size < 4096) {
        int req = (header->Size + 31) >> 5;
+       slabobj *slab = header->slabOrg;
+       clean_cache(req, slab->Cache_2048, header->sc);
+       slab->FreeObs += req;
+
+
+       slabhd 
+       
+           
        
