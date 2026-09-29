@@ -96,6 +96,7 @@ static inline slabobj *createSlab(void) {
         latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         latest = latest->next_object;
         latest->PageBase = INVALID_BASE;
+        latest->next_object = NULL;
         new_hd->free_entries--;
         
     } else {
@@ -111,6 +112,7 @@ static inline slabobj *createSlab(void) {
         latest->next_object = (slabobj *)((u8 *)latest + sizeof(slabobj));
         latest = latest->next_object;
         latest->PageBase = INVALID_BASE;
+        latest->next_object = NULL;
         hd = find_hd(latest);
         hd->free_entries--;
         
@@ -562,7 +564,8 @@ void kfree(void *alloc) {
               if (miss) {
                   latest_hd->former_page->next_page = latest_hd->next_page;
               latest_hd->next_page->former_page = latest_hd->former_page;
-              }
+              } else if (!miss) 
+                  latest_hd->former_page->next_page = NULL;
               latest_hd = deallocate_slab(latest_hd);
               slab_pages--;
               if (!miss)
