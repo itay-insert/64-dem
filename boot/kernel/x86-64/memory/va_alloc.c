@@ -46,6 +46,8 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
             va_hd *new_hd = NULL;
             if (index > 0) {
                 v_cache.index--;
+                if (v_cache.base[v_cache.index] == va_top)
+                    va_top += 0x1000;
                 EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base[v_cache.index], 1, 0x03);
                 if (alloc.Attribute != 0)
                     return NULL;
@@ -248,17 +250,20 @@ va_ret va_alloc(u64 pages, u16 attributes) {
           
                 pg_hd->unused_entries++;
                 
-                va_hd *last_hd = (va_hd *)(va_top - 0x1000);
+                va_hd *last_hd = find_hd(va_latest);
                 bool miss = false;
                 while (last_hd != va_header) {
  
                     if (last_hd->free_entries == max) {
                          if (!miss) {
+                             if ((u64)last_hd == (va_top - 0x1000))
                              va_top -= 0x1000;
                              last_hd->former_page->next_page = NULL;
                              update_latest(last_hd->former_page);
                          }
                          if (miss) {
+
+                             if ((u64)last_hd  == (va_top - 0x1000)) va_top -= 0x1000;
                             last_hd->former_page->next_page = last_hd->next_page;
                              last_hd->next_page->former_page = last_hd->former_page;
                              v_cache.base[v_cache.index] = (u64)last_hd;
