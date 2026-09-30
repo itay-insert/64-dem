@@ -22,6 +22,9 @@ KERNEL_EXTERN_C_BEGIN
 #ifndef VA_TREE
 #define VA_TREE 0xffffb00000000000
 #endif
+#ifndef VA_V
+#define VA_V 0xffffb10000000000
+#endif
 
 typedef struct {
     u64 physical_address;
