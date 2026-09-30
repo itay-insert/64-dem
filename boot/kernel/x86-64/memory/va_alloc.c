@@ -311,6 +311,7 @@ void va_free(va_ret desc) {
 
     va_hd *pghd = va_header;
     va_node *entry = NULL;
+    va_node *last = find_last(desc.attributes, pghd);
 
     if (last == NULL) {
         spin_unlock(&va_lock);
@@ -331,8 +332,6 @@ void va_free(va_ret desc) {
                 src->virtual_base = desc.base;
                 src->attributes = desc.attributes;
                 src->length = desc.pages << 12;
-                va_node *last = find_last(desc.attributes, pghd);
-
                 attach_node(last, src);
                 UpdateParents(src);
                 pghd->unused_entries--;
