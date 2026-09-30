@@ -55,12 +55,13 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
                if (alloc.Attribute != 0)
                    return NULL;
                new_hd = (va_hd *)va_top;
-               va_top++;
+               va_top += 0x1000;
             }`
             va_metadata_pages++;
             new_hd->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
             new_hd->unused_entries = 0;
             new_hd->next_page = NULL;
+            new_hd->former_page = hd;
             hd->next_page = new_hd;
             entry = (va_node *)((u8 *)new_hd + sizeof(va_hd));
         }
@@ -173,6 +174,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
         va_header->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
         max = (int)va_header->free_entries;
         va_header->next_page = NULL;
+        va_header->former_page = NULL;
         va_header->unused_entries = 0;
     }
 
@@ -251,19 +253,28 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 while (last_hd != va_header) {
  
                     if (last_hd->free_entries == max) {
+                         if (!miss) {
+                             va_top -= 0x1000;
+                             last_hd->former_page->next_page = NULL;
+                             update_latest(last_hd->former_page);
+                         }
+                         if (miss) {
+                            last_hd->former_page->next_page = last_hd->next_page;
+                             last_hd->next_page->former_page = last_hd->former_page;
+                             v_cache.base = (u64)last_hd;
+                             v_cache.set = true;
+                         }
 
                          alloc.VirtualStart = (u64)last_hd;
                          alloc.NumberOfPages = 1;
+                         last_hd = last_hd->former_page;
                          vfree(alloc);
-                         if (miss) {
-                             va_hd *phd = (va_hd *)((u8 *)last_hd - 0x1000);
+          
 
-                         va_top -= 0x1000;
                          va_metadata_pages--;
-                         last_hd = (va_hd *)(va_top - 0x1000);
                     } else {
                          miss = true;
-                         last_hd = (va_hd *)((u64)last_hd -= 0x1000);
+                         last_hd = last_hd->former_page;
                     }
         }
                     
