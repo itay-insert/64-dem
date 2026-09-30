@@ -23,9 +23,10 @@ typedef struct {
     u64 Base;
     u64 Size;
     u16 attributes;
+    u16 _pad;
     int sc;
     slabobj *slabOrg;
-} __attribute__((packed)) k_header;
+} k_header;
 
 
 typedef struct slabhd slabhd;
