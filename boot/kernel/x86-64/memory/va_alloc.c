@@ -226,11 +226,22 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 pg_hd->unused_entries++;
                 
                 va_hd *last_hd = find_hd(va_latest);
+                bool miss = false;
                 while (last_hd != va_header) {
  
                     if (last_hd->free_entries == max) {
+                         if (miss)
+
                          alloc.VirtualStart = (u64)last_hd;
                          alloc.NumberOfPages = 1;
+                         vfree(alloc);
+                         va_top -= 0x1000;
+                         va_metadata_pages--;
+                         last_hd = (va_hd *)(va_top - 0x1000);
+                    } else {
+                         miss = true;
+                         last_hd = (va_hd *)((u64)last_hd -= 0x1000);
+                    }
         }
                     
     } else {
