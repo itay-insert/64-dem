@@ -44,7 +44,7 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
     while (hd->free_entries == NoEntriesLeft) {
         if (hd->next_page == NULL) {
             va_hd *new_hd = NULL;
-            if (index > 0) {
+            if (v_cache.index > 0) {
                 v_cache.index--;
                 if (v_cache.base[v_cache.index] >= va_top)
                     va_top = v_cache.base[v_cache.index] + 0x1000;
