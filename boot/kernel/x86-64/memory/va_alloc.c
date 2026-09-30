@@ -30,12 +30,20 @@ typedef enum {
     LEFT = 1 << 1,
 } used_nodes;
 
+typedef struct {
+    u64 base;
+    bool set;
+} vc;
+
+v_c v_cache = {0};
+
 
 static va_node *find_new_entry(u8 Pos, va_node *Parent) {
     va_node *entry = NULL;
     va_hd *hd = va_header;
     while (hd->free_entries == NoEntriesLeft) {
         if (hd->next_page == NULL) {
+            
             EFI_MEMORY_DESCRIPTOR alloc = vmalloc(va_top, 1, 0x03);
             if (alloc.Attribute != 0)
                 return NULL;
