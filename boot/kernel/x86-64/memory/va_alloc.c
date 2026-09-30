@@ -256,12 +256,12 @@ va_ret va_alloc(u64 pages, u16 attributes) {
 
 
 
-static va_node *find_last(u16 attributes, va_hd *pghd) {
+static va_node *find_last(u16 attributes, va_hd *pghd, va_node *par) {
     while (pghd != NULL) {
         int entries = ((max + (int)pghd->unused_entries) - (int)pghd->free_entries);
         va_node *src = (va_node *)((u8 *)pghd + sizeof(va_hd));
         for (int i = 0; i < entries; i++) { 
-            if (src->attributes == attributes && ((src->UsedNodes & 0x03) != 3)) {
+            if (src->attributes == attributes && ((src->UsedNodes & 0x03) != 3) && src != par) {
                 return src;
             }
 
@@ -311,7 +311,6 @@ void va_free(va_ret desc) {
 
     va_hd *pghd = va_header;
     va_node *entry = NULL;
-    va_node *last = find_last(desc.attributes, pghd);
 
     if (last == NULL) {
         spin_unlock(&va_lock);
@@ -332,6 +331,8 @@ void va_free(va_ret desc) {
                 src->virtual_base = desc.base;
                 src->attributes = desc.attributes;
                 src->length = desc.pages << 12;
+                va_node *last = find_last(desc.attributes, pghd, src);
+
                 attach_node(last, src);
                 UpdateParents(src);
                 pghd->unused_entries--;
