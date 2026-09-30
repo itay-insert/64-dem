@@ -45,11 +45,11 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
         if (hd->next_page == NULL) {
             va_hd *new_hd = NULL;
             if (index > 0) {
-                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base[v_cache.index--], 1, 0x03);
+                v_cache.index--;
+                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base[v_cache.index], 1, 0x03);
                 if (alloc.Attribute != 0)
                     return NULL;
                 new_hd = (va_hd *)alloc.VirtualStart;
-                v_cache.index--;
             } else {    
                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(va_top, 1, 0x03);
                if (alloc.Attribute != 0)
