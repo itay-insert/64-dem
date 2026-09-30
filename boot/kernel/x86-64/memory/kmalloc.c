@@ -26,6 +26,7 @@ typedef struct {
     slabobj *slabOrg;
 } __attribute__((packed)) k_header;
 
+typedef struct unused_cache unused_cache;
 
 typedef struct slabhd slabhd;
 
@@ -34,6 +35,12 @@ struct slabhd {
     u64 unused_entries;
     slabhd *next_page;
     slabhd *former_page;
+    unused_cache *page_cache;
+} __attribute__((packed));
+
+struct unused_cache {
+    u64 unused_entries;
+    u64 addresses[(4096 - sizeof(slabhd)) / sizeof(slabobj)];
 } __attribute__((packed));
 
 
@@ -103,7 +110,6 @@ static inline slabobj *createSlab(void) {
         slabobj *slab = start;
         while (slab != NULL) {
             if (slab->FreeObs == 128) 
-                return slab;
             
 
             slab = slab->next_object;
