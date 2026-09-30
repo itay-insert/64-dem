@@ -31,8 +31,8 @@ typedef enum {
 } used_nodes;
 
 typedef struct {
-    u64 base;
-    bool set;
+    u64 base[512];
+    int index;
 } vc;
 
 v_c v_cache = {0};
@@ -44,12 +44,12 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
     while (hd->free_entries == NoEntriesLeft) {
         if (hd->next_page == NULL) {
             va_hd *new_hd = NULL;
-            if (v_cache.set) {
-                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base, 1, 0x03);
+            if (index > 0) {
+                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base[v_cache.index], 1, 0x03);
                 if (alloc.Attribute != 0)
                     return NULL;
                 new_hd = (va_hd *)alloc.VirtualStart;
-                v_cache.set = false;
+                v_cache.index--;
             } else {    
                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(va_top, 1, 0x03);
                if (alloc.Attribute != 0)
@@ -261,8 +261,8 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                          if (miss) {
                             last_hd->former_page->next_page = last_hd->next_page;
                              last_hd->next_page->former_page = last_hd->former_page;
-                             v_cache.base = (u64)last_hd;
-                             v_cache.set = true;
+                             v_cache.base[v_cache.index] = (u64)last_hd;
+                             if (v_cache.index < 511) v_cache.index++;
                          }
 
                          alloc.VirtualStart = (u64)last_hd;
