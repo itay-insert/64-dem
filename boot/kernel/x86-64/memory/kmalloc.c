@@ -350,17 +350,10 @@ static inline void clean_cache(int req, u64 *buff, int sc) {
 
 
 static inline bool check_page(slabhd *hd) {
-    u64 count = max - hd->free_entries;
-    u64 zc = 0;
-    slabobj *slab = (slabobj *)((u8 *)hd + sizeof(slabhd));
-    for (u64 i = 0; i < count; i++) {
-        if (slab->FreeObs == 128) 
-            zc++;
-        slab = (slabobj *)((u8 *)slab + sizeof(slabobj));
-    }
-
-    if (zc == count) 
-       return true;
+    u64 used = max - hd->free_entries - hd->unused_entries;
+    
+    if (used == 0)
+        return true;
     else return false;
 
 }
@@ -567,6 +560,8 @@ void kfree(void *alloc) {
        slabobj *slab = header->slabOrg;
        clean_cache(req, slab->Cache_2048, header->sc);
        slab->FreeObs += req;
+       slabhd *hd = find_hd(slab);
+       if (slab->FreeObs == 128) hd->unused_entries++;
        
        bool miss = false;
        slabhd *latest_hd = find_hd(latest);
