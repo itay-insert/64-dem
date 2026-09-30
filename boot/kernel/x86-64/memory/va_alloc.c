@@ -336,6 +336,7 @@ void va_free(va_ret desc) {
                 UpdateParents(src);
                 pghd->unused_entries--;
                 pghd->free_entries--;
+                va_entries++;
                 vfree(alloc);
                 spin_unlock(&va_lock);
                 return;
