@@ -475,7 +475,7 @@ void *kmalloc(u64 Size) {
             }
             memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
-            slabhd *hd = find_hd(slab);
+            hd = find_hd(slab);
             hd->unused_entries++;
             int req = (int)(Size + 31) >> 5;
             obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
