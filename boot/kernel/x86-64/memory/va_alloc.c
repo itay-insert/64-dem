@@ -35,7 +35,7 @@ typedef struct {
     int index;
 } vc;
 
-v_c v_cache = {0};
+vc v_cache = {0};
 
 
 static va_node *find_new_entry(u8 Pos, va_node *Parent) {
@@ -151,7 +151,7 @@ static inline void update_latest(va_hd *hd) {
     u64 place = max - hd->free_entries + hd->unused_entries;
     va_node *node = (va_node *)((u64)hd + sizeof(va_hd));
 
-    va_latest = node[place-1];
+    va_latest = &node[place-1];
 }
 
 va_ret va_alloc(u64 pages, u16 attributes) {
