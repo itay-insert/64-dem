@@ -484,7 +484,19 @@ void *kmalloc(u64 Size) {
         }
 
         if (slab->PageBase == INVALID_BASE && conreq) {
-           va_ret alloc = va_alloc(1, 0x03);
+          va_ret alloc = va_alloc(1, 0x03);
+
+          if (alloc.status != 0) {
+              clean_cache(req, slab->Cache_2048,     obj_ret.sc);
+              slab->FreeObs += req;
+
+              if (slab->FreeObs == 128)
+                  hd->unused_entries++;
+
+              spin_unlock(&klock);
+              return NULL;
+           }
+           
            slab->PageBase = alloc.base;
            place = (void *)((u64)place - 1 + alloc.base);
         if (back) 
