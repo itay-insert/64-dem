@@ -261,7 +261,7 @@ static va_node *find_last(u16 attributes, va_hd *pghd) {
         int entries = ((max + (int)pghd->unused_entries) - (int)pghd->free_entries);
         va_node *src = (va_node *)((u8 *)pghd + sizeof(va_hd));
         for (int i = 0; i < entries; i++) { 
-            if (src->attributes == attributes && ((src->UsedNodes & 0x03) != 3) && src->Parent != NULL) {
+            if (src->attributes == attributes && ((src->UsedNodes & 0x03) != 3) && src->length != 0) {
                 return src;
             }
 
