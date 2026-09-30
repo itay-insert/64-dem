@@ -130,7 +130,12 @@ static inline va_hd *find_hd(va_node *entry) {
     return enhd;
 }
 
+static inline void update_latest(va_hd *hd) {
+    u64 place = max - hd->free_entries + hd->unused_entries;
+    va_node *node = (va_node *)((u64)hd + sizeof(va_hd));
 
+    va_latest = node[place-1];
+}
 
 va_ret va_alloc(u64 pages, u16 attributes) {
     va_ret ret = {0};
@@ -230,7 +235,17 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 while (last_hd != va_header) {
  
                     if (last_hd->free_entries == max) {
-                         if (miss)
+                         if (miss) {
+                             u64 addr = ((u64)last_hd + 0x1000);
+                             while (addr < va_top) {
+                                memcpy(last_hd, addr, 4096);
+                                 addr += 0x1000;
+                                 last_hd = (va_hd *)((u64)last_hd + 0x1000);
+
+                             }
+                             update_latest((va_hd *)((u64)last_hd - 0x1000);
+                        }
+                             
 
                          alloc.VirtualStart = (u64)last_hd;
                          alloc.NumberOfPages = 1;
