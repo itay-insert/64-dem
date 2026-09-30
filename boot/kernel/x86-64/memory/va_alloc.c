@@ -248,7 +248,7 @@ va_ret va_alloc(u64 pages, u16 attributes) {
           
                 pg_hd->unused_entries++;
                 
-                va_hd *last_hd = find_hd(va_latest);
+                va_hd *last_hd = (va_hd *)(va_top - 0x1000);
                 bool miss = false;
                 while (last_hd != va_header) {
  
