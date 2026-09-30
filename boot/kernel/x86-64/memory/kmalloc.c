@@ -1,3 +1,4 @@
+ 
 #include <stddef.h>
 #include <stdbool.h>
 #include "x86-64/paging.h"
@@ -26,7 +27,6 @@ typedef struct {
     slabobj *slabOrg;
 } __attribute__((packed)) k_header;
 
-typedef struct unused_cache unused_cache;
 
 typedef struct slabhd slabhd;
 
@@ -35,12 +35,6 @@ struct slabhd {
     u64 unused_entries;
     slabhd *next_page;
     slabhd *former_page;
-    unused_cache *page_cache;
-} __attribute__((packed));
-
-struct unused_cache {
-    u64 unused_entries;
-    u64 addresses[(4096 - sizeof(slabhd)) / sizeof(slabobj)];
 } __attribute__((packed));
 
 
@@ -105,12 +99,16 @@ static inline slabobj *createSlab(void) {
         latest->PageBase = INVALID_BASE;
         latest->next_object = NULL;
         new_hd->free_entries--;
-        
+
     } else {
         slabobj *slab = start;
         while (slab != NULL) {
-            if (slab->FreeObs == 128) 
-            
+            if (slab->FreeObs == 128) {
+                hd = find_hd(slab);
+                hd->unused_entries--;
+                return slab;
+            }
+
 
             slab = slab->next_object;
         }
@@ -121,7 +119,7 @@ static inline slabobj *createSlab(void) {
         latest->next_object = NULL;
         hd = find_hd(latest);
         hd->free_entries--;
-        
+
     }
 
     return latest;
@@ -222,13 +220,13 @@ static inline search_ret find_objs(int req, u64 *buff, u64 base, bool creq) {
        ret.addr = NULL;
        return ret;
     }
-    
+
     ret.sc = sc;
- 
+
     u64 addr = (base + (sc << 5));
 
     recheck:
-    
+
     if (!(sc & 7)) {
         while (req > 0) {
            int qwc = (req >> 6);
@@ -283,14 +281,14 @@ static inline search_ret find_objs(int req, u64 *buff, u64 base, bool creq) {
         for (int i = sc; i < (sc+req); i++) 
             set128(&buff[0], &buff[1], i);
     }
-    
+
     ret.addr = addr;
     return ret;
-         
+
 }
 
 static inline void clean_cache(int req, u64 *buff, int sc) {
-      
+
     recheck:
 
     if (!(sc & 7)) {
@@ -357,7 +355,7 @@ static inline void clean_cache(int req, u64 *buff, int sc) {
 
 static inline bool check_page(slabhd *hd) {
     u64 used = max - hd->free_entries - hd->unused_entries;
-    
+
     if (used == 0)
         return true;
     else return false;
@@ -385,10 +383,10 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
     desc.attributes = 0x03;
     desc.pages = 1;
     va_free(desc);
-    
+
     return former_page;
 }
-     
+
 
 
 static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
@@ -437,7 +435,7 @@ void *kmalloc(u64 Size) {
     search_ret obj_ret = {0};
     if (Size < 4096) {
         find_slab:
-        
+
         if (start == NULL) {
             slab = createSlab();
             if (slab == NULL) {
@@ -464,10 +462,14 @@ void *kmalloc(u64 Size) {
             obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
             place = obj_ret.addr;
             if (place != NULL) {
+                if (slab->FreeObs == 128) {
+                    slabhd *hd = find_hd(slab);
+                    hd->unused_entries--;
+                }
                 slab->FreeObs -= req;
                 break;
             }
-            
+
             slab = slab->next_object;
         }
 
@@ -497,7 +499,7 @@ void *kmalloc(u64 Size) {
         if (back) 
             goto home;
 
-        
+
     } else if (!(Size & 0xFFFULL)) {
         va_ret alloc = va_alloc((Size>>12), 0x03);
         if (alloc.status != 0) {
@@ -530,10 +532,10 @@ void *kmalloc(u64 Size) {
             va_free(desc);
         }
 
-       
+
         slab->PageBase = new_addr;
         Size = save_size;
-              
+
     }
 
     if (place == NULL) {
@@ -547,7 +549,7 @@ void *kmalloc(u64 Size) {
     header->attributes = 0x03;
     header->slabOrg = slab;
     header->sc = obj_ret.sc;
-    
+
     place = (void *)((u8 *)place + sizeof(k_header));
 
     spin_unlock(&klock);
@@ -568,7 +570,7 @@ void kfree(void *alloc) {
        slab->FreeObs += req;
        slabhd *hd = find_hd(slab);
        if (slab->FreeObs == 128) hd->unused_entries++;
-       
+
        bool miss = false;
        slabhd *latest_hd = find_hd(latest);
        while (latest_hd != shd) {
@@ -612,10 +614,3 @@ void kfree(void *alloc) {
    spin_unlock(&klock);
 
 }
-        
-
-
-              
-       
-           
-       
