@@ -367,17 +367,6 @@ static inline bool check_page(slabhd *hd) {
 
 static inline slabhd *deallocate_slab(slabhd *hd) {
     slabhd *former_page = hd->former_page;
-    u64 count = max - hd->free_entries;
-    slabobj *slab = (slabobj *)((u8 *)hd + sizeof(slabhd));
-    for (u64 i = 0; i < count; i++) {
-        va_ret desc = {0};
-        desc.Base = slab->PageBase;
-        desc.attributes = 0x03;
-        desc.pages = 1;
-        va_free(desc);
-        slab = (slabobj *)((u8 *)slab + sizeof(slabobj));
-    }
-
     va_ret desc = {0};
     desc.Base = (u64)hd;
     desc.attributes = 0x03;
@@ -443,16 +432,11 @@ void *kmalloc(u64 Size) {
                 return NULL;
             }
 
-            va_ret alloc = va_alloc(1, 0x03);
-            if (alloc.status != 0) {
-                spin_unlock(&klock);
-                return NULL;
-            }
-            u64 addr = alloc.base;
             memset(slab, 0, sizeof(slabobj));
             slab->next_object = NULL;
-            slab->PageBase = addr;
-            slab->FreeObs = 128;
+            slab->PageBase = INVALID_BASE;
+            slab->FreeObs = 128,
+            shd->unused_entries++;
             start = slab;
         }
 
@@ -479,7 +463,7 @@ void *kmalloc(u64 Size) {
                 spin_unlock(&klock);
                 return NULL;
             }
-            if (slab->PageBase == INVALID_BASE) {
+            if (slab->PageBase == INVALID_BASE && conreq) {
                 va_ret alloc = va_alloc(1, 0x03);
                 if (alloc.status != 0) {
                     spin_unlock(&klock);
@@ -490,12 +474,19 @@ void *kmalloc(u64 Size) {
             }
             memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
+            slabhd *hd = find_hd(slab);
+            hd->unused_entries++;
             int req = (int)(Size + 31) >> 5;
             obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
             place = obj_ret.addr;
             slab->FreeObs -= req;
+            hd->unused_entries--;
         }
 
+        if (slab->PageBase == INVALID_BASE && conreq) {
+           va_ret alloc = va_alloc(1, 0x03);
+           slab->PageBase = alloc.base;
+           place = (void *)((u64)place - 1 + alloc.base);
         if (back) 
             goto home;
 
@@ -524,14 +515,6 @@ void *kmalloc(u64 Size) {
 
         place = (void *)addr;
         u64 new_addr = ((addr + save_size) & ~0xFFFULL);
-        if (slab->PageBase != new_addr && slab->PageBase != INVALID_BASE) {
-            va_ret desc = {O};
-            desc.attributes = 0x03;
-            desc.base = slab->PageBase;
-            desc.pages = 1;
-            va_free(desc);
-        }
-
 
         slab->PageBase = new_addr;
         Size = save_size;
@@ -569,7 +552,15 @@ void kfree(void *alloc) {
        clean_cache(req, slab->Cache_2048, header->sc);
        slab->FreeObs += req;
        slabhd *hd = find_hd(slab);
-       if (slab->FreeObs == 128) hd->unused_entries++;
+       if (slab->FreeObs == 128) {
+           hd->unused_entries++;
+           va_ret alloc = {0};
+           alloc.base = slab->PageBase;
+           alloc.pages = 1;
+           alloc.attributes = 0x03;
+           va_free(alloc);
+           slab->PageBase = INVALID_BASE;
+       }
 
        bool miss = false;
        slabhd *latest_hd = find_hd(latest);
