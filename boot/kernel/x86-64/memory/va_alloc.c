@@ -130,6 +130,8 @@ static inline va_hd *find_hd(va_node *entry) {
     return enhd;
 }
 
+
+
 va_ret va_alloc(u64 pages, u16 attributes) {
     va_ret ret = {0};
     if (pages == 0) {
@@ -220,25 +222,15 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 }
 
                 entry->Parent = NULL;
-            }
-
-            if (pg_hd->free_entries == max && va_metadata_pages > 0 && va_latest == entry && pg_hd->unused_entries == 0) {
-                EFI_MEMORY_DESCRIPTOR alloc = {0};
-                u64 adr = (u64)((u8 *)pg_hd - 0x1000);
-                va_hd *parhd = (va_hd *)adr;
-                parhd->next_page = pg_hd->next_page;
-                alloc.NumberOfPages = 1;
-                alloc.VirtualStart = (u64)pg_hd;
-                vfree(alloc);
-                va_metadata_pages--;
-                va_top -= 0x1000;
-                u64 base = (u64)(((u8 *)parhd + sizeof(va_hd)) + (sizeof(va_node) * 
-                (max - (int)parhd->free_entries - 1) < 0 ? 0 : (max - (int)parhd->free_entries - 1)));
-                va_latest = (va_node *)base;
-            } else {
+          
                 pg_hd->unused_entries++;
-            }
-
+                
+                va_hd *last_hd = find_hd(va_latest);
+                while (last_hd != va_header) {
+ 
+                    if (last_hd->free_entries == max) {
+                         alloc.VirtualStart = (u64)last_hd;
+                         alloc.NumberOfPages = 1;
         }
                     
     } else {
