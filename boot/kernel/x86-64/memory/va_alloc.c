@@ -43,12 +43,20 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
     va_hd *hd = va_header;
     while (hd->free_entries == NoEntriesLeft) {
         if (hd->next_page == NULL) {
-            
-            EFI_MEMORY_DESCRIPTOR alloc = vmalloc(va_top, 1, 0x03);
-            if (alloc.Attribute != 0)
-                return NULL;
-            va_hd *new_hd = (va_hd *)va_top;
-            va_top += 0x1000;
+            va_hd *new_hd = NULL;
+            if (v_cache.set) {
+                EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base, 1, 0x03);
+                if (alloc.Attribute != 0)
+                    return NULL;
+                new_hd = (va_hd *)alloc.VirtualStart;
+                v_cache.set = false;
+            } else {    
+               EFI_MEMORY_DESCRIPTOR alloc = vmalloc(va_top, 1, 0x03);
+               if (alloc.Attribute != 0)
+                   return NULL;
+               new_hd = (va_hd *)va_top;
+               va_top++;
+            }`
             va_metadata_pages++;
             new_hd->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
             new_hd->unused_entries = 0;
@@ -243,21 +251,13 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                 while (last_hd != va_header) {
  
                     if (last_hd->free_entries == max) {
-                         if (miss) {
-                             u64 addr = ((u64)last_hd + 0x1000);
-                             while (addr < va_top) {
-                                memcpy(last_hd, addr, 4096);
-                                 addr += 0x1000;
-                                 last_hd = (va_hd *)((u64)last_hd + 0x1000);
-
-                             }
-                             update_latest((va_hd *)((u64)last_hd - 0x1000);
-                        }
-                             
 
                          alloc.VirtualStart = (u64)last_hd;
                          alloc.NumberOfPages = 1;
                          vfree(alloc);
+                         if (miss) {
+                             va_hd *phd = (va_hd *)((u8 *)last_hd - 0x1000);
+
                          va_top -= 0x1000;
                          va_metadata_pages--;
                          last_hd = (va_hd *)(va_top - 0x1000);
