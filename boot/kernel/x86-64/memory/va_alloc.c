@@ -46,8 +46,8 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
             va_hd *new_hd = NULL;
             if (index > 0) {
                 v_cache.index--;
-                if (v_cache.base[v_cache.index] == va_top)
-                    va_top += 0x1000;
+                if (v_cache.base[v_cache.index] >= va_top)
+                    va_top = v_cache.base[v_cache.index] + 0x1000;
                 EFI_MEMORY_DESCRIPTOR alloc = vmalloc(v_cache.base[v_cache.index], 1, 0x03);
                 if (alloc.Attribute != 0)
                     return NULL;
