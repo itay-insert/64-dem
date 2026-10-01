@@ -534,12 +534,14 @@ void *kmalloc(u64 Size) {
                        slab = (slabobj *)ptr[i];
                        if ((slab->FreeObs - req) >= 0) {
                           obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                          if (obj_ret.addr == NULL) goto failed;
                           place = obj_ret.addr;
                           slab->FreeObs -= req;
                           slab_pid = i;
                           goto exit;
                        }
                    }
+                   failed:
                }
                hd = hd->next_page;
            }
