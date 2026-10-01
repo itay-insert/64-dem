@@ -102,6 +102,17 @@ static inline slabobj *createSlab(void) {
         new_hd->next_page = NULL;
         hd->next_page = new_hd;
         new_hd->former_page = hd;
+        alloc = va_alloc(1, 0x03);
+        if (alloc.status != 0)
+            return NULL;
+        new_hd->unused_cache = (slab_cache *)alloc.base;
+        new_hd->unused_cache->index = 0;
+        alloc = va_alloc(1, 0x03);
+        if (alloc.status != 0)
+            return NULL;
+        new_hd->used_cache = (slab_cache *)alloc.base;
+        new_hd->used_cache->index = 0;
+        
         slab_pages++;
         latest->next_object = (slabobj *)((u8 *)new_hd + sizeof(slabhd));
         latest = latest->next_object;
@@ -110,17 +121,22 @@ static inline slabobj *createSlab(void) {
         new_hd->free_entries--;
 
     } else {
-        slabobj *slab = start;
-        while (slab != NULL) {
-            if (slab->FreeObs == 128) {
-                hd = find_hd(slab);
-                hd->unused_entries--;
-                return slab;
-            }
-
-
-            slab = slab->next_object;
+        hd = shd;
+        int index = hd->unused_cache->index;
+        u64 *ptr = hd->unused_cache->addresses;
+        while (index == 0) {
+           if (hd->next_page == NULL) break;
+           hd = hd->next_page;
+           index = hd->unused_cache->index;
+           ptr = hd->unused_cache->addresses;
         }
+        
+        if (index != 0) {
+           index--;
+           hd->unused_entries--;
+           return (slabobj *)ptr[index];
+        }
+           
 
         latest->next_object = (slabobj *)((u8 *)latest + sizeof(slabobj));
         latest = latest->next_object;
@@ -428,6 +444,20 @@ void *kmalloc(u64 Size) {
         max = shd->free_entries;
         shd->next_page = NULL;
         shd->former_page = NULL;
+        alloc = va_alloc(1, 0x03);
+        if (alloc.status != 0) {
+           spin_unlock(&klock);
+           return NULL;
+        }
+        shd->unused_cache = (slab_cache *)alloc.base;
+        shd->unused_cache->index = 0;
+        alloc = va_alloc(1, 0x03);
+        if (alloc.status != 0) {
+           spin_unlock(&klock);
+           return NULL;
+        }
+        shd->used_cache = (slab_cache *)alloc.base;
+        shd->used_cache->index = 0;
     }
 
     slabobj *slab = NULL;
