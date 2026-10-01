@@ -25,6 +25,7 @@ typedef struct {
     u16 attributes;
     u16 _pad;
     int sc;
+    int index;
     slabobj *slabOrg;
 } k_header;
 
@@ -422,6 +423,12 @@ static inline void link_pages(slabhd *former, slabhd *next) {
 }
 
 
+static inline int get_index(slabobj *slab) {
+    u64 addr = &slab;
+    addr = addr & 0xfff;
+    return (int)((addr - sizeof(slabhd)) / sizeof(slabobj));
+}
+
 void *kmalloc(u64 Size) {
     u64 addr = 0;
     u64 save_size = 0;
@@ -465,6 +472,7 @@ void *kmalloc(u64 Size) {
     slabhd *hd = NULL;
     search_ret obj_ret = {0};
     int req;
+    int slab_pid;
     if (Size < 4096) {
         find_slab:
 
@@ -480,25 +488,53 @@ void *kmalloc(u64 Size) {
             slab->PageBase = INVALID_BASE;
             slab->FreeObs = 128,
             shd->unused_entries++;
+            shd->unused_cache->addresses[index] = &slab;
+            shd->unused_cache->index++;
             start = slab;
         }
 
-        slab = start;
-        while (slab != NULL) {
-            req = (int)(Size + 31) >> 5;
-            obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
-            place = obj_ret.addr;
-            if (place != NULL) {
-                if (slab->FreeObs == 128) {
-                    hd = find_hd(slab);
-                    hd->unused_entries--;
-                }
+        req = (int)(Size + 31) >> 5;
+
+        hd = shd;
+        while (hd != NULL) {
+            if (hd->unused_cache->index != 0) {
+                hd->unused_cache->index--;
+                slab = (slabobj *)hd->unused_cache->addresses[hd->unused_cache->index];
+                hd->unused_entries--;
+                place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
                 slab->FreeObs -= req;
+                int index = get_index(slab);
+                hd->used_cache->addresses[index] = &slab;
+                if (index >= hd->used_cache->index)
+                   hd->used_cache->index = index + 1;
                 break;
             }
 
-            slab = slab->next_object;
+           hd = hd->next_page;
         }
+
+        if (place == NULL && conreq) {
+            hd = shd;
+            while (hd != NULL) {
+                u64 *ptr = hd->used_cache->addresses;
+                int index = hd->used_cache->index;
+                for (int i = 0; i < index; i++) {
+                   if (ptr[i] != INVALID_BASE) {
+                       slab = (slabobj *)ptr[i];
+                       if ((slab->FreeObs - req) >= 0) {
+                          place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                          slab->FreeObs -= req;
+                          slab_pid = i;
+                          goto exit;
+                       }
+                   }
+               }
+               hd = hd->next_page;
+           }
+        }
+
+        exit:
+                          
 
         if (place == NULL) {
             slab = createSlab();
@@ -515,6 +551,12 @@ void *kmalloc(u64 Size) {
             place = obj_ret.addr;
             slab->FreeObs -= req;
             hd->unused_entries--;
+            int index = get_index(slab);
+            hd->used_cache->addresses[index] = &slab;
+            slab_pid = index;
+            if (index >= hd->used_cache->index)
+                   hd->used_cache->index = index + 1;
+            
         }
 
         if (slab->PageBase == INVALID_BASE && conreq) {
