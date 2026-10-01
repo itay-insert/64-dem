@@ -662,7 +662,7 @@ void kfree(void *alloc) {
        slabhd *hd = find_hd(slab);
        if (slab->FreeObs == 128) {
            hd->unused_cache->addresses[hd->unused_cache->index] = (u64)slab;
-           hd->unused_cache->index++:
+           hd->unused_cache->index++;
 ..         hd->used_cache->addresses[slab_pid] = INVALID_BASE;
            hd->unused_entries++;
            va_ret alloc = {0};
