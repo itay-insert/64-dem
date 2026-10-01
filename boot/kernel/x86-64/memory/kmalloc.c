@@ -583,6 +583,7 @@ void *kmalloc(u64 Size) {
               slab->FreeObs += req;
 
               if (slab->FreeObs == 128) {
+                  hd->used_cache->addresses[get_index(slab)] = INVALID_BASE;
                   hd->unused_entries++;
                   hd->unused_cache->addresses[hd->unused_cache->index] = (u64)slab;
                   hd->unused_cache->index++;
