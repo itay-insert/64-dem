@@ -394,8 +394,8 @@ static inline bool check_page(slabhd *hd) {
 static inline slabhd *deallocate_slab(slabhd *hd) {
     slabhd *former_page = hd->former_page;
 
-    u64 unused_cache = &hd->unused_cache;
-    u64 used_cache = &hd->used_cache;
+    u64 unused_cache = (u64)hd->unused_cache;
+    u64 used_cache = (u64)hd->used_cache;
     va_ret desc = {0};
     desc.Base = (u64)hd;
     desc.attributes = 0x03;
@@ -497,7 +497,7 @@ void *kmalloc(u64 Size) {
             slab->PageBase = INVALID_BASE;
             slab->FreeObs = 128;
             shd->unused_entries++;
-            shd->unused_cache->addresses[index] = &slab;
+            shd->unused_cache->addresses[index] = (u64)slab;
             if (shd->unused_cache->index < max) shd->unused_cache->index++;
             start = slab;
         }
@@ -510,11 +510,12 @@ void *kmalloc(u64 Size) {
                 hd->unused_cache->index--;
                 slab = (slabobj *)hd->unused_cache->addresses[hd->unused_cache->index];
                 hd->unused_entries--;
-                place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                place = obj_ret.addr;
                 slab->FreeObs -= req;
                 int index = get_index(slab);
                 slab_pid = index;
-                hd->used_cache->addresses[index] = &slab;
+                hd->used_cache->addresses[index] = (u64)slab;
                 if (index >= hd->used_cache->index)
                    hd->used_cache->index = index + 1;
                 break;
@@ -532,7 +533,8 @@ void *kmalloc(u64 Size) {
                    if (ptr[i] != INVALID_BASE) {
                        slab = (slabobj *)ptr[i];
                        if ((slab->FreeObs - req) >= 0) {
-                          place = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                          obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                          place = obj_ret.addr;
                           slab->FreeObs -= req;
                           slab_pid = i;
                           goto exit;
@@ -578,7 +580,7 @@ void *kmalloc(u64 Size) {
 
               if (slab->FreeObs == 128) {
                   hd->unused_entries++;
-                  hd->unused_cache->addresses[hd->unused_cache->index] = &slab;
+                  hd->unused_cache->addresses[hd->unused_cache->index] = (u64)slab;
                   hd->unused_cache->index++;
               }
 
@@ -657,7 +659,7 @@ void kfree(void *alloc) {
        slab->FreeObs += req;
        slabhd *hd = find_hd(slab);
        if (slab->FreeObs == 128) {
-           hd->unused_cache->addresses[hd->unused_cache->index] = &slab;
+           hd->unused_cache->addresses[hd->unused_cache->index] = (u64)slab;
            hd->unused_cache->index++:
 ..         hd->used_cache->addresses[slab_pid] = INVALID_BASE;
            hd->unused_entries++;
