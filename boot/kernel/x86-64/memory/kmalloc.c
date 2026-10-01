@@ -399,6 +399,8 @@ static inline void link_pages(slabhd *former, slabhd *next) {
 
 
 void *kmalloc(u64 Size) {
+    u64 addr = 0;
+    u64 save_size = 0;
     bool conreq = true;
     bool back = false;
     Size = Size + sizeof(k_header);
@@ -504,7 +506,7 @@ void *kmalloc(u64 Size) {
             spin_unlock(&klock);
             return NULL;
         }
-        u64 addr = alloc.base;
+        addr = alloc.base;
         place = (void *)addr;
     } else {
         va_ret alloc = va_alloc(((Size+4095)>>12), 0x03);
@@ -512,8 +514,8 @@ void *kmalloc(u64 Size) {
             spin_unlock(&klock);
             return NULL;
         }
-        u64 addr = alloc.base;
-        u64 save_size = Size;
+        addr = alloc.base;
+        save_size = Size;
         Size = Size & 0xFFFULL;
         back = true;
         conreq = false;
