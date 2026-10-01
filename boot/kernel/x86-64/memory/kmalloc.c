@@ -466,15 +466,6 @@ void *kmalloc(u64 Size) {
                 spin_unlock(&klock);
                 return NULL;
             }
-            if (slab->PageBase == INVALID_BASE && conreq) {
-                va_ret alloc = va_alloc(1, 0x03);
-                if (alloc.status != 0) {
-                    spin_unlock(&klock);
-                    return NULL;
-                }
-                u64 addr = alloc.base;
-                slab->PageBase = addr;
-            }
             memset(slab->Cache_2048, 0, 16);
             slab->FreeObs = 128;
             hd = find_hd(slab);
