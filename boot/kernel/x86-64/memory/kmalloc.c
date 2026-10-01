@@ -502,6 +502,7 @@ void *kmalloc(u64 Size) {
            
            slab->PageBase = alloc.base;
            place = (void *)((u64)place - 1 + alloc.base);
+        }
         if (back) 
             goto home;
 
