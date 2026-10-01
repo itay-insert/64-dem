@@ -423,6 +423,7 @@ void *kmalloc(u64 Size) {
     slabobj *slab = NULL;
     void *place = NULL;
     search_ret obj_ret = {0};
+    int req;
     if (Size < 4096) {
         find_slab:
 
@@ -443,7 +444,7 @@ void *kmalloc(u64 Size) {
 
         slab = start;
         while (slab != NULL) {
-            int req = (int)(Size + 31) >> 5;
+            req = (int)(Size + 31) >> 5;
             obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
             place = obj_ret.addr;
             if (place != NULL) {
@@ -477,7 +478,7 @@ void *kmalloc(u64 Size) {
             slab->FreeObs = 128;
             hd = find_hd(slab);
             hd->unused_entries++;
-            int req = (int)(Size + 31) >> 5;
+            req = (int)(Size + 31) >> 5;
             obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
             place = obj_ret.addr;
             slab->FreeObs -= req;
