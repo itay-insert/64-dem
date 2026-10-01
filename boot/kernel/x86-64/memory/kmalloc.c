@@ -433,7 +433,7 @@ static inline void link_pages(slabhd *former, slabhd *next) {
 
 
 static inline int get_index(slabobj *slab) {
-    u64 addr = &slab;
+    u64 addr = (u64)slab;
     addr = addr & 0xfff;
     return (int)((addr - sizeof(slabhd)) / sizeof(slabobj));
 }
@@ -503,28 +503,7 @@ void *kmalloc(u64 Size) {
         }
 
         req = (int)(Size + 31) >> 5;
-
-        hd = shd;
-        while (hd != NULL) {
-            if (hd->unused_cache->index != 0) {
-                hd->unused_cache->index--;
-                slab = (slabobj *)hd->unused_cache->addresses[hd->unused_cache->index];
-                hd->unused_entries--;
-                obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
-                place = obj_ret.addr;
-                slab->FreeObs -= req;
-                int index = get_index(slab);
-                slab_pid = index;
-                hd->used_cache->addresses[index] = (u64)slab;
-                if (index >= hd->used_cache->index)
-                   hd->used_cache->index = index + 1;
-                break;
-            }
-
-           hd = hd->next_page;
-        }
-
-        if (place == NULL && conreq) {
+       if (conreq) {
             hd = shd;
             while (hd != NULL) {
                 u64 *ptr = hd->used_cache->addresses;
@@ -548,6 +527,29 @@ void *kmalloc(u64 Size) {
         }
 
         exit:
+        if (place != NULL) goto skip;
+        hd = shd;
+        while (hd != NULL) {
+            if (hd->unused_cache->index != 0) {
+                hd->unused_cache->index--;
+                slab = (slabobj *)hd->unused_cache->addresses[hd->unused_cache->index];
+                hd->unused_entries--;
+                obj_ret = find_objs(req, slab->Cache_2048, slab->PageBase, conreq);
+                place = obj_ret.addr;
+                slab->FreeObs -= req;
+                int index = get_index(slab);
+                slab_pid = index;
+                hd->used_cache->addresses[index] = (u64)slab;
+                if (index >= hd->used_cache->index)
+                   hd->used_cache->index = index + 1;
+                break;
+            }
+
+           hd = hd->next_page;
+        }
+
+        
+        skip:
                           
 
         if (place == NULL) {
