@@ -497,7 +497,7 @@ void *kmalloc(u64 Size) {
             slab->PageBase = INVALID_BASE;
             slab->FreeObs = 128;
             shd->unused_entries++;
-            shd->unused_cache->addresses[index] = (u64)slab;
+            shd->unused_cache->addresses[shd->unused_cache->index] = (u64)slab;
             if (shd->unused_cache->index < max) shd->unused_cache->index++;
             start = slab;
         }
