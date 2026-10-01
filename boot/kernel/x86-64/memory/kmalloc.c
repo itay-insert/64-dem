@@ -30,12 +30,20 @@ typedef struct {
 
 
 typedef struct slabhd slabhd;
+typedef struct slab_cache slab_cache;
 
 struct slabhd {
     u64 free_entries;
     u64 unused_entries;
     slabhd *next_page;
     slabhd *former_page;
+    slab_cache *used_cache;
+    slab_cache *unused_cache;
+} __attribute__((packed));
+
+struct slab_cache {
+    u64 addresses[(4096 - sizeof(slabhd)) / sizeof(slabobj)];
+    int index;
 } __attribute__((packed));
 
 
