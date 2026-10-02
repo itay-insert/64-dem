@@ -141,12 +141,51 @@ _start:
         call 0x1000:_convert_cluster_to_lba
         mov [starting_lba], eax
     
-        jmp halt
-
         call _load_segments
 
-    
+        mov ax, 0x0003
+        int 0x10
 
+        in al, 0x92
+        test al, 2
+        jnz after
+        or al, 2
+        and al, 0xFE
+        out 0x92, al
+        after:
+
+        mov edx, 0x10000
+        add edx, _bios_services
+
+        lgdt [gdt_descriptor]
+        mov eax, cr0
+        or al, 1
+        mov cr0, eax
+
+        jmp dword 0x08:0x18000
+
+    gdt_start:
+        dd 0x0
+        dd 0x0
+
+
+        dw 0xffff ; kernel code segment (0x08)
+        dw 0x0000 
+        db 0x00
+        db 10011010b
+        db 11001111b
+        db 0x00
+
+        dw 0xffff ; kernel data segment (0x10)
+        dw 0x0000
+        db 0x00
+        db 10010010b
+        db 11001111b
+        db 0x00
+    gdt_end:
+    gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd 0x10000 + gdt_start
 
     _println:
         push ecx
@@ -200,6 +239,14 @@ _start:
         movzx ecx, byte [sectors_per_cluster] 
         imul eax, ecx
         add eax, [first_data_lba]
+        retf
+    
+    _convert_lba_to_cluster:
+        sub eax, [first_data_lba]
+        xor edx, edx
+        movzx ecx, byte [sectors_per_cluster]
+        div ecx
+        add eax, 2
         retf
 
     _open_root:
@@ -263,9 +310,11 @@ _start:
         mov ax, 0x9000
         mov es, ax
         mov eax, [es:di]
+        cmp eax, 0x0FFFFFFF
+        je skip_save
         and eax, 0x0FFFFFFF
         mov [current_cluster], eax
-        
+        skip_save:
         retf
     
 
@@ -282,15 +331,81 @@ _start:
         rep stosb
         ret
 
-    _load_segment:
+    _convert_sector_count:
+        xor edx, edx
+        movzx ecx, byte [sectors_per_cluster]
+        div ecx
+        cmp eax, 0
+        jne skip_set
+        mov eax, 1
+        skip_set:
+        retf
+
+    _load_clusters:
+
         push ecx
+        mov [current_cluster], eax
+        call 0x1000:_convert_cluster_to_lba
+        add eax, [sector_remainder]
+        push eax
+        mov eax, [ld_addr]
+        call _convert_addr
+        mov bx, ax
+        mov di, cx
+        pop eax
+        movzx ecx, byte [sectors_per_cluster]
+        call 0x1000:_bios_disk_services
+        call 0x1000:_find_next_cluster
+        mov eax, [current_cluster]
+        mov ecx, 512
+        movzx edx, byte [sectors_per_cluster]
+        imul ecx, edx
+        add dword [ld_addr], ecx
+        pop ecx
+        loop _load_clusters
+        retf
+
+    ld_addr dd 0
+    ctrf dd 0
+    _load_segment:
+        push ecx ; save important registers for caller
         push di
         push es
-        mov ecx, [ss:bp-16]
-        mov eax, p_vadder
+        mov eax, [p_vaddr]
+        mov [ld_addr], eax
+        call _convert_addr ; convert the 32-bit virtual address to a 16-bit offset and segment
+        mov di, ax
+        mov es, cx
+        push di
+        mov ecx, [p_memsz]
+        add ecx, 0xFFF ; align p_memsz to 4k
+        and ecx, ~0xFFF
+        call _zero_initialize ; zero_initiallize the memory region
+        pop di
+        mov ecx, [p_filesz]
+        add ecx, 0xFFF ; align p_filesz to 4k
+        shr ecx, 12
+        load_loop:
+        push ecx
+        mov eax, [p_offset]
+        shr eax, 9 ; divide by 512 to extract how many sectors to add to the starting sector
+        add eax, dword [starting_lba]
+        call 0x1000:_convert_lba_to_cluster
+        mov [sector_remainder], edx
+        mov [ctrf], eax
+        mov eax, 8
+        call 0x1000:_convert_sector_count
+        mov ecx, eax
+        mov eax, [ctrf]
+        call 0x1000:_load_clusters
+        pop ecx
+        add dword [p_offset], 4096
+        loop load_loop
+        pop es
+        pop di
+        pop ecx
+        ret
         
-        call _zero_initialize
-        add sp, 8
 
     _load_segments:
         mov ecx, [e_phoff]
@@ -300,23 +415,21 @@ _start:
         mov eax, [es:di]
         cmp eax, 1
         jne skip_load
-        push bp
-        mov bp, sp
-        sub sp, 16
         mov eax, [es:di+0x04]  ; p_offset
         mov ebx, [es:di+0x08]  ; p_vaddr
-        mov [ss:bp-4], eax
-        mov [ss:bp-8], ebx
+        mov [p_offset], eax
+        mov [p_vaddr], ebx
         mov eax, [es:di+0x10]  ; p_filesz
         mov ebx, [es:di+0x14]  ; p_memsz
-        mov [ss:bp-12], eax
-        mov [ss:bp-16], ebx
+        mov [p_filesz], eax
+        mov [p_memsz], ebx
+        cmp eax, 0
+        je skip_load
         call _load_segment
-        add sp, 16
-        pop bp
         skip_load:
         add di, [e_phentsize]
         loop _seg_loop
+        ret
         
 
 
@@ -326,6 +439,8 @@ file db 'STAGE4  ELF'
 _bios_services:
 dw _bios_disk_services
 dw _convert_cluster_to_lba
+dw _convert_lba_to_cluster
+dw _convert_sector_count
 dw _find_next_cluster
 dw _println
 code_seg dw 0x1000
@@ -341,6 +456,7 @@ current_cluster dd 0
 starting_cluster dd 0
 starting_lba dd 0
 
+sector_remainder dd 0
 pointer dw folder
 counter db 0
 
@@ -358,5 +474,9 @@ e_phoff dd 0
 e_phentsize dw 0
 e_phnum dw 0
 
+p_offset dd 0 ; offset 0x04
+p_vaddr dd 0 ; offset 0x08 
+p_filesz dd 0 ; offset 0x10
+p_memsz dd 0 ; offset 0x14
 
 times 32768-($-$$) db 0

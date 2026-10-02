@@ -58,7 +58,7 @@ static va_node *find_new_entry(u8 Pos, va_node *Parent) {
                    return NULL;
                new_hd = (va_hd *)va_top;
                va_top += 0x1000;
-            }`
+            }
             va_metadata_pages++;
             new_hd->free_entries = (4096 - sizeof(va_hd)) / sizeof(va_node);
             new_hd->unused_entries = 0;
@@ -282,6 +282,8 @@ va_ret va_alloc(u64 pages, u16 attributes) {
                          last_hd = last_hd->former_page;
                     }
         }
+        }
+    }
                     
     } else {
         entry->virtual_base += rsz;
