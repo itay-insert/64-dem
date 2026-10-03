@@ -44,7 +44,15 @@ gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/memory/memory_diagnostics.c -o memory_diagnostics.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/acpiPM.cpp -o acpiPM.o
-
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/memory/kmalloc.c -o kmalloc.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/new.cpp -o new.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/timer.cpp -o timer.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/pm.cpp -o pm.o
+    g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/hpet.cpp -o hpet.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o

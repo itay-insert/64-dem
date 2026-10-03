@@ -71,9 +71,9 @@ slabhd *shd = NULL;
 
 u64 slab_pages = 0;
 
-u64 max = 0;
+u64 kmax = 0;
 
-spin_lock_t klock = {0};
+spinlock_t klock = {0};
 
 
 static inline slabhd *find_hd(slabobj *slab) {
@@ -397,15 +397,15 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
     u64 unused_cache = (u64)hd->unused_cache;
     u64 used_cache = (u64)hd->used_cache;
     va_ret desc = {0};
-    desc.Base = (u64)hd;
+    desc.base = (u64)hd;
     desc.attributes = 0x03;
     desc.pages = 1;
     va_free(desc);
 
-    desc.Base = unused_cache;
+    desc.base = unused_cache;
     va_free(desc);
 
-    desc.Base = used_cache;
+    desc.base = used_cache;
     va_free(desc);
 
     return former_page;
@@ -414,7 +414,7 @@ static inline slabhd *deallocate_slab(slabhd *hd) {
 
 
 static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
-    u64 place = max - last_hd->free_entries;
+    u64 place = kmax - last_hd->free_entries;
     last = (slabobj *)((u8 *)last_hd + sizeof(slabhd));
     last = &last[place-1];
     last->next_object = NULL;
@@ -424,7 +424,7 @@ static inline slabobj *reset_latest(slabobj *last, slabhd *last_hd) {
 
 
 static inline void link_pages(slabhd *former, slabhd *next) {
-    u64 place = max - former->free_entries;
+    u64 place = kmax - former->free_entries;
     slabobj *last_slab = (slabobj *)((u8 *)former + sizeof(slabhd));
     last_slab = &last_slab[place-1];
     last_slab->next_object = (slabobj *)((u8 *)next + sizeof(slabhd));
@@ -457,7 +457,7 @@ void *kmalloc(u64 Size) {
         shd = (slabhd *)alloc.base;
         shd->unused_entries = 0;
         shd->free_entries = (4096 - sizeof(slabhd)) / sizeof(slabobj);
-        max = shd->free_entries;
+        kmax = shd->free_entries;
         shd->next_page = NULL;
         shd->former_page = NULL;
         alloc = va_alloc(1, 0x03);
@@ -702,7 +702,7 @@ void kfree(void *alloc) {
     } else if (!(header->Size & 0xFFFULL)) {
         free_aligned:
         va_ret desc = {0};
-        desc.Base = header->Base;
+        desc.base = header->Base;
         desc.attributes = 0x03;
         desc.pages = header->Size >> 12;
         va_free(desc);

@@ -14,10 +14,14 @@ class TimerSource {
     public:
         virtual u64 read() = 0;
         virtual u64 read_freq() = 0;
-}
+        SimpleTimer hw;
+};
 
 class Timer {
     public: 
-        SimpleTimer *Src;
+        TimerSource *Src;
         Timer();
 };
+
+
+void wait_ms(TimerSource& timer, u64 ms);

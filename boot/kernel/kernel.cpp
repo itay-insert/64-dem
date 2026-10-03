@@ -18,7 +18,7 @@
 #include "boot_info.h"
 #include "drivers/xhci.h"
 #include "drivers/acpiPM.hpp"
-
+#include "drivers/timers/timer.hpp"
 
 #define RGB 0
 #define BGR 1
@@ -268,8 +268,11 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                (unsigned int)boot_path.DeviceCount);
     }
 
-
+    Timer timer;
+    printf("Timer signature: %s\n", timer.Src->hw.signature);
+    printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);
     int xhci_status = xhci_init();
+
 
     if (xhci_status == 1) {
         printf("xHCI initialization failed\n");
@@ -277,6 +280,15 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf("xHCI initialization successful\n");
     }
 
+
+    for (int i = 0; i < 3; i++) {
+        printf(".");
+        wait_ms(*timer.Src, 1000);
+    }
+
+
+    printf("\n");
+    printf("Current timer tick is: %lx\n", timer.Src->read());
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
          info64->kernel_start, info64->kernel_entry, info64->kernel_end, info64->framebuffer_base, APIC_base, IO_APIC);
     printf("the clock:");

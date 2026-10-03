@@ -41,20 +41,34 @@ Timer::Timer() {
     
     for (int i = 0; i < 2; i++) {
         ACPI_ret ret = ACPI_discovery(signs[i]);
-        instances += (ret.status == 0);
         if (ret.status != 0) {
             printf("Kernel: %s not found\n", names[i]);
         } else {
             if (memcmp(signs[i], "FACP", 4) == 0) {
-                PMTimer pm;            
-                Src = &pm;    
+                Src = new PMTimer;
+                Src->hw.Timer_init(ret.simple_timer, names[i], signs[i]);
+                break;
             } else if (memcmp(signs[i], "HPET", 4) == 0) {
-                HPET hpet;
-                Src = &hpet;
+                Src = new HPET;
+                Src->hw.Timer_init(ret.simple_timer, names[i], signs[i]);
+                break;
             } 
         }
     }
     
 
+}
+
+void wait_ms(TimerSource& timer, u64 ms) {
+    const u64 target = (timer.read_freq() * ms + 999) / 1000;
+    u32 previous = (u32)timer.read() & 0x00FFFFFFu;
+    u64 elapsed = 0;
+
+    while (elapsed < target) {
+        u32 current = (u32)timer.read() & 0x00FFFFFFu;
+        elapsed += (current - previous) & 0x00FFFFFFu;
+        previous = current;
+        __asm__ volatile("pause");
+    }
 }
 

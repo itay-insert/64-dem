@@ -28,7 +28,7 @@ mov [idt + 16], ax
 shr eax, 16
 mov [idt + 22], ax
 
-lidt [idt_descriptor]
+lidt [idt_descriptor] ; loading the idt to handle NMIs
 
 sub esp, 4
 jmp main
