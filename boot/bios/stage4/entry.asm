@@ -114,6 +114,8 @@ section .text.start
 ; service 3: sector count (arg1=sectors), returns clusters; secondary=remainder.
 ; service 4: next cluster (arg1=current cluster), returns next cluster.
 ; service 5: print (arg1=physical string address, arg2=length), returns 0.
+; service 6: E820 map (arg1=physical address of 1024 entries), returns count
+;            or 0xffffffff on BIOS error or map overflow.
 ; Invalid service/arguments return 0xffffffff. Pointers must be below 1 MiB.
 global RealModeWrapper
 RealModeWrapper:
@@ -127,8 +129,10 @@ RealModeWrapper:
     cmp eax, 0x20000
     jae .invalid
     mov ecx, [esp + 44]       ; service number
-    cmp ecx, 5
+    cmp ecx, 6
     ja .invalid
+    cmp ecx, 6
+    je .local_map_service
     movzx edx, word [eax + ecx * 2]
     test edx, edx
     jz .invalid
@@ -137,6 +141,22 @@ RealModeWrapper:
     test dx, dx
     jz .invalid
     mov [service_far + 2], dx
+    jmp .service_ready
+
+.local_map_service:
+    mov edx, get_memory_map
+    sub edx, 0x18000
+    mov [service_far], dx
+    mov word [service_far + 2], 0x1800
+    jmp .service_ready
+
+.local_vbe_service:
+    mov edx, vbe_init
+    sub edx, 0x18000
+    mov [service_far], dx
+    mov word [service_far + 2], 0x1800
+
+.service_ready:
     mov [service_number], cx
 
     mov eax, [esp + 48]
@@ -147,11 +167,12 @@ RealModeWrapper:
     mov [service_arg3], eax
     mov eax, [esp + 60]
     mov [secondary_ptr], eax
-
     cmp ecx, 0
     je .disk_args
     cmp ecx, 5
     je .print_args
+    cmp ecx, 6
+    je .memory_map_args
     jmp .enter_real_mode
 
 .disk_args:
@@ -190,6 +211,16 @@ RealModeWrapper:
     jnz .enter_real_mode
     xor eax, eax
     jmp .finish
+
+.memory_map_args:
+    mov eax, [service_arg1]
+    cmp eax, 0x10000
+    jb .invalid
+    add eax, 1024 * 24
+    jc .invalid
+    cmp eax, 0x100000
+    ja .invalid
+    jmp .enter_real_mode
 
 .enter_real_mode:
     mov [saved_esp], esp
@@ -232,6 +263,8 @@ real_mode_entry:
     je .disk
     cmp si, 5
     je .print
+    cmp si, 7
+    je .vbe
     jmp .call_service
 
 .disk:
@@ -241,6 +274,10 @@ real_mode_entry:
     shr edx, 4
     mov di, dx               ; DI:BX is the BIOS DAP buffer address
     mov cx, [ds:bp + service_arg3 - bridge_data]
+    jmp .call_service
+
+.vbe:
+    mov edx, [ds:bp + service_arg1 - bridge_data]
     jmp .call_service
 
 .print:
@@ -271,6 +308,448 @@ real_mode_entry:
     mov cr0, eax
     jmp dword far [cs:bp + pm16_return_ptr - bridge_data]
 
+; Called with CS=0x1800 and EAX=the physical destination address. Each
+; E820 transfer uses a fresh segment:offset so the 24 KiB map can cross a
+; 64 KiB boundary. The BIOS continuation token stays in EBX.
+get_memory_map:
+    mov ebp, bridge_data - 0x18000
+    mov [cs:bp + e820_next - bridge_data], eax
+    mov dword [cs:bp + e820_count - bridge_data], 0
+    xor ebx, ebx
+.next_entry:
+    cmp dword [cs:bp + e820_count - bridge_data], 1024
+    jae .error                 ; the BIOS still has another entry
+    mov eax, [cs:bp + e820_next - bridge_data]
+    mov di, ax
+    and di, 0x000f
+    shr eax, 4
+    mov es, ax
+    mov dword [es:di + 20], 1 ; request ACPI 3.x extended attributes
+    mov eax, 0xe820
+    mov edx, 0x534d4150      ; 'SMAP'
+    mov ecx, 24
+    int 0x15
+    mov ebp, bridge_data - 0x18000
+    jc .bios_end
+    cmp eax, 0x534d4150
+    jne .error
+    cmp ecx, 20
+    jb .error
+    cmp ecx, 24
+    jb .accept_entry         ; 20-byte BIOS entry has implicit valid bit
+    mov eax, [cs:bp + e820_next - bridge_data]
+    mov di, ax
+    and di, 0x000f
+    shr eax, 4
+    mov es, ax
+    test dword [es:di + 20], 1
+    jz .continue
+.accept_entry:
+    add dword [cs:bp + e820_next - bridge_data], 24
+    inc dword [cs:bp + e820_count - bridge_data]
+.continue:
+    test ebx, ebx
+    jnz .next_entry
+.done:
+    mov eax, [cs:bp + e820_count - bridge_data]
+    retf
+.bios_end:
+    cmp dword [cs:bp + e820_count - bridge_data], 0
+    jne .done                ; some BIOSes end with CF on the next call
+.error:
+    mov eax, 0xffffffff
+    retf
+
+
+; ============================================================
+; VBE output structure
+; ============================================================
+
+vbe_mode:
+    .pixel_mode:             dd 0
+    .horizontal_resolution:  dd 0
+    .vertical_resolution:    dd 0
+    .pixels_per_scanline:    dd 0
+    .framebuffer_address:    dd 0
+
+
+; ============================================================
+; BIOS buffers
+; ============================================================
+
+vbe_controller:
+    times 512 db 0
+
+vbe_mode_info:
+    times 256 db 0
+
+
+; ============================================================
+; Temporary variables
+; ============================================================
+
+vbe_best_mode:      dw 0
+vbe_best_x:         dw 0
+vbe_best_y:         dw 0
+vbe_best_bpp:       dw 0
+vbe_best_area:      dd 0
+
+target_address: dd 0
+; ============================================================
+; vbe_init
+;
+; Finds the highest-resolution VBE mode, enables it with the
+; linear framebuffer, and stores its information in vbe_mode.
+;
+; Returns:
+;   AX = 1  success
+;   AX = 0  failure
+; ============================================================
+
+vbe_init:
+
+    mov [cs:target_address], edx
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    push fs
+
+
+    ; --------------------------------------------------------
+    ; Get VBE controller information
+    ; --------------------------------------------------------
+
+    mov ax, cs
+    mov es, ax
+
+    mov di, vbe_controller
+
+    ; VBE 2.0 signature
+    mov word [es:di], '2B'
+    mov word [es:di+2], 'EV'
+
+    mov ax, 4F00h
+    int 10h
+
+    cmp ax, 004Fh
+    jne .failure
+
+
+    ; --------------------------------------------------------
+    ; Get pointer to VBE mode list
+    ;
+    ; controller + 0Eh = mode list offset
+    ; controller + 10h = mode list segment
+    ; --------------------------------------------------------
+
+    mov si, [es:vbe_controller + 0Eh]
+
+    mov ax, [es:vbe_controller + 10h]
+    mov fs, ax
+
+
+    ; --------------------------------------------------------
+    ; No best mode yet
+    ; --------------------------------------------------------
+
+    mov word [cs:vbe_best_mode], 0
+    mov word [cs:vbe_best_x], 0
+    mov word [cs:vbe_best_y], 0
+    mov word [cs:vbe_best_bpp], 0
+    mov dword [cs:vbe_best_area], 0
+
+
+    ; ========================================================
+    ; Walk VBE mode list
+    ; ========================================================
+
+.next_mode:
+
+    mov bx, [fs:si]
+    add si, 2
+
+    cmp bx, 0FFFFh
+    je .found_mode
+
+
+    ; --------------------------------------------------------
+    ; Get information about this mode
+    ; --------------------------------------------------------
+
+    mov ax, cs
+    mov es, ax
+
+    mov di, vbe_mode_info
+
+    mov cx, bx
+    mov ax, 4F01h
+    int 10h
+
+    cmp ax, 004Fh
+    jne .next_mode
+
+
+    ; --------------------------------------------------------
+    ; Mode attributes
+    ;
+    ; bit 0  = mode supported
+    ; bit 7  = color
+    ; bit 14 = linear framebuffer available
+    ; --------------------------------------------------------
+
+    mov ax, [es:vbe_mode_info]
+
+    test ax, 0001h
+    jz .next_mode
+
+    test ax, 0040h
+    jz .next_mode
+
+    test ax, 4000h
+    jz .next_mode
+
+
+    ; --------------------------------------------------------
+    ; Bits per pixel
+    ; offset 19h
+    ; --------------------------------------------------------
+
+    mov ax, [es:vbe_mode_info + 19h]
+
+    cmp ax, 8
+    jb .next_mode
+
+    mov dx, ax                    ; DX = BPP
+
+
+    ; --------------------------------------------------------
+    ; X resolution
+    ; offset 12h
+    ; --------------------------------------------------------
+
+    mov ax, [es:vbe_mode_info + 12h]
+    mov [cs:vbe_current_x], ax
+
+
+    ; --------------------------------------------------------
+    ; Y resolution
+    ; offset 14h
+    ; --------------------------------------------------------
+
+    mov ax, [es:vbe_mode_info + 14h]
+    mov [cs:vbe_current_y], ax
+
+
+    ; --------------------------------------------------------
+    ; Calculate X * Y
+    ; --------------------------------------------------------
+
+    mov ax, [cs:vbe_current_x]
+    mov cx, [cs:vbe_current_y]
+
+    mul cx                       ; DX:AX = X * Y
+
+    ; Compare 32-bit area against best area.
+    ;
+    ; DX:AX = current area
+    ; --------------------------------------------------------
+
+    cmp dx, [cs:vbe_best_area + 2]
+    ja .new_best
+
+    jb .next_mode
+
+    cmp ax, [cs:vbe_best_area]
+    ja .new_best
+
+    jb .next_mode
+
+    ; Same resolution -> prefer higher BPP.
+    cmp word [cs:vbe_best_bpp], 0
+    je .new_best
+
+    cmp dx, [cs:vbe_best_bpp]
+    jbe .next_mode
+
+
+.new_best:
+
+    mov [cs:vbe_best_mode], bx
+    mov ax, [cs:vbe_current_x]
+    mov [cs:vbe_best_x], ax
+
+    mov ax, [cs:vbe_current_y]
+    mov [cs:vbe_best_y], ax
+
+    mov [cs:vbe_best_bpp], dx
+
+    mov ax, [cs:vbe_current_x]
+    mov cx, [cs:vbe_current_y]
+    mul cx
+
+    mov [cs:vbe_best_area], ax
+    mov [cs:vbe_best_area + 2], dx
+
+    jmp .next_mode
+
+
+    ; ========================================================
+    ; Found highest resolution
+    ; ========================================================
+
+.found_mode:
+
+    cmp word [cs:vbe_best_mode], 0
+    je .failure
+
+
+    ; ========================================================
+    ; Get information about the selected mode one more time
+    ; ========================================================
+
+    mov ax, cs
+    mov es, ax
+
+    mov di, vbe_mode_info
+
+    mov cx, [cs:vbe_best_mode]
+
+    mov ax, 4F01h
+    int 10h
+
+    cmp ax, 004Fh
+    jne .failure
+
+
+    ===========================================
+    ; Set mode
+    ;
+    ; Bit 14 = linear framebuffer
+    ; ========================================================
+
+    mov bx, [cs:vbe_best_mode]
+    or bx, 4000h
+
+    mov ax, 4F02h
+    int 10h
+
+    cmp ax, 004Fh
+    jne .failure
+
+
+    ; ========================================================
+    ; Save:
+    ;
+    ; pixel_mode
+    ; ========================================================
+
+    xor eax, eax
+    mov ax, [cs:vbe_best_bpp]
+    mov [cs:vbe_mode.pixel_mode], eax
+
+
+    ; ========================================================
+    ; Save horizontal resolution
+    ; ========================================================
+
+    xor eax, eax
+    mov ax, [cs:vbe_best_x]
+    mov [cs:vbe_mode.horizontal_resolution], eax
+
+
+    ; ========================================================
+    ; Save vertical resolution
+    ; ========================================================
+
+    xor eax, eax
+    mov ax, [cs:vbe_best_y]
+    mov [cs:vbe_mode.vertical_resolution], eax
+
+
+    ; ========================================================
+    ; Save pixels per scanline
+    ;
+    ; VBE gives BytesPerScanLine at +10h.
+    ;
+    ; pixels_per_scanline =
+    ;     BytesPerScanLine / (BitsPerPixel / 8)
+    ; ========================================================
+
+    xor eax, eax
+    mov ax, [es:vbe_mode_info + 10h]
+
+    xor edx, edx
+
+    mov cx, [cs:vbe_best_bpp]
+    shr cx, 3
+
+    div cx
+
+    mov [cs:vbe_mode.pixels_per_scanline], eax
+
+
+    ; ========================================================
+    ; Save framebuffer address
+    ;
+    ; PhysBasePtr = offset 28h
+    ; ========================================================
+
+    mov eax, [es:vbe_mode_info + 28h]
+    mov [cs:vbe_mode.framebuffer_address], eax
+
+
+    ; ========================================================
+    ; Success
+    ; ========================================================
+
+    mov edx, [cs:target_address]
+    mov si, vbe_mode
+
+    xor ecx, ecx
+    mov ecx, 5
+    copy_loop:
+    mov ebx, edx
+    shr ebx, 16
+    shl bx, 12
+    mov es, bx
+    mov di, dx
+    mov eax, [cs:si]
+    mov [es:di], eax
+    add si, 4
+    add edx, 4
+    loop copy_loop
+
+    xor eax, eax ; 0 for success
+    jmp .done
+
+
+.failure:
+
+    mov eax, 1
+
+
+.done:
+
+    pop fs
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+
+    retf
+
+
+; ============================================================
+; Temporary variables
+; ============================================================
+
+vbe_current_x: dw 0
+vbe_current_y: dw 0
 pm16_return:
     mov ax, 0x20
     mov ds, ax
@@ -320,5 +799,7 @@ service_arg3: dd 0
 secondary_ptr: dd 0
 result_eax: dd 0
 result_edx: dd 0
+e820_next: dd 0
+e820_count: dd 0
 
 section .note.GNU-stack noalloc noexec nowrite progbits
