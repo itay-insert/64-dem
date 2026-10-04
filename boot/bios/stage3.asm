@@ -234,6 +234,21 @@ _start:
         jc error
         retf
 
+    ; Stage 4 needs a disk error returned to its caller instead of halting.
+    _bios_disk_services_status:
+        mov dl, [boot_drive]
+        mov si, dap
+        mov byte [si], 0x10
+        mov [si + 8], eax
+        mov word [si + 4], bx
+        mov word [si + 6], di
+        mov word [si + 2], cx
+        mov ah, 0x42
+        int 0x13
+        setc al
+        movzx eax, al             ; 0 = success, 1 = BIOS error
+        retf
+
     _convert_cluster_to_lba:
         sub eax, 2
         movzx ecx, byte [sectors_per_cluster] 
@@ -316,6 +331,12 @@ _start:
         mov [current_cluster], eax
         skip_save:
         retf
+
+    ; The original routine uses current_cluster as its input. This entry
+    ; accepts the cluster in EAX for the stage 4 call interface.
+    _find_next_cluster_from_eax:
+        mov [current_cluster], eax
+        jmp _find_next_cluster
     
 
     _convert_addr:
@@ -437,11 +458,11 @@ folder db 'BOOT       '
 file db 'STAGE4  ELF'
 
 _bios_services:
-dw _bios_disk_services
+dw _bios_disk_services_status
 dw _convert_cluster_to_lba
 dw _convert_lba_to_cluster
 dw _convert_sector_count
-dw _find_next_cluster
+dw _find_next_cluster_from_eax
 dw _println
 code_seg dw 0x1000
 boot_drive db 0
