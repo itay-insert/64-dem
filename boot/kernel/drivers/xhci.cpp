@@ -801,7 +801,7 @@ void USB_init(void) {
     u32 hcsparams1 = cap->hcsparams1;
     u8 max_ports = (hcsparams1 >> 24) & 0xFF;
     
-    u64 ports_base = op_base + 0x440;
+    u64 ports_base = op_base + 0x400;
 
     for (u8 port = 1; port <= max_ports; port++) {
         u32 portsc = read_portsc(ports_base, port);
