@@ -787,3 +787,28 @@ int xhci_init(TimerSource& timer) {
     
     return 0;
 }
+
+static inline u32 read_portsc(u64 base, u8 reg) {
+    return MMIO_read32(base, (reg * 0x10));
+}
+
+#define PORTSC_CCS (1u << 0)
+
+void USB_init(void) {
+    volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)xhci_base;
+
+    u64 op_base = xhci_base + cap->caplength;
+    u32 hcsparams1 = cap->hcsparams1;
+    u8 max_ports = (hcsparams1 >> 24) & 0xFF;
+    
+    u64 ports_base = op_base + 0x440;
+
+    for (u8 port = 1; port <= max_ports; port++) {
+        u32 portsc = read_portsc(ports_base, port);
+
+        if (portsc & PORTSC_CCS) {
+            printf("USB Device connected on port 0x%b\n", port);
+        }
+    }
+    
+}

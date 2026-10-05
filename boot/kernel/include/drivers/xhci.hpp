@@ -3,3 +3,5 @@
 #include "drivers/xhci_events.h"
 
 int xhci_init(TimerSource& timer);
+void USB_init(void);
+

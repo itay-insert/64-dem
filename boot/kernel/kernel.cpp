@@ -278,6 +278,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf("xHCI initialization failed\n");
     } else if (xhci_status == 0) {
         printf("xHCI initialization successful\n");
+        USB_init();
     }
 
 
