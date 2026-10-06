@@ -308,7 +308,7 @@ static inline search_ret find_objs(int req, u64 *buff, u64 base, bool creq) {
             set128(&buff[0], &buff[1], i);
     }
 
-    ret.addr = addr;
+    ret.addr = (void *)addr;
     return ret;
 
 }
@@ -453,7 +453,7 @@ void *kmalloc(u64 Size) {
             spin_unlock(&klock);
             return NULL;
         }
-        memset(alloc.base, 0, 4096);
+        memset((void *)alloc.base, 0, 4096);
         shd = (slabhd *)alloc.base;
         shd->unused_entries = 0;
         shd->free_entries = (4096 - sizeof(slabhd)) / sizeof(slabobj);

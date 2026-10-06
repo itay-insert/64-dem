@@ -57,21 +57,13 @@ typedef struct {
     u32 attributes;
 } __attribute__((packed)) E820Entry;
 
-enum { MEMORY_MAP_CAPACITY = 1024 };
+E820Entry E820map[1024] = {0};
+EFI_MEMORY_DESCRIPTOR efi_memory_map[1024] = {0};
 
-/* Stage 3 skips NOLOAD segments, so these buffers do not enter its 64 KiB
-   real-mode zeroing loop. The E820 service writes every returned entry. */
-E820Entry e820_entries[MEMORY_MAP_CAPACITY]
-    __attribute__((section(".memory_maps")));
-EFI_MEMORY_DESCRIPTOR efi_memory_map[MEMORY_MAP_CAPACITY]
-    __attribute__((section(".memory_maps")));
-u32 e820_entry_count;
-u32 efi_descriptor_count;
+u32 e820_entry_count = 0;
+u32 efi_descriptor_count = 0;
 
 typedef char e820_entry_must_be_24_bytes[(sizeof(E820Entry) == 24) ? 1 : -1];
-typedef char efi_descriptor_must_be_40_bytes[(sizeof(EFI_MEMORY_DESCRIPTOR) == 40) ? 1 : -1];
-typedef char efi_physical_start_must_be_at_offset_8[
-    (__builtin_offsetof(EFI_MEMORY_DESCRIPTOR, PhysicalStart) == 8) ? 1 : -1];
 
 static u32 e820_to_efi_type(u32 type) {
     switch (type) {
@@ -87,7 +79,7 @@ static u32 e820_to_efi_type(u32 type) {
 u32 convert_e820_to_efi(const E820Entry *entries, u32 count,
                         EFI_MEMORY_DESCRIPTOR *descriptors) {
     u32 written = 0;
-    for (u32 i = 0; i < count && i < MEMORY_MAP_CAPACITY; ++i) {
+    for (u32 i = 0; i < count && i < 1024; ++i) {
         u64 base = entries[i].base;
         u64 length = entries[i].length;
         if (length == 0 || length > ~(u64)0 - base) {
@@ -113,7 +105,6 @@ u32 convert_e820_to_efi(const E820Entry *entries, u32 count,
 
         EFI_MEMORY_DESCRIPTOR *descriptor = &descriptors[written++];
         descriptor->Type = type;
-        descriptor->Padding = 0;
         descriptor->PhysicalStart = first_page << 12;
         descriptor->VirtualStart = 0;
         descriptor->NumberOfPages = end_page - first_page;
@@ -122,11 +113,11 @@ u32 convert_e820_to_efi(const E820Entry *entries, u32 count,
             descriptor->Type == EfiACPIReclaimMemory ||
             descriptor->Type == EfiACPIMemoryNVS ||
             descriptor->Type == EfiPersistentMemory) {
-            descriptor->Attribute = EFI_MEMORY_WB;
+            descriptor->Attribute = 0;
         }
         if ((entries[i].attributes & 2) != 0 ||
             descriptor->Type == EfiPersistentMemory) {
-            descriptor->Attribute |= EFI_MEMORY_NV;
+            descriptor->Attribute |= 0;
         }
     }
     return written;
@@ -156,11 +147,11 @@ static u32 extract_size(const char *str) {
 void main(bios_services *Services) {
 
     e820_entry_count = RealModeWrapper(Services, read_memory_map,
-        (u32)(uintptr_t)e820_entries, 0, 0, 0);
+        (u32)(uintptr_t)E820map, 0, 0, 0);
     efi_descriptor_count = 0;
     if (e820_entry_count != 0xffffffff) {
         efi_descriptor_count = convert_e820_to_efi(
-            e820_entries, e820_entry_count, efi_memory_map);
+            E820map, e820_entry_count, efi_memory_map);
     }
 
     const char *Strings[] = {

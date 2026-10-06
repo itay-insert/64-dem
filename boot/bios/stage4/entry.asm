@@ -1,4 +1,4 @@
-BITS 32
+[BITS 32]
 global _start
 extern main
 
@@ -103,8 +103,6 @@ gdt_end:
 gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
-
-section .text.start
 ; u32 RealModeWrapper(bios_services *table, u32 service, u32 arg1,
 ;                     u32 arg2, u32 arg3, u32 *secondary);
 ; service 0: disk read (arg1=LBA, arg2=physical buffer, arg3=sectors),
@@ -117,6 +115,9 @@ section .text.start
 ; service 6: E820 map (arg1=physical address of 1024 entries), returns count
 ;            or 0xffffffff on BIOS error or map overflow.
 ; Invalid service/arguments return 0xffffffff. Pointers must be below 1 MiB.
+
+section .text
+
 global RealModeWrapper
 RealModeWrapper:
     pushfd
@@ -237,7 +238,7 @@ RealModeWrapper:
     popfd
     ret
 
-BITS 16
+[BITS 16]
 pm16_to_real:
     mov ax, 0x20
     mov ds, ax
@@ -365,6 +366,7 @@ get_memory_map:
 ; VBE output structure
 ; ============================================================
 
+section .data
 vbe_mode:
     .pixel_mode:             dd 0
     .horizontal_resolution:  dd 0
@@ -405,10 +407,10 @@ target_address: dd 0
 ;   AX = 1  success
 ;   AX = 0  failure
 ; ============================================================
-
+section .text
 vbe_init:
 
-    mov [cs:target_address], edx
+    mov [cs:target_address - 0x18000], edx
     push bx
     push cx
     push dx
@@ -425,7 +427,7 @@ vbe_init:
     mov ax, cs
     mov es, ax
 
-    mov di, vbe_controller
+    mov di, vbe_controller - 0x18000
 
     ; VBE 2.0 signature
     mov word [es:di], '2B'
@@ -435,7 +437,7 @@ vbe_init:
     int 10h
 
     cmp ax, 004Fh
-    jne .failure
+    jne _failure
 
 
     ; --------------------------------------------------------
@@ -445,9 +447,9 @@ vbe_init:
     ; controller + 10h = mode list segment
     ; --------------------------------------------------------
 
-    mov si, [es:vbe_controller + 0Eh]
+    mov si, [es:vbe_controller - 0x18000 + 0x0E]
 
-    mov ax, [es:vbe_controller + 10h]
+    mov ax, [es:vbe_controller - 0x18000 + 10h]
     mov fs, ax
 
 
@@ -455,24 +457,24 @@ vbe_init:
     ; No best mode yet
     ; --------------------------------------------------------
 
-    mov word [cs:vbe_best_mode], 0
-    mov word [cs:vbe_best_x], 0
-    mov word [cs:vbe_best_y], 0
-    mov word [cs:vbe_best_bpp], 0
-    mov dword [cs:vbe_best_area], 0
+    mov word [cs:vbe_best_mode - 0x18000], 0
+    mov word [cs:vbe_best_x - 0x18000], 0
+    mov word [cs:vbe_best_y - 0x18000], 0
+    mov word [cs:vbe_best_bpp - 0x18000], 0
+    mov dword [cs:vbe_best_area - 0x18000], 0
 
 
     ; ========================================================
     ; Walk VBE mode list
     ; ========================================================
 
-.next_mode:
+_next_mode:
 
     mov bx, [fs:si]
     add si, 2
 
     cmp bx, 0FFFFh
-    je .found_mode
+    je _found_mode
 
 
     ; --------------------------------------------------------
@@ -489,7 +491,7 @@ vbe_init:
     int 10h
 
     cmp ax, 004Fh
-    jne .next_mode
+    jne _next_mode
 
 
     ; --------------------------------------------------------
@@ -503,13 +505,13 @@ vbe_init:
     mov ax, [es:vbe_mode_info]
 
     test ax, 0001h
-    jz .next_mode
+    jz _next_mode
 
     test ax, 0040h
-    jz .next_mode
+    jz _next_mode
 
     test ax, 4000h
-    jz .next_mode
+    jz _next_mode
 
 
     ; --------------------------------------------------------
@@ -520,7 +522,7 @@ vbe_init:
     mov ax, [es:vbe_mode_info + 19h]
 
     cmp ax, 8
-    jb .next_mode
+    jb _next_mode
 
     mov dx, ax                    ; DX = BPP
 
@@ -558,24 +560,24 @@ vbe_init:
     ; --------------------------------------------------------
 
     cmp dx, [cs:vbe_best_area + 2]
-    ja .new_best
+    ja _new_best
 
-    jb .next_mode
+    jb _next_mode
 
     cmp ax, [cs:vbe_best_area]
-    ja .new_best
+    ja _new_best
 
-    jb .next_mode
+    jb _next_mode
 
     ; Same resolution -> prefer higher BPP.
     cmp word [cs:vbe_best_bpp], 0
-    je .new_best
+    je _new_best
 
     cmp dx, [cs:vbe_best_bpp]
-    jbe .next_mode
+    jbe _next_mode
 
 
-.new_best:
+_new_best:
 
     mov [cs:vbe_best_mode], bx
     mov ax, [cs:vbe_current_x]
@@ -593,17 +595,17 @@ vbe_init:
     mov [cs:vbe_best_area], ax
     mov [cs:vbe_best_area + 2], dx
 
-    jmp .next_mode
+    jmp _next_mode
 
 
     ; ========================================================
     ; Found highest resolution
     ; ========================================================
 
-.found_mode:
+_found_mode:
 
     cmp word [cs:vbe_best_mode], 0
-    je .failure
+    je _failure
 
 
     ; ========================================================
@@ -621,10 +623,10 @@ vbe_init:
     int 10h
 
     cmp ax, 004Fh
-    jne .failure
+    jne _failure
 
 
-    ===========================================
+    ; ===========================================
     ; Set mode
     ;
     ; Bit 14 = linear framebuffer
@@ -637,7 +639,7 @@ vbe_init:
     int 10h
 
     cmp ax, 004Fh
-    jne .failure
+    jne _failure
 
 
     ; ========================================================
@@ -723,16 +725,15 @@ vbe_init:
     loop copy_loop
 
     xor eax, eax ; 0 for success
-    jmp .done
+    jmp _done
 
 
-.failure:
+_failure:
 
     mov eax, 1
 
 
-.done:
-
+_done:
     pop fs
     pop es
     pop di
@@ -802,4 +803,3 @@ result_edx: dd 0
 e820_next: dd 0
 e820_count: dd 0
 
-section .note.GNU-stack noalloc noexec nowrite progbits
