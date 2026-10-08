@@ -238,6 +238,7 @@ RealModeWrapper:
     popfd
     ret
 
+section .bridge16
 [BITS 16]
 pm16_to_real:
     mov ax, 0x20
@@ -366,7 +367,8 @@ get_memory_map:
 ; VBE output structure
 ; ============================================================
 
-section .data
+section .bridge_data16
+align 16
 vbe_mode:
     .pixel_mode:             dd 0
     .horizontal_resolution:  dd 0
@@ -397,20 +399,19 @@ vbe_best_bpp:       dw 0
 vbe_best_area:      dd 0
 
 target_address: dd 0
-; ============================================================
-; vbe_init
-;
-; Finds the highest-resolution VBE mode, enables it with the
-; linear framebuffer, and stores its information in vbe_mode.
-;
-; Returns:
-;   AX = 1  success
-;   AX = 0  failure
-; ============================================================
-section .text
+
+vbe_current_x: dw 0
+vbe_current_y: dw 0
+
+section .bridge16
 vbe_init:
 
-    mov [cs:target_address - 0x18000], edx
+    ; DS = 0x1000 when vbe_init is called.
+    ; vbe_mode is the base of the VBE data block.
+    mov ebp, vbe_mode - 0x10000
+
+    mov [ds:bp + target_address - vbe_mode], edx
+
     push bx
     push cx
     push dx
@@ -424,10 +425,11 @@ vbe_init:
     ; Get VBE controller information
     ; --------------------------------------------------------
 
-    mov ax, cs
+    mov ax, ds
     mov es, ax
 
-    mov di, vbe_controller - 0x18000
+    mov di, vbe_controller - vbe_mode
+    add di, bp
 
     ; VBE 2.0 signature
     mov word [es:di], '2B'
@@ -447,9 +449,9 @@ vbe_init:
     ; controller + 10h = mode list segment
     ; --------------------------------------------------------
 
-    mov si, [es:vbe_controller - 0x18000 + 0x0E]
+    mov si, [es:bp + vbe_controller - vbe_mode + 0Eh]
 
-    mov ax, [es:vbe_controller - 0x18000 + 10h]
+    mov ax, [es:bp + vbe_controller - vbe_mode + 10h]
     mov fs, ax
 
 
@@ -457,11 +459,11 @@ vbe_init:
     ; No best mode yet
     ; --------------------------------------------------------
 
-    mov word [cs:vbe_best_mode - 0x18000], 0
-    mov word [cs:vbe_best_x - 0x18000], 0
-    mov word [cs:vbe_best_y - 0x18000], 0
-    mov word [cs:vbe_best_bpp - 0x18000], 0
-    mov dword [cs:vbe_best_area - 0x18000], 0
+    mov word [ds:bp + vbe_best_mode - vbe_mode], 0
+    mov word [ds:bp + vbe_best_x - vbe_mode], 0
+    mov word [ds:bp + vbe_best_y - vbe_mode], 0
+    mov word [ds:bp + vbe_best_bpp - vbe_mode], 0
+    mov dword [ds:bp + vbe_best_area - vbe_mode], 0
 
 
     ; ========================================================
@@ -481,10 +483,11 @@ _next_mode:
     ; Get information about this mode
     ; --------------------------------------------------------
 
-    mov ax, cs
+    mov ax, ds
     mov es, ax
 
-    mov di, vbe_mode_info
+    mov di, vbe_mode_info - vbe_mode
+    add di, bp
 
     mov cx, bx
     mov ax, 4F01h
@@ -502,7 +505,7 @@ _next_mode:
     ; bit 14 = linear framebuffer available
     ; --------------------------------------------------------
 
-    mov ax, [es:vbe_mode_info]
+    mov ax, [es:bp + vbe_mode_info - vbe_mode]
 
     test ax, 0001h
     jz _next_mode
@@ -519,12 +522,12 @@ _next_mode:
     ; offset 19h
     ; --------------------------------------------------------
 
-    mov ax, [es:vbe_mode_info + 19h]
+    mov ax, [es:bp + vbe_mode_info - vbe_mode + 19h]
 
     cmp ax, 8
     jb _next_mode
 
-    mov dx, ax                    ; DX = BPP
+    mov dx, ax
 
 
     ; --------------------------------------------------------
@@ -532,8 +535,8 @@ _next_mode:
     ; offset 12h
     ; --------------------------------------------------------
 
-    mov ax, [es:vbe_mode_info + 12h]
-    mov [cs:vbe_current_x], ax
+    mov ax, [es:bp + vbe_mode_info - vbe_mode + 12h]
+    mov [ds:bp + vbe_current_x - vbe_mode], ax
 
 
     ; --------------------------------------------------------
@@ -541,59 +544,57 @@ _next_mode:
     ; offset 14h
     ; --------------------------------------------------------
 
-    mov ax, [es:vbe_mode_info + 14h]
-    mov [cs:vbe_current_y], ax
+    mov ax, [es:bp + vbe_mode_info - vbe_mode + 14h]
+    mov [ds:bp + vbe_current_y - vbe_mode], ax
 
 
     ; --------------------------------------------------------
     ; Calculate X * Y
     ; --------------------------------------------------------
 
-    mov ax, [cs:vbe_current_x]
-    mov cx, [cs:vbe_current_y]
+    mov ax, [ds:bp + vbe_current_x - vbe_mode]
+    mov cx, [ds:bp + vbe_current_y - vbe_mode]
 
-    mul cx                       ; DX:AX = X * Y
+    mul cx
 
-    ; Compare 32-bit area against best area.
-    ;
     ; DX:AX = current area
-    ; --------------------------------------------------------
 
-    cmp dx, [cs:vbe_best_area + 2]
+    cmp dx, [ds:bp + vbe_best_area - vbe_mode + 2]
     ja _new_best
 
     jb _next_mode
 
-    cmp ax, [cs:vbe_best_area]
+    cmp ax, [ds:bp + vbe_best_area - vbe_mode]
     ja _new_best
 
     jb _next_mode
 
     ; Same resolution -> prefer higher BPP.
-    cmp word [cs:vbe_best_bpp], 0
+    cmp word [ds:bp + vbe_best_bpp - vbe_mode], 0
     je _new_best
 
-    cmp dx, [cs:vbe_best_bpp]
+    cmp dx, [ds:bp + vbe_best_bpp - vbe_mode]
     jbe _next_mode
 
 
 _new_best:
 
-    mov [cs:vbe_best_mode], bx
-    mov ax, [cs:vbe_current_x]
-    mov [cs:vbe_best_x], ax
+    mov [ds:bp + vbe_best_mode - vbe_mode], bx
 
-    mov ax, [cs:vbe_current_y]
-    mov [cs:vbe_best_y], ax
+    mov ax, [ds:bp + vbe_current_x - vbe_mode]
+    mov [ds:bp + vbe_best_x - vbe_mode], ax
 
-    mov [cs:vbe_best_bpp], dx
+    mov ax, [ds:bp + vbe_current_y - vbe_mode]
+    mov [ds:bp + vbe_best_y - vbe_mode], ax
 
-    mov ax, [cs:vbe_current_x]
-    mov cx, [cs:vbe_current_y]
+    mov [ds:bp + vbe_best_bpp - vbe_mode], dx
+
+    mov ax, [ds:bp + vbe_current_x - vbe_mode]
+    mov cx, [ds:bp + vbe_current_y - vbe_mode]
     mul cx
 
-    mov [cs:vbe_best_area], ax
-    mov [cs:vbe_best_area + 2], dx
+    mov [ds:bp + vbe_best_area - vbe_mode], ax
+    mov [ds:bp + vbe_best_area - vbe_mode + 2], dx
 
     jmp _next_mode
 
@@ -604,20 +605,21 @@ _new_best:
 
 _found_mode:
 
-    cmp word [cs:vbe_best_mode], 0
+    cmp word [ds:bp + vbe_best_mode - vbe_mode], 0
     je _failure
 
 
     ; ========================================================
-    ; Get information about the selected mode one more time
+    ; Get information about selected mode one more time
     ; ========================================================
 
-    mov ax, cs
+    mov ax, ds
     mov es, ax
 
-    mov di, vbe_mode_info
+    mov di, vbe_mode_info - vbe_mode
+    add di, bp
 
-    mov cx, [cs:vbe_best_mode]
+    mov cx, [ds:bp + vbe_best_mode - vbe_mode]
 
     mov ax, 4F01h
     int 10h
@@ -626,13 +628,11 @@ _found_mode:
     jne _failure
 
 
-    ; ===========================================
+    ; ========================================================
     ; Set mode
-    ;
-    ; Bit 14 = linear framebuffer
     ; ========================================================
 
-    mov bx, [cs:vbe_best_mode]
+    mov bx, [ds:bp + vbe_best_mode - vbe_mode]
     or bx, 4000h
 
     mov ax, 4F02h
@@ -643,14 +643,12 @@ _found_mode:
 
 
     ; ========================================================
-    ; Save:
-    ;
-    ; pixel_mode
+    ; Save pixel_mode
     ; ========================================================
 
     xor eax, eax
-    mov ax, [cs:vbe_best_bpp]
-    mov [cs:vbe_mode.pixel_mode], eax
+    mov ax, [ds:bp + vbe_best_bpp - vbe_mode]
+    mov [ds:bp + vbe_mode.pixel_mode - vbe_mode], eax
 
 
     ; ========================================================
@@ -658,8 +656,8 @@ _found_mode:
     ; ========================================================
 
     xor eax, eax
-    mov ax, [cs:vbe_best_x]
-    mov [cs:vbe_mode.horizontal_resolution], eax
+    mov ax, [ds:bp + vbe_best_x - vbe_mode]
+    mov [ds:bp + vbe_mode.horizontal_resolution - vbe_mode], eax
 
 
     ; ========================================================
@@ -667,8 +665,8 @@ _found_mode:
     ; ========================================================
 
     xor eax, eax
-    mov ax, [cs:vbe_best_y]
-    mov [cs:vbe_mode.vertical_resolution], eax
+    mov ax, [ds:bp + vbe_best_y - vbe_mode]
+    mov [ds:bp + vbe_mode.vertical_resolution - vbe_mode], eax
 
 
     ; ========================================================
@@ -681,16 +679,16 @@ _found_mode:
     ; ========================================================
 
     xor eax, eax
-    mov ax, [es:vbe_mode_info + 10h]
+    mov ax, [es:bp + vbe_mode_info - vbe_mode + 10h]
 
     xor edx, edx
 
-    mov cx, [cs:vbe_best_bpp]
+    mov cx, [ds:bp + vbe_best_bpp - vbe_mode]
     shr cx, 3
 
     div cx
 
-    mov [cs:vbe_mode.pixels_per_scanline], eax
+    mov [ds:bp + vbe_mode.pixels_per_scanline - vbe_mode], eax
 
 
     ; ========================================================
@@ -699,32 +697,38 @@ _found_mode:
     ; PhysBasePtr = offset 28h
     ; ========================================================
 
-    mov eax, [es:vbe_mode_info + 28h]
-    mov [cs:vbe_mode.framebuffer_address], eax
+    mov eax, [es:bp + vbe_mode_info - vbe_mode + 28h]
+    mov [ds:bp + vbe_mode.framebuffer_address - vbe_mode], eax
 
 
     ; ========================================================
-    ; Success
+    ; Copy vbe_mode structure to caller
     ; ========================================================
 
-    mov edx, [cs:target_address]
-    mov si, vbe_mode
+    mov edx, [ds:bp + target_address - vbe_mode]
 
-    xor ecx, ecx
+    mov si, bp
+
     mov ecx, 5
-    copy_loop:
+
+.copy_loop:
     mov ebx, edx
     shr ebx, 16
     shl bx, 12
+
     mov es, bx
     mov di, dx
-    mov eax, [cs:si]
+
+    mov eax, [ds:si]
     mov [es:di], eax
+
     add si, 4
     add edx, 4
-    loop copy_loop
 
-    xor eax, eax ; 0 for success
+    loop .copy_loop
+
+
+    xor eax, eax
     jmp _done
 
 
@@ -734,6 +738,7 @@ _failure:
 
 
 _done:
+
     pop fs
     pop es
     pop di
@@ -743,14 +748,7 @@ _done:
     pop bx
 
     retf
-
-
-; ============================================================
-; Temporary variables
-; ============================================================
-
-vbe_current_x: dw 0
-vbe_current_y: dw 0
+    
 pm16_return:
     mov ax, 0x20
     mov ds, ax

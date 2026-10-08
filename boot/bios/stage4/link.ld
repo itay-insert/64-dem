@@ -9,6 +9,14 @@ SECTIONS {
         *(.text*)
     }
 
+    .bridge16 ALIGN (4K) : {
+        *(.bridge16*)
+    }
+
+    .bridge_data16 ALIGN (4K) : {
+        *(.bridge_data16*)
+    }
+
     .rodata ALIGN (4K) : {
         *(.rodata*)
     }
