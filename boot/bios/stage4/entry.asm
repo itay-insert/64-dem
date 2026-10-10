@@ -114,6 +114,8 @@ gdt_descriptor:
 ; service 5: print (arg1=physical string address, arg2=length), returns 0.
 ; service 6: E820 map (arg1=physical address of 1024 entries), returns count
 ;            or 0xffffffff on BIOS error or map overflow.
+; service 7: set VBE mode (arg1=physical address of 24-byte result),
+;            returns 0 on success or 1 if no supported mode is available.
 ; Invalid service/arguments return 0xffffffff. Pointers must be below 1 MiB.
 
 section .text
@@ -130,10 +132,12 @@ RealModeWrapper:
     cmp eax, 0x20000
     jae .invalid
     mov ecx, [esp + 44]       ; service number
-    cmp ecx, 6
+    cmp ecx, 7
     ja .invalid
     cmp ecx, 6
     je .local_map_service
+    cmp ecx, 7
+    je .local_vbe_service
     movzx edx, word [eax + ecx * 2]
     test edx, edx
     jz .invalid
@@ -174,6 +178,8 @@ RealModeWrapper:
     je .print_args
     cmp ecx, 6
     je .memory_map_args
+    cmp ecx, 7
+    je .vbe_args
     jmp .enter_real_mode
 
 .disk_args:
@@ -220,6 +226,14 @@ RealModeWrapper:
     add eax, 1024 * 24
     jc .invalid
     cmp eax, 0x100000
+    ja .invalid
+    jmp .enter_real_mode
+
+.vbe_args:
+    mov eax, [service_arg1]
+    cmp eax, 0x10000
+    jb .invalid
+    cmp eax, 0x100000 - 24
     ja .invalid
     jmp .enter_real_mode
 
@@ -370,10 +384,11 @@ get_memory_map:
 section .bridge_data16
 align 16
 vbe_mode:
-    .pixel_mode:             dd 0
+    .pixel_mode:             dd 0 ; 0 = RGB, 1 = BGR (kernel convention)
     .horizontal_resolution:  dd 0
     .vertical_resolution:    dd 0
     .pixels_per_scanline:    dd 0
+    .info_size:              dd 24
     .framebuffer_address:    dd 0
 
 
@@ -395,7 +410,6 @@ vbe_mode_info:
 vbe_best_mode:      dw 0
 vbe_best_x:         dw 0
 vbe_best_y:         dw 0
-vbe_best_bpp:       dw 0
 vbe_best_area:      dd 0
 
 target_address: dd 0
@@ -431,9 +445,9 @@ vbe_init:
     mov di, vbe_controller - vbe_mode
     add di, bp
 
-    ; VBE 2.0 signature
-    mov word [es:di], '2B'
-    mov word [es:di+2], 'EV'
+    ; Request the VBE 2.0+ controller information block.
+    mov word [es:di], 'VB'
+    mov word [es:di+2], 'E2'
 
     mov ax, 4F00h
     int 10h
@@ -462,7 +476,6 @@ vbe_init:
     mov word [ds:bp + vbe_best_mode - vbe_mode], 0
     mov word [ds:bp + vbe_best_x - vbe_mode], 0
     mov word [ds:bp + vbe_best_y - vbe_mode], 0
-    mov word [ds:bp + vbe_best_bpp - vbe_mode], 0
     mov dword [ds:bp + vbe_best_area - vbe_mode], 0
 
 
@@ -501,8 +514,8 @@ _next_mode:
     ; Mode attributes
     ;
     ; bit 0  = mode supported
-    ; bit 7  = color
-    ; bit 14 = linear framebuffer available
+    ; bit 4 = graphics mode
+    ; bit 7 = linear framebuffer available
     ; --------------------------------------------------------
 
     mov ax, [es:bp + vbe_mode_info - vbe_mode]
@@ -510,25 +523,18 @@ _next_mode:
     test ax, 0001h
     jz _next_mode
 
-    test ax, 0040h
+    test ax, 0010h
     jz _next_mode
 
-    test ax, 4000h
+    test ax, 0080h
     jz _next_mode
 
 
-    ; --------------------------------------------------------
-    ; Bits per pixel
-    ; offset 19h
-    ; --------------------------------------------------------
-
-    mov ax, [es:bp + vbe_mode_info - vbe_mode + 19h]
-
-    cmp ax, 8
-    jb _next_mode
-
-    mov dx, ax
-
+    ; The kernel writes u32 pixels. Accept 8:8:8 RGB with either an
+    ; unused high byte (24-bit color) or an 8-bit fourth channel.
+    call _get_pixel_mode
+    cmp al, 0ffh
+    je _next_mode
 
     ; --------------------------------------------------------
     ; X resolution
@@ -566,15 +572,7 @@ _next_mode:
 
     cmp ax, [ds:bp + vbe_best_area - vbe_mode]
     ja _new_best
-
-    jb _next_mode
-
-    ; Same resolution -> prefer higher BPP.
-    cmp word [ds:bp + vbe_best_bpp - vbe_mode], 0
-    je _new_best
-
-    cmp dx, [ds:bp + vbe_best_bpp - vbe_mode]
-    jbe _next_mode
+    jmp _next_mode
 
 
 _new_best:
@@ -586,8 +584,6 @@ _new_best:
 
     mov ax, [ds:bp + vbe_current_y - vbe_mode]
     mov [ds:bp + vbe_best_y - vbe_mode], ax
-
-    mov [ds:bp + vbe_best_bpp - vbe_mode], dx
 
     mov ax, [ds:bp + vbe_current_x - vbe_mode]
     mov cx, [ds:bp + vbe_current_y - vbe_mode]
@@ -627,6 +623,12 @@ _found_mode:
     cmp ax, 004Fh
     jne _failure
 
+    call _get_pixel_mode
+    cmp al, 0ffh
+    je _failure
+    movzx eax, al
+    mov [ds:bp + vbe_mode.pixel_mode - vbe_mode], eax
+
 
     ; ========================================================
     ; Set mode
@@ -640,15 +642,6 @@ _found_mode:
 
     cmp ax, 004Fh
     jne _failure
-
-
-    ; ========================================================
-    ; Save pixel_mode
-    ; ========================================================
-
-    xor eax, eax
-    mov ax, [ds:bp + vbe_best_bpp - vbe_mode]
-    mov [ds:bp + vbe_mode.pixel_mode - vbe_mode], eax
 
 
     ; ========================================================
@@ -672,21 +665,21 @@ _found_mode:
     ; ========================================================
     ; Save pixels per scanline
     ;
-    ; VBE gives BytesPerScanLine at +10h.
+    ; VBE gives BytesPerScanLine at +10h. VBE 3.0 has a separate
+    ; LinBytesPerScanLine at +32h for linear framebuffer modes.
     ;
-    ; pixels_per_scanline =
-    ;     BytesPerScanLine / (BitsPerPixel / 8)
+    ; pixels_per_scanline = BytesPerScanLine / 4 (32-bit pixels)
     ; ========================================================
 
     xor eax, eax
     mov ax, [es:bp + vbe_mode_info - vbe_mode + 10h]
-
-    xor edx, edx
-
-    mov cx, [ds:bp + vbe_best_bpp - vbe_mode]
-    shr cx, 3
-
-    div cx
+    cmp word [es:bp + vbe_controller - vbe_mode + 4], 0300h
+    jb .have_scanline_bytes
+    cmp word [es:bp + vbe_mode_info - vbe_mode + 32h], 0
+    je .have_scanline_bytes
+    mov ax, [es:bp + vbe_mode_info - vbe_mode + 32h]
+.have_scanline_bytes:
+    shr eax, 2
 
     mov [ds:bp + vbe_mode.pixels_per_scanline - vbe_mode], eax
 
@@ -709,15 +702,15 @@ _found_mode:
 
     mov si, bp
 
-    mov ecx, 5
+    mov ecx, 6
 
 .copy_loop:
     mov ebx, edx
-    shr ebx, 16
-    shl bx, 12
+    mov di, bx
+    and di, 000fh
+    shr ebx, 4
 
     mov es, bx
-    mov di, dx
 
     mov eax, [ds:si]
     mov [es:di], eax
@@ -748,6 +741,62 @@ _done:
     pop bx
 
     retf
+
+
+; Return the kernel's pixel format in AL: 0 = RGB (red at bit 16),
+; 1 = BGR (red at bit 0), or FFh for an unsupported VBE layout.
+; VBE 3.0 has separate mask fields for the linear framebuffer.
+_get_pixel_mode:
+    push si
+    cmp byte [es:bp + vbe_mode_info - vbe_mode + 19h], 32
+    jne .unsupported
+    cmp byte [es:bp + vbe_mode_info - vbe_mode + 1bh], 6
+    jne .unsupported
+
+    mov si, 1fh               ; VBE 2.0 direct-color mask fields
+    cmp word [es:bp + vbe_controller - vbe_mode + 4], 0300h
+    jb .check_masks
+    cmp byte [es:bp + vbe_mode_info - vbe_mode + 36h], 0
+    je .check_masks
+    mov si, 36h               ; VBE 3.0 linear-framebuffer mask fields
+
+.check_masks:
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode], 8
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 2], 8
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 3], 8
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 4], 8
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 6], 0
+    je .check_order
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 6], 8
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 7], 24
+    jne .unsupported
+
+.check_order:
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 1], 16
+    jne .maybe_bgr
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 5], 0
+    jne .unsupported
+    xor al, al
+    jmp .done
+
+.maybe_bgr:
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 1], 0
+    jne .unsupported
+    cmp byte [es:bp + si + vbe_mode_info - vbe_mode + 5], 16
+    jne .unsupported
+    mov al, 1
+    jmp .done
+
+.unsupported:
+    mov al, 0ffh
+.done:
+    pop si
+    ret
     
 pm16_return:
     mov ax, 0x20
@@ -800,4 +849,3 @@ result_eax: dd 0
 result_edx: dd 0
 e820_next: dd 0
 e820_count: dd 0
-

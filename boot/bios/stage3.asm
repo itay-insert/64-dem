@@ -347,11 +347,6 @@ _start:
         ret
 
 
-    _zero_initialize:
-        xor eax, eax
-        rep stosb
-        ret
-
     _convert_sector_count:
         xor edx, edx
         movzx ecx, byte [sectors_per_cluster]
@@ -394,15 +389,25 @@ _start:
         push es
         mov eax, [p_vaddr]
         mov [ld_addr], eax
-        call _convert_addr ; convert the 32-bit virtual address to a 16-bit offset and segment
-        mov di, ax
-        mov es, cx
-        push di
         mov ecx, [p_memsz]
-        add ecx, 0xFFF ; align p_memsz to 4k
-        and ecx, ~0xFFF
-        call _zero_initialize ; zero_initiallize the memory region
-        pop di
+        add ecx, 0xFFF
+        shr ecx, 12             ; clear every page, including BSS beyond 64 KiB
+        jz .zero_done
+    .zero_loop:
+        push ecx
+        mov eax, [ld_addr]
+        call _convert_addr
+        mov es, cx
+        mov di, ax
+        xor al, al
+        mov cx, 4096
+        rep stosb
+        add dword [ld_addr], 4096
+        pop ecx
+        loop .zero_loop
+    .zero_done:
+        mov eax, [p_vaddr]
+        mov [ld_addr], eax
         mov ecx, [p_filesz]
         add ecx, 0xFFF ; align p_filesz to 4k
         shr ecx, 12

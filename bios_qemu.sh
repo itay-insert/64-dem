@@ -112,6 +112,8 @@ if [[ "$RUN_QEMU" == true ]]; then
         -machine pc \
         -m 512M \
         -drive "format=raw,file=$IMAGE" \
+        -global "VGA.vgamem_mb=2" \
+        -vga std \
         -debugcon stdio \
         "${EXTRA_QEMU_ARGS[@]}"
 fi

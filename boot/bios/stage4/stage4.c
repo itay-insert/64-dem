@@ -1,5 +1,6 @@
 #include "uint_definitions.h"
 #include "efi_memory_types.h"
+#include "vga.h"
 
 typedef enum {
     bios_disk_services = 0,
@@ -124,13 +125,17 @@ u32 convert_e820_to_efi(const E820Entry *entries, u32 count,
 }
 
 typedef struct {
-    i32 pixel_mode;
+    i32 pixel_mode; // 0 = RGB, 1 = BGR
     i32 horizontal_resolution;
     i32 vertical_resolution;
     i32 pixels_per_scanline;
     i32 info_size;
     u32 framebuffer_address;
 } __attribute__((packed)) vbe_data;
+
+/* RealModeWrapper requires the VBE result buffer at or above 0x10000.
+   The stage 4 stack starts at 0x10000 and grows below that address. */
+static vbe_data vga = { .info_size = sizeof(vbe_data) };
 
 extern u32 RealModeWrapper(bios_services *table, u32 service, u32 arg1, u32 arg2, u32 arg3, u32 *secondary);
 
@@ -174,6 +179,16 @@ void main(bios_services *Services) {
         RealModeWrapper(Services, println, (u32)String, extract_size(String), 0, 0);
     }
 
+    u32 res = RealModeWrapper(Services, SetVbe, (u32)(uintptr_t)&vga, 0, 0, 0);
+    if (res != 0) {
+        String = Strings[3];
+        RealModeWrapper(Services, println, (u32)String, extract_size(String), 0, 0);
+    } else {
+        vga_init(vga.framebuffer_address, vga.horizontal_resolution,
+                 vga.vertical_resolution, vga.pixels_per_scanline,
+                 vga.pixel_mode);
 
+        printf("Vbe Mode set seccussfully, resolution: %dx%d\n", vga.horizontal_resolution, vga.vertical_resolution);
+    }
     while (1);
 }
