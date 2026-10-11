@@ -242,31 +242,33 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     pci_detect_devices();
 
-    PCI_PATH_RET boot_path =
-        Discover_BootDevice(info64->device_path, info32->device_path_size);
-    if (boot_path.PCI_status == PCI_STATUS_SUCCESS) {
-        printf("PCI devices in boot path: %u\n",
-               (unsigned int)boot_path.DeviceCount);
+    if (info64->device_path != 1) {
+        PCI_PATH_RET boot_path =
+            Discover_BootDevice(info64->device_path, info32->device_path_size);
+        if (boot_path.PCI_status == PCI_STATUS_SUCCESS) {
+            printf("PCI devices in boot path: %u\n",
+                (unsigned int)boot_path.DeviceCount);
 
-        for (u32 i = 0; i < boot_path.DeviceCount; i++) {
-            PCI_ret *device = &boot_path.Devices[i];
-            printf("  [%u] %u:%u.%u vendor=0x%ux device=0x%ux\n",
+            for (u32 i = 0; i < boot_path.DeviceCount; i++) {
+                PCI_ret *device = &boot_path.Devices[i];
+                printf("  [%u] %u:%u.%u vendor=0x%ux device=0x%ux\n",
                    (unsigned int)i,
                    (unsigned int)device->Bus,
                    (unsigned int)device->Device,
                    (unsigned int)device->Function,
                    (unsigned int)device->vendor_id,
                    (unsigned int)device->device_id);
-            printf("      %s  %s\n",
+                printf("      %s  %s\n",
                    PCI_vendor_name(device->vendor_id),
                    PCI_device_name(device->vendor_id,
                                    device->device_id));
+            }
+        } else {
+            printf("Boot PCI path discovery failed: %d (found %u devices)\n",
+                   boot_path.PCI_status,
+                (unsigned int)boot_path.DeviceCount);
         }
-    } else {
-        printf("Boot PCI path discovery failed: %d (found %u devices)\n",
-               boot_path.PCI_status,
-               (unsigned int)boot_path.DeviceCount);
-    }
+    }   
 
     Timer timer;
     printf("Timer signature: %s\n", timer.Src->hw.signature);

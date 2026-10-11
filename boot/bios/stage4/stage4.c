@@ -135,6 +135,62 @@ typedef struct {
 
 /* RealModeWrapper requires the VBE result buffer at or above 0x10000.
    The stage 4 stack starts at 0x10000 and grows below that address. */
+
+u32 find_rsdp_legacy(void)
+{
+    const char signature[8] = "RSD PTR ";
+
+    // 1. Search EBDA
+    u16 ebda_segment = *(u16 *)0x40E;
+    u32 ebda_address = ((u32)ebda_segment) << 4;
+
+    for (u32 addr = ebda_address;
+         addr < ebda_address + 1024;
+         addr += 16)
+    {
+        char *ptr = (char *)addr;
+
+        int match = 1;
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (ptr[i] != signature[i])
+            {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match)
+            return addr;
+    }
+
+
+    // 2. Search BIOS area
+    for (u32 addr = 0xE0000;
+         addr < 0x100000;
+         addr += 16)
+    {
+        char *ptr = (char *)addr;
+
+        int match = 1;
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (ptr[i] != signature[i])
+            {
+                match = 0;
+                break;
+            }
+        }
+
+        if (match)
+            return addr;
+    }
+
+    return 0;
+}
+
 static vbe_data vga = { .info_size = sizeof(vbe_data) };
 
 extern u32 RealModeWrapper(bios_services *table, u32 service, u32 arg1, u32 arg2, u32 arg3, u32 *secondary);
@@ -183,6 +239,7 @@ void main(bios_services *Services) {
     if (res != 0) {
         String = Strings[3];
         RealModeWrapper(Services, println, (u32)String, extract_size(String), 0, 0);
+        while (1);
     } else {
         vga_init(vga.framebuffer_address, vga.horizontal_resolution,
                  vga.vertical_resolution, vga.pixels_per_scanline,
@@ -190,5 +247,13 @@ void main(bios_services *Services) {
 
         printf("Vbe Mode set seccussfully, resolution: %dx%d\n", vga.horizontal_resolution, vga.vertical_resolution);
     }
+
+    printf("finding rsdp address... ");
+    u32 rsdp = find_rsdp_legacy();
+    if (rsdp != 0)
+        printf("rsdp address found and is: %lu\n", rsdp);
+
+    printf("Preparing to load kernel...\n");
+
     while (1);
 }
