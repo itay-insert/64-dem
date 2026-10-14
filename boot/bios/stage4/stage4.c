@@ -204,6 +204,10 @@ static u32 extract_size(const char *str) {
     return size;
 }
 
+u32 open_path(const char *path) {
+    
+}
+
 
 void main(bios_services *Services) {
 
