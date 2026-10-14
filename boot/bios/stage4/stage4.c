@@ -1,6 +1,8 @@
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "efi_memory_types.h"
 #include "vga.h"
+#include "elf.h"
 
 typedef enum {
     bios_disk_services = 0,
@@ -204,10 +206,36 @@ static u32 extract_size(const char *str) {
     return size;
 }
 
-u32 open_path(const char *path) {
+static inline bool cmpstr(const char *ptr0, const char *ptr1, int length) {
+    int ec = 0;
+    for (int i = 0; i < length; i++) {
+        if (ptr0[i] == ptr1[i]) 
+            ec++;
+    }
+    if (ec == length)
+        return true;
+    else return false;
+}
+
+u32 open_path(const char *path, bios_services *Services, u32 Sector) {
+    RealModeWrapper(Services, bios_disk_services, Sector, 0x90000, 32, 0);
+    char *ptr = (char *)0x90000;
+    while (1) {
+        if (*ptr == 0)
+            return 1;
+        
+        if (cmpstr(ptr, path, 11))
+            return (u32)ptr;
+
+        ptr += 32;
+    }
     
 }
 
+u32 calc_size(void *ptr, u16 ephentsize, u16 ephnum) {
+    
+
+}
 
 void main(bios_services *Services) {
 
@@ -258,6 +286,23 @@ void main(bios_services *Services) {
         printf("rsdp address found and is: %lu\n", rsdp);
 
     printf("Preparing to load kernel...\n");
-
+    u32 BOOT = open_path("BOOT       ", Services, Services->first_data_lba);
+    printf("BOOT: 0x%ux\n", BOOT);
+    u16 *cluhigh = (u16 *)(BOOT + 0x14);
+    u16 *clulow = (u16 *)(BOOT + 0x1A);
+    u32 cluster = (*cluhigh << 16) + *clulow;
+    cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
+    u32 KNL = open_path("KERNEL  ELF", Services, cluster);
+    printf("KERNEL.ELF: 0x%ux\n", KNL);
+    cluhigh = (u16 *)(KNL + 0x14);
+    clulow = (u16 *)(KNL + 0x1A);
+    cluster = (*cluhigh << 16) + *clulow;
+    cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
+    RealModeWrapper(Services, bios_disk_services, cluster, 0x90000, 32, 0);
+    u64 *ephoff = (u64 *)(0x90000+E_PHOFF);
+    u16 *ephentsize = (u16 *)(0x90000+E_PHENTSIZE);
+    u16 *ephnum = (u16 *)(0x90000+E_PHNUM);
+    void *ph = (void *)(0x90000+*ephoff);
+    u32 size = calc_size
     while (1);
 }
