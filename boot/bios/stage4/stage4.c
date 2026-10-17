@@ -249,6 +249,25 @@ u32 calc_size(void *ptr, u16 ephentsize, u16 ephnum) {
 
 }
 
+u32 find_free_region(u32 pages) {
+    for (u32 i = 0; i < efi_descriptor_count; i++) 
+        if (efi_memory_map[i].PhysicalStart >= 0x100000 && efi_memory_map[i].Type == EfiConventionalMemory
+             && efi_memory_map[i].NumberOfPages >= (u64)pages)
+             return (u32)efi_memory_map[i].PhysicalStart;
+    
+    return 1;
+}
+
+static inline u64 find_memory_size(void) {
+    u64 size = 0;
+    for (u32 i = 0; i < efi_descriptor_count; i++) 
+        size += efi_memory_map[i].NumberOfPages;
+    
+    return (size<<12);
+}
+
+
+
 void main(bios_services *Services) {
 
     e820_entry_count = RealModeWrapper(Services, read_memory_map,
@@ -316,6 +335,25 @@ void main(bios_services *Services) {
     u16 *ephnum = (u16 *)(0x90000+E_PHNUM);
     void *ph = (void *)(0x90000+*ephoff);
     u32 size = calc_size(ph, *ephentsize, *ephnum);
+    size = (size + 4095) & ~0xFFF; 
     printf("Kernel size: 0x%ux\n", size);
+    u32 bitmap_size = ((((u32)find_memory_size() >> 12) >> 3) + 4095) & ~0xfff;
+    printf("stack size: 0x00041000\n");
+    printf("bitmap size: 0x%ux\n", bitmap_size);
+    u32 mmsz = efi_descriptor_count * sizeof(EFI_MEMORY_DESCRIPTOR);
+    printf("memory map size: 0x%ux\n", mmsz);
+    u32 buf_size64 = 72;
+    printf("buf_size64: 72\n");
+    u32 buf_size = 24;
+    printf("buf_sz: 24\n");
+    u32 total_size = size + 0x41000 + bitmap_size + mmsz + buf_size64 + buf_size;
+    total_size = (total_size + 4095) & ~0xFFF;
+    printf("Total kernel size: 0x%ux\n", total_size);
+    u32 kernelstart = find_free_region(total_size>>12);
+    printf("KernelStart: 0x%ux\n", kernelstart);
+    u32 stack = addr + size + 0x41000;
+    EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
+
+    
     while (1);
 }
