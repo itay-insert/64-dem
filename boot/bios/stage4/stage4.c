@@ -232,8 +232,20 @@ u32 open_path(const char *path, bios_services *Services, u32 Sector) {
     
 }
 
+#define PT_LOAD 1
+
 u32 calc_size(void *ptr, u16 ephentsize, u16 ephnum) {
-    
+    u32 size = 0;
+    for (u16 i = 0; i < ephnum; i++) {
+        u32 *p_type = (u32 *)ptr;
+        if (*p_type == PT_LOAD) {
+            u64 *p_memsz = (u64 *)((u8 *)ptr + P_MEMSZ);
+            size += (u32)*p_memsz;
+        }
+        ptr = (void *)((u8 *)ptr + ephentsize);
+    }
+
+    return size;
 
 }
 
