@@ -315,6 +315,7 @@ void main(bios_services *Services) {
     u16 *ephentsize = (u16 *)(0x90000+E_PHENTSIZE);
     u16 *ephnum = (u16 *)(0x90000+E_PHNUM);
     void *ph = (void *)(0x90000+*ephoff);
-    u32 size = calc_size
+    u32 size = calc_size(ph, *ephentsize, *ephnum);
+    printf("Kernel size: 0x%ux\n", size);
     while (1);
 }
