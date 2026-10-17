@@ -85,3 +85,13 @@ void clock(void) {
         }
     }
 }
+
+void wait_secs(int count) {
+    for (int i = 0; i < count; i++) {
+        u8 second = rtc_read(0x00);
+        while (rtc_read(0x00) == second) __asm__ volatile("pause");
+
+        second = rtc_read(0x00);
+        while (rtc_read(0x00) == second) __asm__ volatile("pause");
+    }
+}

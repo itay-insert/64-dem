@@ -49,8 +49,10 @@ Timer::Timer() {
                 Src->hw.Timer_init(ret.simple_timer, names[i], signs[i]);
                 break;
             } else if (memcmp(signs[i], "HPET", 4) == 0) {
-                Src = new HPET;
-                Src->hw.Timer_init(ret.simple_timer, names[i], signs[i]);
+                HPET *hpet = new HPET;
+                hpet->hw.Timer_init(ret.simple_timer, names[i], signs[i]);
+                hpet->init();
+                Src = hpet;
                 break;
             } 
         }

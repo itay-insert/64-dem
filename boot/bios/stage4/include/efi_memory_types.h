@@ -32,6 +32,7 @@ typedef UINT64 EFI_VIRTUAL_ADDRESS;
 
 typedef struct {
     UINT32 Type;
+    UINT32 Pad;
     EFI_PHYSICAL_ADDRESS PhysicalStart;
     EFI_VIRTUAL_ADDRESS VirtualStart;
     UINT64 NumberOfPages;

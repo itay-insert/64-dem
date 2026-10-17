@@ -52,6 +52,7 @@ void setup_execptions(void) {
     u64 spurious = (u64)&spurious_stub + spurious_stub;
 
     idt_set_gate(0xFF, spurious, 0, INTERRUPT_GATE);
+    idt_set_gate(0x27, spurious, 0, INTERRUPT_GATE);
     
     u64 timer = (u64)&timer_stub + timer_stub;
 

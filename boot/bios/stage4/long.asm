@@ -15,7 +15,7 @@ mov eax, [PML4]
 mov cr3, eax ; put the address of PML4 in cr3
 
 mov eax, cr4
-or eax, 1 << 5
+or eax, (1 << 5) | (1 << 9) ; enable PAE and SSE instructions
 mov cr4, eax
 
 mov ecx, 0xC0000080 ; enable long mode
@@ -52,11 +52,11 @@ mov gs, ax
 
 mov rsp, 0x10000
 call idt_init
-mov rdi, [g_buff64]
-mov rsi, [g_buff]
-mov rdx, [gstack]
-mov rcx, [GMMP]
-mov rax, [kernel_entry]
+mov edi, dword [g_buff64]
+mov esi, dword [g_buff]
+mov edx, dword [gstack]
+mov ecx, dword [GMMP]
+mov eax, dword [kernel_entry]
 
 jmp rax
 

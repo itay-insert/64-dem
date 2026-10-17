@@ -19,6 +19,7 @@
 #include "drivers/xhci.hpp"
 #include "drivers/acpiPM.hpp"
 #include "drivers/timers/timer.hpp"
+#include "drivers/pcspkr.h"
 
 #define RGB 0
 #define BGR 1
@@ -35,7 +36,13 @@ u64 IO_APIC = 0;
 
 u64 Kernel_end = 0;
 
+
+
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
+    speaker_on(880);
+    wait_secs(1);
+    speaker_off();
+    wait_secs(1);
     qemu_debug_print("[kernel] entered kernel_main\n");
 
     if (paging_enabled == 0) {

@@ -17,6 +17,7 @@ typedef struct {
 
 rtc_data get_dateAndTime(void);
 void clock(void);
+void wait_secs(int count);
 
 KERNEL_EXTERN_C_END
 #endif

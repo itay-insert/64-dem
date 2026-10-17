@@ -220,7 +220,8 @@ cp -- "$BOOTLOADER" "$TEMP_DIR/disk/EFI/boot/BOOTX64.efi"
 cp -- "$ROOT_DIR/boot/kernel.elf" "$TEMP_DIR/disk/boot/kernel.elf"
 
 QEMU_ARGS+=(
-    -machine q35
+    -machine q35,pcspk-audiodev=spk
+    -audiodev pa,id=spk
     -drive "format=raw,media=disk,file=fat:rw:$TEMP_DIR/disk"
     -monitor none
     -serial none

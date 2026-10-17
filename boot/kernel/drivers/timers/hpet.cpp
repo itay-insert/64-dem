@@ -2,10 +2,13 @@
 #include "drivers/timers/hpet.hpp"
 
 
-HPET::HPET() {
-    u64 cap = io_inq(hw.Timer_base, hw.Mode);
+void HPET::init() {
+    const u64 base = hw.Timer_base;       // enable the hpet counter
+    const u64 cap = io_inq(base, hw.Mode);
+    clong = (cap & (1ULL << 13)) != 0;
 
-    clong = (cap >> 13) & 1;  // clong determines whether the tick register is 64-bit or 32-bit, extracting clong from the cap register
+    const u64 config = io_inq(base + 0x10, hw.Mode);
+    io_outq(base + 0x10, config | 1ULL, hw.Mode);
 }
 
 

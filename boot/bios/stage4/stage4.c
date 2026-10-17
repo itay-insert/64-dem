@@ -260,12 +260,16 @@ u32 find_free_region(u32 pages) {
     return 1;
 }
 
-static inline u64 find_memory_size(void) {
-    u64 size = 0;
-    for (u32 i = 0; i < efi_descriptor_count; i++) 
-        size += efi_memory_map[i].NumberOfPages;
-    
-    return (size<<12);
+static inline u64 find_highest_page(void) {
+    u64 highest_page = 0;
+    for (u32 i = 0; i < efi_descriptor_count; i++) {
+        u64 end_page = (efi_memory_map[i].PhysicalStart >> 12) +
+                       efi_memory_map[i].NumberOfPages;
+        if (end_page > highest_page)
+            highest_page = end_page;
+    }
+
+    return highest_page;
 }
 
 static void *memcpy(void *Destination, void *Source, int size) {
@@ -339,9 +343,12 @@ static void load_kernel(u32 addr, void *ptr, u16 ephentsize, u16 ephnum, u32 ker
                 load_4k(cluster, (void *)addr, Services, cluster_off);
                 addr += 0x1000;
                 offset += 0x1000;
+                printf(".");
             }
             addr = save_addr + (u32)*p_filesz;
             memset((void *)addr, remainder, 0);
+            addr = addr + remainder;
+            addr = (addr + 4095) & ~0xFFF;
         }
         ptr = (void *)((u8 *)ptr + ephentsize);
     }
@@ -432,17 +439,17 @@ void main(bios_services *Services) {
     cluster = (*cluhigh << 16) + *clulow;
     u32 save_cluster = cluster;
     cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
-    RealModeWrapper(Services, bios_disk_services, cluster, 0x90000, 32, 0);
-    u64 *ephoff = (u64 *)(0x90000+E_PHOFF);
-    u16 *ephentsize = (u16 *)(0x90000+E_PHENTSIZE);
-    u16 *ephnum = (u16 *)(0x90000+E_PHNUM);
-    void *ph = (void *)(u32)(0x90000+*ephoff);
+    RealModeWrapper(Services, bios_disk_services, cluster, 0x95000, 32, 0);
+    u64 *ephoff = (u64 *)(0x95000+E_PHOFF);
+    u16 *ephentsize = (u16 *)(0x95000+E_PHENTSIZE);
+    u16 *ephnum = (u16 *)(0x95000+E_PHNUM);
+    void *ph = (void *)(u32)(0x95000+*ephoff);
     u32 size = calc_size(ph, *ephentsize, *ephnum);
     size = (size + 4095) & ~0xFFF; 
     printf("Kernel size: 0x%ux\n", size);
-    u32 bitmap_size = ((((u32)find_memory_size() >> 12) >> 3) + 4095) & ~0xfff;
+    u64 bitmap_size = (((find_highest_page() + 7) >> 3) + 4095) & ~0xfffULL;
     printf("stack size: 0x00041000\n");
-    printf("bitmap size: 0x%ux\n", bitmap_size);
+    printf("bitmap size: 0x%lx\n", bitmap_size);
     u32 mmsz = efi_descriptor_count * sizeof(EFI_MEMORY_DESCRIPTOR);
     printf("memory map size: 0x%ux\n", mmsz);
     u32 buf_size64 = 72;
@@ -482,6 +489,7 @@ void main(bios_services *Services) {
     p_buff64[8] = (u64)1;
 
     cluster = save_cluster;
+    printf("Loading kernel");
     load_kernel(kernelstart, ph, *ephentsize, *ephnum, cluster, Services); // loading the kernel
     printf("Kernel Loaded... switching to long mode\n");
     setup_paging();
@@ -491,6 +499,10 @@ void main(bios_services *Services) {
     GMMP = MMP;
     gstack = stack;
     kernel_entry = kernelstart;
+
+    for (int i = 0; i < vga.vertical_resolution; i++)
+        for (int j = 0; j < vga.horizontal_resolution; j++)
+            draw_16color(j, i, 0);
 
     long_mode();
 

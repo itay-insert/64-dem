@@ -109,7 +109,8 @@ echo "BIOS image ready: $IMAGE"
 
 if [[ "$RUN_QEMU" == true ]]; then
     exec qemu-system-x86_64 \
-        -machine pc \
+        -machine pc,pcspk-audiodev=spk \
+        -audiodev pa,id=spk \
         -m 512M \
         -drive "format=raw,file=$IMAGE" \
         -global "VGA.vgamem_mb=2" \
