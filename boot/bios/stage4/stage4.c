@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdbool.h>
 #include "uint_definitions.h"
 #include "efi_memory_types.h"
@@ -196,6 +197,7 @@ u32 find_rsdp_legacy(void)
 static vbe_data vga = { .info_size = sizeof(vbe_data) };
 
 extern u32 RealModeWrapper(bios_services *table, u32 service, u32 arg1, u32 arg2, u32 arg3, u32 *secondary);
+extern void long_mode(void);
 
 static u32 extract_size(const char *str) {
     u32 size = 0;
@@ -276,25 +278,97 @@ static void *memcpy(void *Destination, void *Source, int size) {
     return Destination;
 }
 
+static void *memset(void *dest, int count, int value) {
+    u8 *dst = (u8 *)dest;
+
+    for (int i = 0; i < count; i++)
+        dst[i] = (u8)value;
+
+    return dest;
+}
+
 u32 place = 0x80000;
 
 static inline void load_clusters(u32 cluster, int count, bios_services *Services) {
+    u32 save_cluster;
     for (int i = 0; i < count; i++) {
+        save_cluster = cluster;
         cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
         RealModeWrapper(Services, bios_disk_services, cluster, place, Services->sectors_per_cluster, 0);
         place += 512 * Services->sectors_per_cluster;
+        cluster = save_cluster;
         cluster = RealModeWrapper(Services, find_next_cluster, cluster, 0, 0, 0);
-     }
+    }
 }
 
-static void load_4k(u32 cluster, void *Destination, bios_services *Services) {
-    int sectors = 4096 >> 12;
+static void load_4k(u32 cluster, void *Destination, bios_services *Services, u32 cluster_off) {
+    int sectors = (4096 + cluster_off + 511) >> 9;
     int cluster_count = (sectors + (Services->sectors_per_cluster - 1)) / Services->sectors_per_cluster;
     load_clusters(cluster, cluster_count, Services);
-    memcpy(Destination, 0x80000, 4096);
+    memcpy(Destination, (void *)(0x80000+cluster_off), 4096);
     place = 0x80000;
 }
-        
+
+static u32 find_next(u32 cluster, u32 count, bios_services *Services) {
+    for (u32 i = 0; i < count; i++)
+        cluster = RealModeWrapper(Services, find_next_cluster, cluster, 0, 0, 0);
+
+    return cluster;
+}
+
+static void load_kernel(u32 addr, void *ptr, u16 ephentsize, u16 ephnum, u32 kernel_cluster, bios_services *Services) {
+    u32 cluster_size = Services->sectors_per_cluster * 512;
+    u32 align = cluster_size - 1;
+    for (u16 i = 0; i < ephnum; i++) {
+        u32 *type = (u32 *)(u32)ptr;
+        if (*type == PT_LOAD) {
+            u64 *p_memsz = (u64 *)((u8 *)ptr + P_MEMSZ);
+            u64 *p_filesz = (u64 *)((u8 *)ptr + P_FILESZ);
+            u64 *p_offset = (u64 *)((u8 *)ptr + P_OFFSET);
+            u64 remainder = *p_memsz - *p_filesz;
+            int page_count = (int)((*p_filesz + 4095) >> 12);
+            u32 offset = (u32)*p_offset;
+            u32 save_addr = addr;
+            for (int i = 0; i < page_count; i++) {
+                u32 cluster_off = 0;
+                u64 calculation = (((u64)kernel_cluster * (u64)cluster_size) + offset);
+                u32 cluster = (u32)(calculation / cluster_size);
+                cluster = find_next(kernel_cluster, cluster-kernel_cluster, Services);
+                if (calculation & align)
+                    cluster_off = calculation & align;
+                load_4k(cluster, (void *)addr, Services, cluster_off);
+                addr += 0x1000;
+                offset += 0x1000;
+            }
+            addr = save_addr + (u32)*p_filesz;
+            memset((void *)addr, remainder, 0);
+        }
+        ptr = (void *)((u8 *)ptr + ephentsize);
+    }
+}
+
+int *g_buff = NULL;
+u64 *g_buff64 = NULL;
+u64 gstack = 0;
+EFI_MEMORY_DESCRIPTOR *GMMP = NULL;
+
+u64 *PML4 = NULL;
+u64 *PDPT = NULL;
+u64 *PD = NULL;
+u64 kernel_entry = 0;
+
+static void setup_paging(void) {
+    PML4 = (u64 *)0x90000;
+    PDPT = (u64 *)0x91000;
+    PD = (u64 *)0x92000;
+    PML4[0] = 0x91000ULL | 0x03;
+    PDPT[0] = 0x92000ULL | 0x03;
+    u64 addr = 0;
+    for (int i = 0; i < 512; i++) {
+        PD[i] = addr | 0x83;
+        addr += 0x200000ULL;
+    }
+}
 
 void main(bios_services *Services) {
 
@@ -356,12 +430,13 @@ void main(bios_services *Services) {
     cluhigh = (u16 *)(KNL + 0x14);
     clulow = (u16 *)(KNL + 0x1A);
     cluster = (*cluhigh << 16) + *clulow;
+    u32 save_cluster = cluster;
     cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
     RealModeWrapper(Services, bios_disk_services, cluster, 0x90000, 32, 0);
     u64 *ephoff = (u64 *)(0x90000+E_PHOFF);
     u16 *ephentsize = (u16 *)(0x90000+E_PHENTSIZE);
     u16 *ephnum = (u16 *)(0x90000+E_PHNUM);
-    void *ph = (void *)(0x90000+*ephoff);
+    void *ph = (void *)(u32)(0x90000+*ephoff);
     u32 size = calc_size(ph, *ephentsize, *ephnum);
     size = (size + 4095) & ~0xFFF; 
     printf("Kernel size: 0x%ux\n", size);
@@ -379,7 +454,7 @@ void main(bios_services *Services) {
     printf("Total kernel size: 0x%ux\n", total_size);
     u32 kernelstart = find_free_region(total_size>>12);
     printf("KernelStart: 0x%ux\n", kernelstart);
-    u32 stack = addr + size + 0x41000;
+    u32 stack = kernelstart + size + 0x41000;
     EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
 
     u64 *p_buff64 = (u64 *)((u32)MMP+mmsz);
@@ -406,7 +481,19 @@ void main(bios_services *Services) {
     p_buff64[7] = (u64)rsdp;
     p_buff64[8] = (u64)1;
 
-    
+    cluster = save_cluster;
+    load_kernel(kernelstart, ph, *ephentsize, *ephnum, cluster, Services); // loading the kernel
+    printf("Kernel Loaded... switching to long mode\n");
+    setup_paging();
+
+    g_buff = p_buff;
+    g_buff64 = p_buff64;
+    GMMP = MMP;
+    gstack = stack;
+    kernel_entry = kernelstart;
+
+    long_mode();
+
 
     while (1);
 }
