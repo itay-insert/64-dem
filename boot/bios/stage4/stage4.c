@@ -276,6 +276,26 @@ static void *memcpy(void *Destination, void *Source, int size) {
     return Destination;
 }
 
+u32 place = 0x80000;
+
+static inline void load_clusters(u32 cluster, int count, bios_services *Services) {
+    for (int i = 0; i < count; i++) {
+        cluster = RealModeWrapper(Services, convert_cluster_to_lba, cluster, 0, 0, 0);
+        RealModeWrapper(Services, bios_disk_services, cluster, place, Services->sectors_per_cluster, 0);
+        place += 512 * Services->sectors_per_cluster;
+        cluster = RealModeWrapper(Services, find_next_cluster, cluster, 0, 0, 0);
+     }
+}
+
+static void load_4k(u32 cluster, void *Destination, bios_services *Services) {
+    int sectors = 4096 >> 12;
+    int cluster_count = (sectors + (Services->sectors_per_cluster - 1)) / Services->sectors_per_cluster;
+    load_clusters(cluster, cluster_count, Services);
+    memcpy(Destination, 0x80000, 4096);
+    place = 0x80000;
+}
+        
+
 void main(bios_services *Services) {
 
     e820_entry_count = RealModeWrapper(Services, read_memory_map,
