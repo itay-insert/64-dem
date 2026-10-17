@@ -385,7 +385,9 @@ void main(bios_services *Services) {
     p_buff64[5] = (u64)sizeof(EFI_MEMORY_DESCRIPTOR);
     p_buff64[6] = (u64)bitmap_size;
     p_buff64[7] = (u64)rsdp;
-    p_buff64[8] = (u64)0;
+    p_buff64[8] = (u64)1;
+
+    
 
     while (1);
 }
