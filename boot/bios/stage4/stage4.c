@@ -266,6 +266,15 @@ static inline u64 find_memory_size(void) {
     return (size<<12);
 }
 
+static void *memcpy(void *Destination, void *Source, int size) {
+    u8 *src = (u8 *)Source;
+    u8 *dst = (u8 *)Destination;
+    
+    for (int i = 0; i < size; i++) 
+        dst[i] = src[i];
+
+    return Destination;
+}
 
 
 void main(bios_services *Services) {
@@ -354,6 +363,11 @@ void main(bios_services *Services) {
     u32 stack = addr + size + 0x41000;
     EFI_MEMORY_DESCRIPTOR *MMP = (EFI_MEMORY_DESCRIPTOR *)(stack+bitmap_size);
 
+    u64 *p_buff64 = (u64 *)((u32)MMP+mmsz);
+    int *p_buff = (int *)((u32)p_buff64 + buf_size64);
+
+    memcpy(MMP, efi_memory_map, mmsz);
+    
     
     while (1);
 }
