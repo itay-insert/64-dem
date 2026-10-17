@@ -382,10 +382,10 @@ void main(bios_services *Services) {
     p_buff64[2] = (u64)((u32)p_buff+24);
     p_buff64[3] = (u64)vga.framebuffer_address;
     p_buff64[4] = (u64)mmsz;
-    p_buff64[5] = (u64)mpc;
+    p_buff64[5] = (u64)sizeof(EFI_MEMORY_DESCRIPTOR);
     p_buff64[6] = (u64)bitmap_size;
     p_buff64[7] = (u64)rsdp;
-    p_buff64[8] = (u64)dst;
+    p_buff64[8] = (u64)0;
 
     while (1);
 }
