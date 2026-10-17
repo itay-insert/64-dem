@@ -368,6 +368,24 @@ void main(bios_services *Services) {
 
     memcpy(MMP, efi_memory_map, mmsz);
     
+    p_buff[0] = vga.pixel_mode;
     
+    p_buff[1] = vga.horizontal_resolution;
+    p_buff[2] = vga.vertical_resolution;
+    p_buff[3] = vga.pixels_per_scanline;
+    p_buff[4] = (int)(buf_size+buf_size64);
+    p_buff[5] = (int)0;
+
+
+    p_buff64[0] = (u64)kernelstart;
+    p_buff64[1] = (u64)kernelstart;
+    p_buff64[2] = (u64)((u32)p_buff+24);
+    p_buff64[3] = (u64)vga.framebuffer_address;
+    p_buff64[4] = (u64)mmsz;
+    p_buff64[5] = (u64)mpc;
+    p_buff64[6] = (u64)bitmap_size;
+    p_buff64[7] = (u64)rsdp;
+    p_buff64[8] = (u64)dst;
+
     while (1);
 }
