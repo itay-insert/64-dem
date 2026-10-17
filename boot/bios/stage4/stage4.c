@@ -276,7 +276,6 @@ static void *memcpy(void *Destination, void *Source, int size) {
     return Destination;
 }
 
-
 void main(bios_services *Services) {
 
     e820_entry_count = RealModeWrapper(Services, read_memory_map,
