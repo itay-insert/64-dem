@@ -9,6 +9,7 @@ KERNEL_EXTERN_C_BEGIN
 extern const intptr_t exception_stub_table[32];
 extern const intptr_t spurious_stub;
 extern const intptr_t timer_stub;
+extern const intptr_t keyboard_stub;
 void isr_eoi(void);
 KERNEL_EXTERN_C_END
 

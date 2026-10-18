@@ -20,6 +20,8 @@
 #include "drivers/acpiPM.hpp"
 #include "drivers/timers/timer.hpp"
 #include "drivers/pcspkr.h"
+#include "drivers/keyboard/keyboard.hpp"
+#include "drivers/keyboard/ps2.hpp"
 
 #define RGB 0
 #define BGR 1
@@ -36,7 +38,7 @@ u64 IO_APIC = 0;
 
 u64 Kernel_end = 0;
 
-
+GlobalKeyboard *globalkeyboard = NULL;
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     speaker_on(880);
@@ -242,6 +244,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     APIC_init();
 
+    ps2_controller_init();
+
     enable_interrupts();
     printf("interrupts enabled!\n");
 
@@ -304,7 +308,11 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
-    clock();
-    while (1) {   }
+    while (1) {  
+        if (globalkeyboard != NULL) {
+            text_data td = printf(globalkeyboard->keyboards[0]->ascii);
+            cursor_Setpos(td.coulmn, td.row);
+        }
+    }
     
 }

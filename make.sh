@@ -53,8 +53,12 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/timer.cpp -o timer.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/pm.cpp -o pm.o
-    g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/hpet.cpp -o hpet.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/keyboard/keyboard.cpp -o keyboard.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/keyboard/ps2.cpp -o ps2.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o
