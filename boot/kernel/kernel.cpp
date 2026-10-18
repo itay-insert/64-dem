@@ -243,6 +243,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     flush_pages(IO_APIC, 1);
 
     APIC_init();
+    
+    ioapic_route_keyboard((u8)(ioapic_read(0x20) >> 24));
 
     ps2_controller_init();
 
@@ -308,11 +310,31 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
-    while (1) {  
-        if (globalkeyboard != NULL) {
-            text_data td = printf(globalkeyboard->keyboards[0]->ascii);
-            cursor_Setpos(td.coulmn, td.row);
+    while (1) {
+        if (globalkeyboard == nullptr ||
+            globalkeyboard->keyboards[0] == nullptr) {
+            continue;
         }
+
+        keyboard* k = globalkeyboard->keyboards[0];
+
+        char display[257];
+
+        // Snapshot the buffer.
+        for (int i = 0; i < 256; i++) {
+            char c = k->ascii[i];
+
+        // Keep the display on one line.
+        if (c == '\0' || c == '\n' || c == '\r' || c == '\t')
+            c = ' ';
+
+        display[i] = c;
+        }
+
+        display[256] = '\0';
+
+        cursor_Setpos(0, 2);
+        printf("%s", display);
     }
     
 }

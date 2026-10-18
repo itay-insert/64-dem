@@ -72,3 +72,25 @@ void APIC_init(void) {
 
     ioapic_mask_all();
 }
+
+
+
+#define KEYBOARD_VECTOR 0x41
+
+void ioapic_route_keyboard(u8 destination_apic_id)
+{
+    u32 gsi = 1;  /* Verify against ACPI MADT. */
+    u32 pin = gsi; /* Valid only if this I/O APIC's GSI base is 0. */
+
+    u32 reg = 0x10 + pin * 2;
+
+    /* Mask while configuring: vector 0x41, fixed delivery,
+       physical destination, edge-triggered, active-high. */
+    ioapic_write_register(reg, KEYBOARD_VECTOR | (1U << 16));
+
+    /* Destination Local APIC ID in bits 24-31. */
+    ioapic_write_register(reg + 1, (u32)destination_apic_id << 24);
+
+    /* Unmask the redirection entry. */
+    ioapic_write_register(reg, KEYBOARD_VECTOR);
+}

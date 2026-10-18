@@ -55,9 +55,10 @@ void setup_execptions(void) {
     idt_set_gate(0x27, spurious, 0, INTERRUPT_GATE);
     
     u64 timer = (u64)&timer_stub + timer_stub;
+    u64 keyboard = (u64)&keyboard_stub + keyboard_stub;
 
     idt_set_gate(0x40, timer, 0, INTERRUPT_GATE);
-    idt_set_gate(0x41, keyboard_stub, 0, INTERRUPT_GATE);
+    idt_set_gate(0x41, keyboard, 0, INTERRUPT_GATE);
 
     idtr_t idtr = {
         .limit = sizeof(idt) - 1,

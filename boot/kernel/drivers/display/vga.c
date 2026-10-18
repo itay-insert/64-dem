@@ -371,7 +371,13 @@ text_data printf(const char *str, ...) {
 					}
 					break;
 				}
-				
+				case 'c': {
+                    char ch = va_arg(args, char);
+                    draw_char(ch, cursor.coulmn, cursor.row);
+                    cursor_inc();
+                    break;
+                }
+
 				case 'w':
 					print_word_hex((u16)va_arg(args, int));
 					break;

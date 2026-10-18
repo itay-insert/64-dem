@@ -10,6 +10,7 @@ KERNEL_EXTERN_C_BEGIN
 u32 ioapic_read_register(u32 offset);
 void ioapic_write_register(u32 offset, u32 value);
 void APIC_init(void);
+void ioapic_route_keyboard(u8 destination_apic_id);
 KERNEL_EXTERN_C_END
 
 #endif
