@@ -1,4 +1,4 @@
-# My operating system
+# 64-dem - A From-Scratch x86-64 Operating System 
 64-dem is a 64-bit UEFI operating system booting from a USB flash drive, made for the x86-64/amd64 architecture.
 
 ## License
@@ -7,6 +7,30 @@
 ## The bootloader 
 At boot the UEFI bootloader gets the memory map from UEFI using a UEFI call, it also sets up the GOP picking the highest resolution it can find, after the GOP is setup the bootloader uses UEFI calls to read the file stored in path "/boot/kernel.elf", it uses a custom elf parser to parse the elf file, at first it calculates the size of all the segments in pages then allocates memory using it's own custom memory allocator, after allocating enough memory it parses the elf file, copies the segments to the right memory regions, exits UEFI services, disables interrupts and jumps to the kernel entry passing some parameters along the way.
 
+
+## bios boot path
+the os also supports a separate bios boot path.
+
+### stage1
+with the 16-bit stage1 bios bootloader being 440 bytes in the Boot sector, upon being loaded to 0x7c00, the bootloader uses a tiny optimized fat32 parser to locate and load stage2.bin from the boot directory of the boot drive to memory at address 0x8000, where the bootloader transfers control to stage2.
+
+### stage2
+stage2.bin is 512 bytes long, where it includes an even smarter parser, uses stage1 services through function pointers, locates and loads stage3.bin from the boot directory to address 0x10000 where control is transfered to stage3.
+
+### stage3
+stage3 is also 16-bit however this time it is 32kb maximum, allowing an even smarter parser and an elf header, stage3 establishes the bios services table which would be passed to stage4, stage3 uses the fat32 parser to locate and load the first few clusters of stage4.elf then it parses the elf header using an elf parser in assembly, after loading all the segments to their addresses the stage3 loader switches to 32-bit protected mode by loading the gdt with a 32-bit code segment and jumps to the stage4 entry at address 0x18000.
+
+### stage4
+stage4 is already in 32-bit protected mode, written in c instead of assembly,and uses the bios services table passed from stage3.
+
+#### RealModeWrapper 
+using a special RealModeWrapper, the stage4 is able to use stage3 bios services functions to load sectors from the disk or set a framebuffer even when in 32-bit protected mode, the way this works is the real mode wrapper loads the address of the real mode function as well as the arguments, reloads the gdt with a 16-bit segment to switch back to real mode and when the function is done it reloads the gdt back with a 32-bit segment to return to protected mode, it may or may not return a value to the caller depending on the selected service.
+
+#### kernel environment setup
+using the RealModeWrapper the 32-bit stage4 sets up the framebuffer using bios Vbe services, a legacy equivalent to the modern GOP, stage4 picks the highest resolution and saves the important framebuffer info, afterwards it uses the RealModeWrapper to obtain the bios memory map which it converts to a UEFI compatible memory map, it is done as a clever workaround since my kernel wasn't originally coded to support bios boot. anyways after setting the memory map and screen, stage4 uses it's own graphics subsystem to temporarily print messages, it organizes a data table matching the kernel ABI that would be passed to it, uses bios_disk_services to locate kernel.elf inside the boot directory and after it finds it, it loads the header, and reads the kernel file segments, since the kernel is meant to be loaded in the higher addresses (0x100000+) which aren't supported in real-mode, the kernel loader uses a back and forth mechanism to load 4 kilobytes at a time to a special low region in ram (the 0x95000 region) and later copies it to the higher address, the kernel base is picked by a tiny algorithm that scans the UEFI converted memory map, the algorithm also allocates a stack and a bitmap region depending on the memory size needed.
+
+#### long mode transition and paging setup
+to transition to long mode, stage4 must setup basic 4-level paging and a few bits in the control registers as well as gdt reload with a 64-bit segment, to start with the most basic 4-level paging i created the PML4 table at 0x90000, the first PDPT table at 0x91000 and the first PD table at 0x92000, rhe hierarchy is essentially PML4->PDPT->PD, since there is only one PDPT and one PD it's only enough to map 1 Gigabyte with each PD entry corresponding to a 2 MiB page, this is essentially enough for all we need since the kernel is expected to be far less than 1 Gigabyte, after setting up the tables we pass the address of PML4 (0x90000) to cr3, set some bits in cr0, reload the gdt with a 64-bit code segment and make a far jump to the long mode entry, where stage4 prepares the data tables and kernel arguments in appropriate registers matching the ABI convention and finally jumps to the kernel entry and transfers control to my kernel which would eventually re-arrange paging by itself as well as reset the idt.
 
 ## The kernel entry
 The kernel is given a few parameters from the UEFI bootloader, one of those paramaters is the GOP framebuffer base, and other important GOP data, and another important parameter is a pointer to the UEFI memory map, the kernel includes it's own "vga subsystem" to use the GOP even after UEFI boot services is closed, at first it checks a global variable called "paging enabled" if it's 1 the kernel skips the paging setup and moves on to initialize other stuff, if it's 0 the kernel sets up it's own page tables first before moving on, the paging flag is automatically set to 0 by the bootloader when loading the kernel.
