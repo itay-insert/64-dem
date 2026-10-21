@@ -11,7 +11,7 @@ void PS2K::init() {
 }
 
 bool set = false;
-volatile u64 keyboard_irq_count;
+volatile u64 keyboard_irq_count = 0;
 
 
 struct KeyMap {
@@ -290,10 +290,16 @@ extern "C" void keyboard_handler() {
     if (status & 1) {
         u8 scancode = inb(0x60);
         globalkeyboard->keyboards[0]->buffer[globalkeyboard->keyboards[0]->scancode_top] = scancode;
-        globalkeyboard->keyboards[0]->ascii[globalkeyboard->keyboards[0]->scancode_top] = scancode_to_ascii(scancode);
         globalkeyboard->keyboards[0]->scancode_top++;
+        char ascii = scancode_to_ascii(scancode);
+        if (ascii != 0 && !(scancode & 0x80)) {
+            globalkeyboard->keyboards[0]->ascii[globalkeyboard->keyboards[0]->ascii_top] = ascii;
+            globalkeyboard->keyboards[0]->ascii_top++;
+        }
         if (globalkeyboard->keyboards[0]->scancode_top == 256)
             globalkeyboard->keyboards[0]->scancode_top = 0;
+        if (globalkeyboard->keyboards[0]->ascii_top == 256)
+            globalkeyboard->keyboards[0]->ascii_top = 0;
         keyboard_irq_count++;
     }
     

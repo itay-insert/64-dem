@@ -4,6 +4,7 @@
 class keyboard {
     public:
         int scancode_top = 0;
+        int ascii_top = 0;
         char vendor[4];
         char buffer[256];
         char ascii[256];

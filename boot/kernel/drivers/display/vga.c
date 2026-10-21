@@ -372,7 +372,7 @@ text_data printf(const char *str, ...) {
 					break;
 				}
 				case 'c': {
-                    char ch = va_arg(args, char);
+                    char ch = (char)va_arg(args, int);
                     draw_char(ch, cursor.coulmn, cursor.row);
                     cursor_inc();
                     break;

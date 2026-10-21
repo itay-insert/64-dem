@@ -38,6 +38,8 @@ u64 IO_APIC = 0;
 
 u64 Kernel_end = 0;
 
+extern volatile u64 keyboard_irq_count;
+
 GlobalKeyboard *globalkeyboard = NULL;
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
@@ -246,7 +248,20 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     
     ioapic_route_keyboard((u8)(ioapic_read(0x20) >> 24));
 
-    ps2_controller_init();
+    printf("ps/2 controller init status: 0x%b\n", ps2_controller_init());
+
+    u32 low = ioapic_read_register(0x12);
+    u32 high = ioapic_read_register(0x13);
+
+    printf("IOAPIC Keyboard route low: 0x%ux\n", low);
+    printf("IOAPIC Keyboard route high: 0x%ux\n", high);
+
+    u32 id_reg = lapic_read(0x20);
+    u8 apic_id = (u8)(id_reg >> 24);
+
+    printf("Local APIC ID register: 0x%ux\n", id_reg);
+    printf("Local APIC ID: 0x%b\n", apic_id);
+
 
     enable_interrupts();
     printf("interrupts enabled!\n");
@@ -310,31 +325,17 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
+    u64 old_keyboard_count = keyboard_irq_count;
     while (1) {
-        if (globalkeyboard == nullptr ||
-            globalkeyboard->keyboards[0] == nullptr) {
-            continue;
+        if (keyboard_irq_count > old_keyboard_count) {
+            old_keyboard_count = keyboard_irq_count;
+            text_data td = printf("Keyboard IRQ count: %lu\n", old_keyboard_count);
+            for (int i = 0; i < 256; i++) {
+                printf("%c", globalkeyboard->keyboards[globalkeyboard->index]->ascii[i]);
+            }
+
+            cursor_Setpos(td.coulmn, td.row);
         }
-
-        keyboard* k = globalkeyboard->keyboards[0];
-
-        char display[257];
-
-        // Snapshot the buffer.
-        for (int i = 0; i < 256; i++) {
-            char c = k->ascii[i];
-
-        // Keep the display on one line.
-        if (c == '\0' || c == '\n' || c == '\r' || c == '\t')
-            c = ' ';
-
-        display[i] = c;
-        }
-
-        display[256] = '\0';
-
-        cursor_Setpos(0, 2);
-        printf("%s", display);
     }
     
 }
