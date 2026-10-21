@@ -125,7 +125,7 @@ int UHCI_init(TimerSource &timer) {
     u64 duration = timer.read_freq() / 100;
 
     while (timer.read() - start < duration) {
-        if (inw(base+UHCI_USBCMD) & UHCI_STS_HCH) {   // 10 ms timeout for halting
+        if (inw(base+UHCI_USBSTS) & UHCI_STS_HCH) {   // 10 ms timeout for halting
             halted = true;
             break;
         }
