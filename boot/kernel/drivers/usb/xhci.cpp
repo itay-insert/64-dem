@@ -8,7 +8,7 @@
 #include "drivers/pci/pci.h"
 #include "drivers/pci/pci_names.h"
 #include "drivers/timers/timer.hpp"
-#include "drivers/xhci_events.h"
+#include "drivers/usb/xhci_events.h"
 
 #define TIMEOUT 1000000
 

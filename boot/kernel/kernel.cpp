@@ -16,7 +16,7 @@
 #include "drivers/pci/pci_names.h"
 #include "drivers/dev.h"
 #include "boot_info.h"
-#include "drivers/xhci.hpp"
+#include "drivers/usb/xhci.hpp"
 #include "drivers/acpiPM.hpp"
 #include "drivers/timers/timer.hpp"
 #include "drivers/pcspkr.h"
