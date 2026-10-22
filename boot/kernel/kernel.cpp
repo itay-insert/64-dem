@@ -301,16 +301,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     Timer timer;
     printf("Timer signature: %s\n", timer.Src->hw.signature);
     printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);
-    int xhci_status = xhci_init(*timer.Src);
-
-
-    if (xhci_status == 1) {
-        printf("xHCI initialization failed\n");
-    } else if (xhci_status == 0) {
-        printf("xHCI initialization successful\n");
-        USB_init();
-    }
-
+   
 
     for (int i = 0; i < 3; i++) {
         printf(".");

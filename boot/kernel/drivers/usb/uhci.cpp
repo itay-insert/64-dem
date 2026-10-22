@@ -31,13 +31,6 @@ typedef enum {
 } UHCI_Regs;
 
 
-typedef struct {
-    bool found;
-    pci_address_t pci_address;
-    pci_bar_t bar;
-    u16 io_base;
-} uhci_controller_t;
-
 uhci_controller_t uhci_controller = {0}; 
 
 static void uhci_find_callback(const PCI_ret *device, void *context) {
@@ -113,9 +106,9 @@ int UHCI_init(TimerSource &timer) {
 
     controller->io_base = (u16)controller->bar.address;
 
-    printf("UHCI I/O base: 0x%w\n", controller->io_base);
+    printf("UHCI I/O base: 0x%w\n", (u16)controller->io_base);
 
-    u16 base = controller->io_base;
+    u16 base = (u16)controller->io_base;
 
     outw(base+UHCI_USBCMD, 0);   // send command 0 to USBCMD to halt the controller
 

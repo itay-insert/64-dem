@@ -9,6 +9,7 @@
 #include "drivers/pci/pci_names.h"
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/xhci_events.h"
+#include "drivers/usb/usb.hpp"
 
 #define TIMEOUT 1000000
 
@@ -23,19 +24,12 @@
 
 #define XHCI_LEGACY_SMI_ENABLES ((1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15))
 
-typedef struct {
-    bool found;
-    pci_address_t pci_address;
-    pci_bar_t bar;
-} xhci_controller_t;
 
-
-u64 xhci_base = 0;
 u64 *scratch_pad = 0;
 u64 *dcbaa = 0;
 u64 scratchpad_physical = 0;
 
-xhci_controller_t xhci_controller = {0};
+usb_controller_t xhci_controller = {0};
 
 
 
@@ -72,8 +66,8 @@ typedef struct {
 
 
 static void xhci_find_callback(const PCI_ret *device, void *context) {
-    xhci_controller_t *controller = static_cast<xhci_controller_t *>(context);
-
+    usb_controller_t *controller = static_cast<usb_controller_t *>(context);
+    
     if (controller->found ||
         device->PCI_status != PCI_STATUS_SUCCESS)
         return;
@@ -97,7 +91,7 @@ static void xhci_find_callback(const PCI_ret *device, void *context) {
 }
 
 
-bool xhci_discover(xhci_controller_t *controller) {
+bool xhci_discover(usb_controller_t *controller) {
     *controller = {};
 
     pci_enumerate(xhci_find_callback, controller);
@@ -625,6 +619,15 @@ static bool wait_command(TimerSource& timer, u64 command_physical,
     return false;
 }
 
+int xhci_discover_pci() {
+    xhci_controller_t *controller =  &xhci_controller;
+
+    if (!xhci_discover(controller))
+        return 1;
+    else return 0;
+}
+
+
 
 int xhci_init(TimerSource& timer) {
     xhci_controller_t *controller = &xhci_controller;
@@ -668,10 +671,10 @@ int xhci_init(TimerSource& timer) {
 
     flush_pages(virtual_address, pages);
 
-    xhci_base = virtual_address + page_offset;
+    xhci_controller.io_base = virtual_address + page_offset;
    
     volatile xhci_cap_regs *cap;
-    cap = (volatile xhci_cap_regs *)xhci_base;
+    cap = (volatile xhci_cap_regs *)xhci_controller.io_base;
 
     if (!xhci_take_ownership(cap, timer))
         return 1;
@@ -795,7 +798,7 @@ static inline u32 read_portsc(u64 base, u8 reg) {
 #define PORTSC_CCS (1u << 0)
 
 void USB_init(void) {
-    volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)xhci_base;
+    volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)xhci_controller.io_base;
 
     u64 op_base = xhci_base + cap->caplength;
     u32 hcsparams1 = cap->hcsparams1;
