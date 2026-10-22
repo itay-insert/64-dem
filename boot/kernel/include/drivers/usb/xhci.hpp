@@ -10,6 +10,7 @@ class xhci_controller : public usb_controller {
         u8 class_code = 0x0C;
         u8 subclass = 0x03;
         u8 prog_if = 0x30;
+        u8 type = MMIO;
         int status;
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
         int controller_init();

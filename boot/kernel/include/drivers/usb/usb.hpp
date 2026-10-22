@@ -2,6 +2,9 @@
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
 
+#define MMIO 0
+#define IO 1
+
 typedef struct {
     bool found;
     pci_address_t pci_address;
@@ -19,6 +22,7 @@ class usb_controller {
         u8 class_code;
         u8 subclass;
         u8 prog_if;
+        u8 type;
         int status;
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
         int controller_init() override;
