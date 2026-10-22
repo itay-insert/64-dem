@@ -1,5 +1,6 @@
 #pragma once
 #include "drivers/pci/pci.h"
+#include "drivers/timers/timer.hpp"
 
 typedef struct {
     bool found;
@@ -13,6 +14,17 @@ typedef struct {
 
 class usb_controller {
     public:
-        char vendor[4];
+        char vendor[5];
+        usb_controller_t controller;
+        u8 class_code;
+        u8 subclass;
+        u8 prog_if;
+        int status;
+        bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
+        int controller_init() override;
+        usb_controller();
 
-}
+};
+
+
+void usb_find_callback(const PCI_ret *device, void *context);

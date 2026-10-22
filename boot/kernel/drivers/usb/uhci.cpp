@@ -4,7 +4,7 @@
 #include "x86-64/memory/memory.h"
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
-
+#include "drivers/usb/usb.hpp"
 
 #define UHCI_CMD_RS       0x0001
 #define UHCI_CMD_HCRESET  0x0002
@@ -31,7 +31,7 @@ typedef enum {
 } UHCI_Regs;
 
 
-uhci_controller_t uhci_controller = {0}; 
+usb_controller_t uhci_controller = {0}; 
 
 static void uhci_find_callback(const PCI_ret *device, void *context) {
     uhci_controller_t *controller = 
@@ -56,10 +56,14 @@ static void uhci_find_callback(const PCI_ret *device, void *context) {
     controller->found = true;
 }
 
-bool uhci_discover(uhci_controller_t *controller) {
+bool uhci_discover(usb_controller_t *controller) {
     *controller = {};
 
-    pci_enumerate(uhci_find_callback, controller);
+    controller->class_code = 0x0C;
+    controller->subclass = 0x03;
+    controller->prog_if = 0x00;
+
+    pci_enumerate(usb_find_callback, controller);
 
     if (!controller->found) {
         printf("UHCI: no controller found!\n");
