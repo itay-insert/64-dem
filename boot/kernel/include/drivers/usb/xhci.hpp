@@ -5,7 +5,7 @@
 
 class xhci_controller : public usb_controller {
     public:
-        char vendors[5] = "XHCI";
+        char vendors[5] = "xHCI";
         usb_controller_t controller = {0};
         u8 class_code = 0x0C;
         u8 subclass = 0x03;
