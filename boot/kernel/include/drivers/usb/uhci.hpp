@@ -12,6 +12,7 @@ class uhci_controller : public usb_controller {
         u8 type = IO;
         int status;
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
+        void MapController(usb_controller_t *controller, u8 type);
         int controller_init();
         usb_controller();
 

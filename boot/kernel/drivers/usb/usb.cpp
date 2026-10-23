@@ -53,8 +53,56 @@ bool usb_controller::discover_controller(usb_controller_t *controller, u8 class_
     return true;
 }
 
+
+void usb_controller::MapController(usb_controller_t *controller, u8 type) {
+    if (!controller || type > 1) // exit if the arguements are invalid
+        return;
+
+    PCI_ret device = pci_get_info(controller->pci_address);
+
+    if (device.PCI_status != PCI_STATUS_SUCCESS)
+        return;
+
+    u8 header_type = device.common.header_type & 0x7F;
+    u8 bar_count = 0;
+
+    switch (header_type) {
+        case 0x00:
+            bar_count = 6;
+            break;
+        case 0x01:
+            bar_count = 2;
+            break;
+        default:
+            return;
+    }
+
+    for (u8 i = 0; i < bar_count; i++) {
+        pci_bar_t bar = {0};
+
+        if (pci_read_bar(controller->pci_address, i, 0, &bar) != 
+        PCI_STATUS_SUCCESS) 
+            continue;
+
+        if (bar.type == type) {
+            u64 addr = bar.address; // pci_read_bar handles bar.address conversion for us
+            if (type == MMIO) {
+                create_mapping(addr+BASE, addr, 1, 0x13, KernelPML4); // map the MMIO address into the virtual i/o space
+                addr = addr + BASE; // pass the virtual address to controller->io_base instead of the physical one
+            } 
+            controller->io_base = addr; // else, pass the physical IO address to controller->io_base          
+            return;
+        }
+    }
+
+    printf("USB: [BAR_ERROR] no matching bar for the %s controller\n", vendor);
+
+}
+
 usb_controller::usb_controller() {
     discover_controller(&controller, class_code, subclass, prog_if, vendor);
-
+    MapController(controller, type);
     status = controller_init();
 }
+
+
