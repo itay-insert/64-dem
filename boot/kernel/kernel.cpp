@@ -38,6 +38,8 @@ u64 IO_APIC = 0;
 
 u64 Kernel_end = 0;
 
+u64 timeradd = 0;
+
 extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
@@ -299,6 +301,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     }   
 
     Timer timer;
+    timeradd = (u64)timer;
     printf("Timer signature: %s\n", timer.Src->hw.signature);
     printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);
    

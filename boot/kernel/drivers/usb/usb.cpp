@@ -6,6 +6,10 @@
 #include "drivers/usb/usb.hpp"
 #include "drivers/timers/timer.hpp"
 
+
+extern u64 timeradd;
+
+
 void usb_find_callback(const PCI_ret *device, void *context) {
     usb_controller_t *controller = static_cast<usb_controller_t *>(context);
 
@@ -88,6 +92,7 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
             u64 addr = bar.address; // pci_read_bar handles bar.address conversion for us
             if (type == MMIO) {
                 create_mapping(addr+BASE, addr, 1, 0x13, KernelPML4); // map the MMIO address into the virtual i/o space
+                flush_pages(addr+BASE, 1); // flush the mapped pages
                 addr = addr + BASE; // pass the virtual address to controller->io_base instead of the physical one
             } 
             controller->io_base = addr; // else, pass the physical IO address to controller->io_base          
@@ -117,7 +122,8 @@ usb_controller::usb_controller() {
     }
 
     
-    status = controller_init();
+    Timer *timer = (Timer *)timeradd; // get a pointer to the global timer class
+    status = controller_init(&timer->Src);
 }
 
 

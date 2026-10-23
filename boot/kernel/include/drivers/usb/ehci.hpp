@@ -11,9 +11,7 @@ class ehci_controller : public usb_controller {
         u8 prog_if = 0x20;
         u8 type = MMIO;
         int status;
-        bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
-        void MapController(usb_controller_t *controller, u8 type);
-        int controller_init();
-        usb_controller();
+        int controller_init(TimerSource &timer) override;
+        ehci_controller();
 
 };

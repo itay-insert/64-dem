@@ -9,7 +9,7 @@
 #include "drivers/pci/pci_names.h"
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/xhci_events.h"
-#include "drivers/usb/usb.hpp"
+#include "drivers/usb/xhci.hpp"
 
 #define TIMEOUT 1000000
 
@@ -28,9 +28,6 @@
 u64 *scratch_pad = 0;
 u64 *dcbaa = 0;
 u64 scratchpad_physical = 0;
-
-usb_controller_t xhci_controller = {0};
-
 
 
 typedef struct {
@@ -142,10 +139,7 @@ static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
 }
 
 
-
-
-
-int xhci_reset(void) {
+int xhci_reset(u64 xhci_base) {
     volatile xhci_cap_regs *xhci_cap;
     xhci_cap = (volatile xhci_cap_regs *)xhci_base;
 
@@ -619,67 +613,30 @@ static bool wait_command(TimerSource& timer, u64 command_physical,
     return false;
 }
 
-int xhci_discover_pci() {
-    xhci_controller_t *controller =  &xhci_controller;
 
-    if (!xhci_discover(controller))
-        return 1;
-    else return 0;
+static inline u32 read_portsc(u64 base, u8 reg) {
+    return MMIO_read32(base, (reg * 0x10));
 }
 
+int xhci_controller::controller_init(TimerSource &timer) {
+    u64 page_offset = controller.bar.address & 0xfffULL;
+    u64 pages = (page_offset + controller.bar.size + 0xfffULL) >> 12;
 
+    printf("xHCI MMIO physical address: 0x%lx\n", controller.bar.address);
 
-int xhci_init(TimerSource& timer) {
-    xhci_controller_t *controller = &xhci_controller;
-
-    if (!xhci_discover(controller))
-        return 1;
-
-    if (pci_enable_device(controller->pci_address) != PCI_STATUS_SUCCESS) {
-        printf("xHCI: failed to enable device\n");
-        return 1;
-    }
-
-    if (pci_enable_bus_mastering(controller->pci_address) != PCI_STATUS_SUCCESS) {
-        printf("xHCI: failed to enable bus mastering\n");
-        return 1;
-    }
-
-
-    if (pci_read_bar(controller->pci_address, 0, 1, &controller->bar) != PCI_STATUS_SUCCESS) {
-        printf("xHCI: failed to read BAR0\n");
-        return 1;
-    }
-
-    if (controller->bar.type != PCI_BAR_MEMORY ||
-        controller->bar.address == 0 || controller->bar.size == 0) {
-        printf("xHCI: invalid BAR0\n");
-        return 1;
-    }
-
-    u64 page_offset = controller->bar.address & 0xfffULL;
-    u64 pages = (page_offset + controller->bar.size + 0xfffULL) >> 12;
-
-    printf("xHCI MMIO physical address: 0x%lx\n", controller->bar.address);
-
-    u64 physical = controller->bar.address & ~0xfffULL;
+    u64 physical = controller.bar.address & ~0xfffULL;
     u64 virtual_address = BASE + physical;
 
-    printf("Mapping xHCI...\n");
-
-    create_mapping(virtual_address, physical, pages, 0x13, KernelPML4);
-
-    flush_pages(virtual_address, pages);
-
-    xhci_controller.io_base = virtual_address + page_offset;
+    controller.io_base = virtual_address + page_offset;
    
+    u64 xhci_base = controller.io_base; // pass controller.io_base to xhci_base for compatibillity issues
     volatile xhci_cap_regs *cap;
-    cap = (volatile xhci_cap_regs *)xhci_controller.io_base;
+    cap = (volatile xhci_cap_regs *)controller.io_base;
 
     if (!xhci_take_ownership(cap, timer))
         return 1;
 
-    if (xhci_reset() != 0) {
+    if (xhci_reset(xhci_base) != 0) {
         printf("xHCI: failed to reset\n");
         return 1;
     }
@@ -791,27 +748,5 @@ int xhci_init(TimerSource& timer) {
     return 0;
 }
 
-static inline u32 read_portsc(u64 base, u8 reg) {
-    return MMIO_read32(base, (reg * 0x10));
-}
-
 #define PORTSC_CCS (1u << 0)
 
-void USB_init(void) {
-    volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)xhci_controller.io_base;
-
-    u64 op_base = xhci_base + cap->caplength;
-    u32 hcsparams1 = cap->hcsparams1;
-    u8 max_ports = (hcsparams1 >> 24) & 0xFF;
-    
-    u64 ports_base = op_base + 0x400;
-
-    for (u8 port = 1; port <= max_ports; port++) {
-        u32 portsc = read_portsc(ports_base, port);
-
-        if (portsc & PORTSC_CCS) {
-            printf("USB Device connected on port 0x%b\n", port);
-        }
-    }
-    
-}
