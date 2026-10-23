@@ -62,53 +62,18 @@ typedef struct {
 } xhci_op_regs;
 
 
-static void xhci_find_callback(const PCI_ret *device, void *context) {
-    usb_controller_t *controller = static_cast<usb_controller_t *>(context);
-    
-    if (controller->found ||
-        device->PCI_status != PCI_STATUS_SUCCESS)
-        return;
 
-
-    if (device->common.class_code != 0x0C ||
-        device->common.subclass != 0x03 ||
-        device->common.prog_if != 0x30)
-        return;
-
-
-    controller->pci_address = (pci_address_t) {
-        .segment  = device->Segment,
-        .bus      = device->Bus,
-        .device   = device->Device,
-        .function = device->Function,
-    };
-
-    controller->found = true;
-
+xhci_controller::xhci_controller() {
+    memcpy(vendor, "xHCI", sizeof(vendor));
+    class_code = 0x0C;
+    subclass = 0x03;
+    prog_if = 0x30;
+    type = MMIO;
+    controller = {0};
+    construct_controller();
 }
 
-
-bool xhci_discover(usb_controller_t *controller) {
-    *controller = {};
-
-    pci_enumerate(xhci_find_callback, controller);
-
-    if (!controller->found) {
-        printf("xHCI: no controller found\n");
-        return false;
-    }
-
-    printf("xHCI found at %u:%u:%u.%u\n",
-            (unsigned int)controller->pci_address.segment,
-            (unsigned int)controller->pci_address.bus,
-            (unsigned int)controller->pci_address.device,
-            (unsigned int)controller->pci_address.function);
-
-    return true;
-}
-
-
-
+u64 xhci_base = 0;
 
 static bool xhci_wait_clear(volatile u32 *reg, u32 mask) {
     u32 attempts = TIMEOUT;
@@ -139,7 +104,7 @@ static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
 }
 
 
-int xhci_reset(u64 xhci_base) {
+int xhci_reset() {
     volatile xhci_cap_regs *xhci_cap;
     xhci_cap = (volatile xhci_cap_regs *)xhci_base;
 
@@ -629,14 +594,14 @@ int xhci_controller::controller_init(TimerSource &timer) {
 
     controller.io_base = virtual_address + page_offset;
    
-    u64 xhci_base = controller.io_base; // pass controller.io_base to xhci_base for compatibillity issues
+    xhci_base = controller.io_base; // pass controller.io_base to xhci_base for compatibillity issues
     volatile xhci_cap_regs *cap;
     cap = (volatile xhci_cap_regs *)controller.io_base;
 
     if (!xhci_take_ownership(cap, timer))
         return 1;
 
-    if (xhci_reset(xhci_base) != 0) {
+    if (xhci_reset() != 0) {
         printf("xHCI: failed to reset\n");
         return 1;
     }

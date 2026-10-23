@@ -4,6 +4,8 @@
 #include "x86-64/memory/memory.h"
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
+#include "drivers/usb/ohci.hpp"
+#include "drivers/display/vga.h"
 
 typedef struct {
     u32 revision;             // 0x00 HcRevision
@@ -30,75 +32,36 @@ typedef struct {
     u32 rh_port_status[15];   // 0x54 HcRhPortStatus[0..14]
 } ohci_registers_t;
 
-typedef struct {
-    bool found;
-    pci_address_t pci_address;
-    pci_bar_t bar;
-    u64 io_base;
-} ohci_controller_t;
-
-ohci_controller_t ohci_controller = {0};
-
-static void ohci_find_callback(const PCI_ret *device, void *context) {
-    ohci_controller_t *controller =
-        static_cast<ohci_controller_t *>(context);
-
-    if (controller->found || 
-    device->PCI_status != PCI_STATUS_SUCCESS) 
-        return;
-    
-    if (device->common.class_code != 0x0C ||
-        device->common.subclass != 0x03 ||
-        device->common.prog_if != 0x10)
-        return;
-
-    controller->pci_address = (pci_address_t) {
-        .segment = device->Segment,
-        .bus = device->Bus,
-        .device = device->Device,
-        .function = device->Function
-    };
-
-    controller->found = true;
-    return;
+ohci_controller::ohci_controller() {
+    memcpy(vendor, "OHCI", sizeof(vendor));
+    class_code = 0x0C:
+    subclass = 0x03;
+    prog_if = 0x10;
+    type = MMIO;
+    controller = {0};
+    construct_controller();
 }
 
+#define HCCTRL ohci_regs->control
+#define HCCMDSTS ohci_regs->command_status
 
-bool ohci_discover(ohci_controller_t *controller) {
-    *controller = {};
+#define InterruptRouting 0x80
+#define OwnershipChangeRequest 0x04
 
-    pci_enumerate(ohci_find_callback, controller);
 
-    if (!controller->found) {
-        printf("OHCI: controller not found\n");
-        return false;
+int ohci_controller::controller_init(TimerSource &Timer) {
+    volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
+
+    if (HCCTRL & InterruptRouting) { // if bit 8 in hccontrol register is set, set bit 3 in the command status register
+        HCCMDSTS |= OwnershipChangeRequest; // to take ownership from firmware
+        u64 duration = Timer.read_freq() / 50000; // set 5 secs TIMEOUT duration
+        u64 start = Timer.read();
+        while (start - Timer.read() < duration) {
+            if (!(HCCTRL & InterruptRouting))
+                break;
+        }
+        printf("Kernel: obtained OHCI Ownership from firmware\n");
     }
 
-    printf("OHCI: controller found at %u:%u:%u.%u\n", 
-        (unsigned int)controller->pci_address.segment, 
-        (unsigned int)controller->pci_address.bus, 
-        (unsigned int)controller->pci_address.device, 
-        (unsigned int)controller->pci_address.function);
-    return true;
-}
-
-
-int OHCI_init(TimerSource &timer) {
-    ohci_controller_t *controller = &ohci_controller;
-
-    if (!ohci_discover(controller))   // discover OHCI
-        return 1;
-
-    if (pci_enable_device(controller->pci_address)
-     != PCI_STATUS_SUCCESS) { // enable the device on PCI
-        printf("OHCI: failed to enable pci device\n");
-        return 1;
-    }
-
-    if (pci_enable_bus_mastering(controller->pci_address) != PCI_STATUS_SUCCESS) { // enable bus mastering
-        printf("OHCI: failed to enable device bus mastering\n");
-        return 1;
-    }
-
-    
+    if (HCCTRL )
 }

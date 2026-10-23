@@ -67,6 +67,14 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
     if (device.PCI_status != PCI_STATUS_SUCCESS)
         return;
 
+    if (type == IO) {
+        pci_bar_t bar = {0};
+        if (pci_read_bar(controller->pci_address, 4, 0, &bar) != PCI_STATUS_SUCCESS)
+            return;
+        controller->io_base = (u16)bar.address;
+        controller->bar = bar;
+        return;
+    }
     u8 header_type = device.common.header_type & 0x7F;
     u8 bar_count = 0;
 
@@ -84,18 +92,21 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
     for (u8 i = 0; i < bar_count; i++) {
         pci_bar_t bar = {0};
 
-        if (pci_read_bar(controller->pci_address, i, 0, &bar) != 
+        if (pci_read_bar(controller->pci_address, i, 1, &bar) != 
         PCI_STATUS_SUCCESS) 
             continue;
 
-        if (bar.type == type) {
+        if (bar.type == MMIO) {
             u64 addr = bar.address; // pci_read_bar handles bar.address conversion for us
-            if (type == MMIO) {
-                create_mapping(addr+BASE, addr, 1, 0x13, KernelPML4); // map the MMIO address into the virtual i/o space
-                flush_pages(addr+BASE, 1); // flush the mapped pages
-                addr = addr + BASE; // pass the virtual address to controller->io_base instead of the physical one
-            } 
-            controller->io_base = addr; // else, pass the physical IO address to controller->io_base          
+            u64 phys_start = addr & ~4095ULL; // align to 4K
+            u64 offset = bar.address - phys_start; // calculate the offset
+            u64 pages = (offset + bar.size + 4095) >> 12; // >> 12 == / 4096, calculate the number of pages to map
+            create_mapping(phys_start+BASE, phys_start, pages, 0x13, KernelPML4); // map the MMIO address into the virtual i/o space
+            flush_pages(phys_start+BASE, pages); // flush the mapped pages
+            addr = addr + BASE; // pass the virtual address to controller->io_base instead of the physical one
+            
+            controller->io_base = addr; // else, pass the physical IO address to controller->io_base
+            controller->bar = bar; // save the pci bar to controller->bar          
             return;
         }
     }
@@ -104,26 +115,28 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 
 }
 
-usb_controller::usb_controller() {
+void usb_controller::construct_controller() {
     // controller discovery
-    discover_controller(&controller, class_code, subclass, prog_if, vendor); // find the controller's pci_address
-    MapController(controller, type); // map the controller to the virtual MMIO space if needed
+    bool dists = discover_controller(&controller, class_code, subclass, prog_if, vendor); // find the controller's pci_address
+    if (!dists)
+        return; // return if there was a discovery failure
+    MapController(&controller, type); // map the controller to the virtual MMIO space if needed
 
 
     // controller pci requirements
-    if (pci_enable_device(controller->pci_address) != PCI_STATUS_SUCCESS) { // enable the pci device
+    if (pci_enable_device(controller.pci_address) != PCI_STATUS_SUCCESS) { // enable the pci device
         printf("%s: failed to enable pci device", vendor); // print a message if error
         return; // abort if failure
     }
 
-    if (pci_enable_bus_mastering(controller->pci_address) != PCI_STATUS_SUCCESS) { // enable pci bus mastering
+    if (pci_enable_bus_mastering(controller.pci_address) != PCI_STATUS_SUCCESS) { // enable pci bus mastering
         printf("%s: failed to enable bus mastering", vendor); // print a message if error
         return; // abort if failure
     }
 
     
-    Timer *timer = (Timer *)timeradd; // get a pointer to the global timer class
-    status = controller_init(&timer->Src);
+    Timer *timer = reinterpret_cast<Timer *>(timeradd); // get a pointer to the global timer class
+    status = controller_init(*timer->Src);
 }
 
 

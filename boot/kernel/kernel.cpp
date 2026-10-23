@@ -301,7 +301,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     }   
 
     Timer timer;
-    timeradd = (u64)timer;
+    timeradd = reinterpret_cast<u64>(&timer);
     printf("Timer signature: %s\n", timer.Src->hw.signature);
     printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);
    
