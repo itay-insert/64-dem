@@ -60,11 +60,13 @@ int ohci_controller::controller_init(TimerSource &timer) {
 
     if (HCCTRL & InterruptRouting) { // if bit 8 in hccontrol register is set, set bit 3 in the command status register
         HCCMDSTS |= OwnershipChangeRequest; // to take ownership from firmware
-        u64 duration = timer.read_freq() * 3; // set 3 secs TIMEOUT duration
-        u64 start = timer.read();
-        while (timer.read() - start < duration) {
-            if (!(HCCTRL & InterruptRouting))
+        int ms_target = 5000; // set 5 secs TIMEOUT duration
+        int ms_count = 0;
+        while (HCCTRL & InterruptRouting) {
+            if (ms_count == ms_target)
                 break;
+            wait_ms(timer, 1);
+            ms_count++;
         }
 
         if (!(HCCTRL & InterruptRouting))
