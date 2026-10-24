@@ -118,19 +118,23 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 void usb_controller::construct_controller() {
     // controller discovery
     bool dists = discover_controller(&controller, class_code, subclass, prog_if, vendor); // find the controller's pci_address
-    if (!dists)
+    if (!dists) {
+        status = 1;
         return; // return if there was a discovery failure
+    }
     MapController(&controller, type); // map the controller to the virtual MMIO space if needed
 
 
     // controller pci requirements
     if (pci_enable_device(controller.pci_address) != PCI_STATUS_SUCCESS) { // enable the pci device
         printf("%s: failed to enable pci device", vendor); // print a message if error
+        status = 1;
         return; // abort if failure
     }
 
     if (pci_enable_bus_mastering(controller.pci_address) != PCI_STATUS_SUCCESS) { // enable pci bus mastering
         printf("%s: failed to enable bus mastering", vendor); // print a message if error
+        status = 1;
         return; // abort if failure
     }
 
