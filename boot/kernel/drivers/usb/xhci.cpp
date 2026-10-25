@@ -23,7 +23,10 @@
 #define XHCI_LEGACY_OS_OWNED (1u << 24)
 
 #define XHCI_LEGACY_SMI_ENABLES ((1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15))
+#define CCS (1 << 0)
 
+#define XHCI_PORTSC_BASE 0x400
+#define XHCI_PORTSC_STRIDE 0x10
 
 u64 *scratch_pad = 0;
 u64 *dcbaa = 0;
@@ -713,5 +716,30 @@ int xhci_controller::controller_init(TimerSource &timer) {
     return 0;
 }
 
-#define PORTSC_CCS (1u << 0)
+static inline u32 read_port(u64 op_base, u8 port) {
+    volatile u32 *PortSC = (volatile u32 *)(op_base + XHCI_PORTSC_BASE + ((u64)port * XHCI_PORTSC_STRIDE));
+    return (u32)*PortSC;
+}
+
+int xhci_controller::enumrate_ports() {
+    volatile xhci_cap_regs *cap_regs = (volatile xhci_cap_regs *)controller.io_base;
+
+    u64 op_base = controller.io_base + (u64)cap_regs->caplength; // calculate op_base from io_base + cap_length
+    u8 xhci_port_count = (u8)((cap_regs->hcsparams1 >> 24) & 0xFF);
+
+    ports = new usb_port_descriptor[xhci_port_count]; // allocate the port descriptors
+    if (ports == nullptr) // return -1 for allocation failure
+        return -1;
+
+        
+    for (u8 port = 0; port < xhci_port_count; port++) {
+        u32 status = read_port(op_base, port);
+        ports[port].port_number = port;
+        ports[port].port_status = status;
+        ports[port].connected = (status & CCS);
+        ports[port].controller_type = xHCI;
+    }
+
+    return (int)xhci_port_count;
+}
 

@@ -153,10 +153,10 @@ int uhci_controller::enumrate_ports() {
     u16 io_base = (u16)controller.io_base;
 
     ports = new usb_port_descriptor[UHCI_PORT_COUNT]; // allocate the port descriptors
-    if (ports == nullptr)
+    if (ports == nullptr) // return -1 for allocation failure
         return -1;
 
-        
+
     for (u8 port = 0; port < UHCI_PORT_COUNT; port++) {
         u16 status = uhci_read_port(io_base, port); // fill the port descriptors with port information
         ports[port].port_number = port;

@@ -175,7 +175,7 @@ int ohci_controller::enumrate_ports() {
     
     u8 ohci_port_count = (u8)(ohci_regs->rh_descriptor_a & 0xFF); // get the port count from the lower 8 bits of the rh_descriptor_a register
     ports = new usb_port_descriptor[ohci_port_count];
-    if (ports == nullptr)
+    if (ports == nullptr) // return -1 for allocation failure
         return -1;
 
     for (u8 port = 0; port < ohci_port_count; port++) {
