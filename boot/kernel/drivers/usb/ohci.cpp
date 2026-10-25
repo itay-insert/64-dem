@@ -180,7 +180,7 @@ int ohci_controller::enumrate_ports() {
 
     for (u8 port = 0; port < ohci_port_count; port++) {
         u32 status = ohci_read_port(port);
-        ports[port].port_number = port;
+        ports[port].port_number = port + 1;
         ports[port].port_status = status;
         ports[port].connected = (status & CCS);
         ports[port].controller_type = OHCI;

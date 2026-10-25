@@ -159,7 +159,7 @@ int uhci_controller::enumrate_ports() {
 
     for (u8 port = 0; port < UHCI_PORT_COUNT; port++) {
         u16 status = uhci_read_port(io_base, port); // fill the port descriptors with port information
-        ports[port].port_number = port;
+        ports[port].port_number = port + 1;
         ports[port].port_status = (u32)status;
         ports[port].connected = (status & UHCI_CCS); // an AND operation with UHCI_CCS to determine whether a port is connected or not
         ports[port].controller_type = UHCI;

@@ -731,10 +731,10 @@ int xhci_controller::enumrate_ports() {
     if (ports == nullptr) // return -1 for allocation failure
         return -1;
 
-        
+
     for (u8 port = 0; port < xhci_port_count; port++) {
         u32 status = read_port(op_base, port);
-        ports[port].port_number = port;
+        ports[port].port_number = port + 1;
         ports[port].port_status = status;
         ports[port].connected = (status & CCS);
         ports[port].controller_type = xHCI;

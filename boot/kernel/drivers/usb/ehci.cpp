@@ -196,10 +196,10 @@ int ehci_controller::enumrate_ports() {
     ports = new usb_port_descriptor[ehci_port_count];
     if (ports == nullptr)
         return -1; // return -1 for allocation failure
-        
+
     for (u8 port = 0; port < ehci_port_count; port++) {
         u32 status = ehci_read_port(op_base, port);
-        ports[port].port_number = port;
+        ports[port].port_number = port + 1;
         ports[port].port_status = status;
         ports[port].connected = (status & CSS);
         ports[port].controller_type = EHCI;
