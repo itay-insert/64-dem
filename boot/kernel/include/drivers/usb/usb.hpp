@@ -22,10 +22,40 @@ typedef struct {
 } usb_controller_t;
 
 typedef struct {
+    u8  bLength;
+    u8  bDescriptorType;
+    u16 bcdUSB;
+    u8  bDeviceClass;
+    u8  bDeviceSubClass;
+    u8  bDeviceProtocol;
+    u8  bMaxPacketSize0;
+    u16 idVendor;
+    u16 idProduct;
+    u16 bcdDevice;
+    u8  iManufacturer;
+    u8  iProduct;
+    u8  iSerialNumber;
+    u8  bNumConfigurations;
+} __attribute__((packed)) usb_device_descriptor;
+
+typedef struct {
+    u8 port_number;
+    u8 address;
+    u8 speed;
+
+    u16 vendor_id;
+    u16 product_id;
+
+    usb_device_descriptor descriptor;
+} usb_device;
+
+
+typedef struct {
     u8 port_number;
     bool connected;
     int controller_type;
     u32 port_status;
+    usb_device *device;
 } usb_port_descriptor;
 
 class usb_controller {
@@ -44,6 +74,7 @@ class usb_controller {
         void construct_controller(void);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
+        virtual void reset_port(u8 port_number) = 0;
         
 
 };

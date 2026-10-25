@@ -141,6 +141,7 @@ void usb_controller::construct_controller() {
     
     Timer *timer = reinterpret_cast<Timer *>(timeradd); // get a pointer to the global timer class
     status = controller_init(*timer->Src);
+    ports_count = enumrate_ports();
 }
 
 
