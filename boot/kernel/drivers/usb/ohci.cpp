@@ -55,9 +55,14 @@ ohci_controller::ohci_controller() {
 #define USBOPER 0x02
 #define USBSUSP 0x03
 
+#define CCS (1 << 0)
+
+u64 ohci_base = 0;
+
 int ohci_controller::controller_init(TimerSource &timer) {
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
 
+    ohci_base = controller.io_base;
     if (HCCTRL & InterruptRouting) { // if bit 8 in hccontrol register is set, set bit 3 in the command status register
         HCCMDSTS |= OwnershipChangeRequest; // to take ownership from firmware
         int ms_target = 5000; // set 5 secs TIMEOUT duration
@@ -153,4 +158,34 @@ int ohci_controller::controller_init(TimerSource &timer) {
     }
 
     return 0;
+}
+
+static inline u32 ohci_read_register(u64 offset) {
+    volatile u32 *ohci_ptr = (volatile u32 *)(ohci_base + offset);
+    return (u32)(*ohci_ptr);
+}
+
+static inline u32 ohci_read_port(u8 port) {
+    u64 offset = 0x54 + (port << 2); // offset = 0x54 + (port * 4)
+    return ohci_read_register(offset);
+}
+
+int ohci_controller::enumrate_ports() {
+    volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
+    
+    u8 ohci_port_count = (u8)(ohci_regs->rh_descriptor_a & 0xFF); // get the port count from the lower 8 bits of the rh_descriptor_a register
+    ports = new usb_port_descriptor[ohci_port_count];
+    if (ports == nullptr)
+        return -1;
+
+    for (u8 port = 0; port < ohci_port_count; port++) {
+        u32 status = ohci_read_port(port);
+        ports[port].port_number = port;
+        ports[port].port_status = status;
+        ports[port].connected = (status & CCS);
+        ports[port].controller_type = OHCI;
+    }
+
+    return (int)ohci_port_count;
+
 }

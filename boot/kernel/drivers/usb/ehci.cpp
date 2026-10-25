@@ -58,6 +58,9 @@ ehci_controller::ehci_controller() { // initialize the ehci_controller fields
 #define HCHalted (1u << 12) // HCHalted bit 12 of USBSTS
 #define HCRESET (1u << 1) // USBCMD.HCRESET bit 1 
 
+#define EHCI_PORTSC 0x44
+#define CCS (1 << 0)
+
 int ehci_controller::controller_init(TimerSource &timer) {
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base; // ehci_cap_regs is at controller.io_base
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + cap_regs->cap_length); // adding cap_length to get op_regs base
@@ -176,5 +179,23 @@ int ehci_controller::controller_init(TimerSource &timer) {
     }
     
     return 0;
+
+}
+
+static inline u32 ehci_read_port(u64 op_base, u8 port) {
+    volatile u32 *Portsc = (volatile u32 *)(op_base + EHCI_PORTSC + (port << 2));
+    return (u32)*Portsc;
+}
+
+int ehci_controller::enumrate_ports() {
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+    u64 cap_length = (u64)cap_regs->cap_length;
+    u64 op_base = controller.io_base + cap_length; // calculate op_base from io_base + cap_length
+
+    u8 ehci_port_count = (u8)(cap_regs->hcs_params & 0x0F);
+    ports = new usb_port_descriptor[ehci_port_count];
+    for (u8 port = 0; port < ehci_port_count; port++) {
+
+    }
 
 }

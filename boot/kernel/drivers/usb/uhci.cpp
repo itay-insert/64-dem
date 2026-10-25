@@ -7,6 +7,9 @@
 #include "drivers/usb/uhci.hpp"
 #include "drivers/display/vga.h"
 
+#define UHCI_PORT_COUNT 2
+#define UHCI_CCS (1 << 0)
+
 #define UHCI_CMD_RS       0x0001
 #define UHCI_CMD_HCRESET  0x0002
 #define UHCI_CMD_GRESET   0x0004
@@ -142,4 +145,26 @@ int uhci_controller::controller_init(TimerSource &timer) {
     return 0;
 }
 
+u16 uhci_read_port(u16 io_base, u8 port) {
+    return inw(io_base + 0x10 + (port << 1));
+}
 
+int uhci_controller::enumrate_ports() {
+    u16 io_base = (u16)controller.io_base;
+
+    ports = new usb_port_descriptor[UHCI_PORT_COUNT]; // allocate the port descriptors
+    if (ports == nullptr)
+        return -1;
+
+        
+    for (u8 port = 0; port < UHCI_PORT_COUNT; port++) {
+        u16 status = uhci_read_port(io_base, port); // fill the port descriptors with port information
+        ports[port].port_number = port;
+        ports[port].port_status = (u32)status;
+        ports[port].connected = (status & UHCI_CCS); // an AND operation with UHCI_CCS to determine whether a port is connected or not
+        ports[port].controller_type = UHCI;
+    }
+
+
+    return UHCI_PORT_COUNT; // return the number of ports
+}

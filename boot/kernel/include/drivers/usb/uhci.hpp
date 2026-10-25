@@ -5,6 +5,7 @@
 class uhci_controller : public usb_controller {
     public:
         int controller_init(TimerSource &timer) override;
+        int enumrate_ports();
         uhci_controller();
 
 };
