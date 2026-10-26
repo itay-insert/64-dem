@@ -10,6 +10,18 @@
 #define EHCI 2
 #define xHCI 3
 
+// if reset return code > 0 == failure
+#define RESET_SUCCESS 0
+#define NO_DEVICE 1
+#define RESET_STILL_ASSERTED 2
+#define RESET_FAILED 3
+#define INVALID_PORT 4
+#define CONTROLLER_HALTED 5
+#define COMPANION_REQUIRED 6
+#define PORT_BUSY 7
+#define OVER_CURRENT_CONDITION 8
+#define OLD_FLAG_DID_NOT_CLEAR 9
+#define INVALID_STATUS 10
 
 typedef struct {
     bool found;
@@ -74,7 +86,7 @@ class usb_controller {
         void construct_controller(void);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
-        virtual void reset_port(u8 port_number) = 0;
+        virtual int reset_port(u8 port, TimerSource &timer) = 0;
         
 
 };

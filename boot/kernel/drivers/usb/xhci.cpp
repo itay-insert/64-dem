@@ -23,7 +23,19 @@
 #define XHCI_LEGACY_OS_OWNED (1u << 24)
 
 #define XHCI_LEGACY_SMI_ENABLES ((1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15))
-#define CCS (1 << 0)
+
+#define CCS (1 << 0) // current connect status
+#define PED (1 << 1) // port enabled
+#define OCA (1 << 3) // over-current active
+#define PR (1 << 4) // port reset
+#define PLS_MASK (0xF << 5) // port link state
+#define U0 (0 << 5) // U0 link state
+#define PRC (1 << 21) // port reset change
+
+#define RESET_TIMEOUT 1000
+
+#define RO_MASK ((1 << 0) | (1 << 3) | (0xF << 10) | (1 << 30))
+#define RWS_MASK ((0xF << 5) | (1 << 9) | (0x3 << 14) | (0x7 << 25))
 
 #define XHCI_PORTSC_BASE 0x400
 #define XHCI_PORTSC_STRIDE 0x10
@@ -743,3 +755,90 @@ int xhci_controller::enumrate_ports() {
     return (int)xhci_port_count;
 }
 
+
+static inline u32 xhci_portsc_neutral(u32 value) {
+    return (value & RO_MASK) | (value & RWS_MASK);
+}
+
+int xhci_controller::reset_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+
+    volatile u8 *caplength = (volatile u8 *)controller.io_base;
+    
+    u64 op_base = controller.io_base + (u64)*caplength;
+    volatile u32 *portsc = (volatile u32 *)(op_base + XHCI_PORTSC_BASE + ((port - 1) * XHCI_PORTSC_STRIDE));
+
+    u32 status = *portsc;
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (!(status & CCS))
+        return NO_DEVICE;
+
+    if (status & OCA)
+        return OVER_CURRENT_CONDITION;  // over-current condition
+
+    if (status & PR)
+        return RESET_STILL_ASSERTED;
+
+    
+    // Clear previous reset-complete flag so that we
+    // can detect completion of this reset
+    *portsc = xhci_portsc_neutral(status) | PRC;
+
+
+    status = *portsc;
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (!(status & CCS))
+        return NO_DEVICE;
+
+    if (status & PRC)
+        return RESET_FAILED; // old flag did not clear
+
+    // intiate reset
+    *portsc = xhci_portsc_neutral(status) | PR;
+
+
+    // wait for hardware to finish the reset
+    for (u32 elapsed = 0; elapsed < RESET_TIMEOUT; elapsed++) {
+        status = *portsc;
+
+        if (status == 0xFFFFFFFF)
+            return INVALID_STATUS;
+
+        if (!(status & CCS)) 
+            return NO_DEVICE;
+
+        if (status & OCA)
+            return OVER_CURRENT_CONDITION;
+
+        // PRC is set when reset processing completes
+        if (status & PRC) {
+            if (status & PR)
+                return RESET_STILL_ASSERTED;
+
+            // we need successfull reset, not merely completion
+            if (!(status & PED))
+                return RESET_FAILED;
+                
+            if ((status & PLS_MASK) != U0)
+                return RESET_FAILED;
+
+            return RESET_SUCCESS;
+        }
+
+        wait_ms(timer, 1);
+    }
+
+    status = *portsc;
+
+    if ((status != 0xFFFFFFFF) && (status & PR))
+        return RESET_STILL_ASSERTED;
+
+    return RESET_FAILED;
+}

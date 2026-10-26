@@ -55,7 +55,15 @@ ohci_controller::ohci_controller() {
 #define USBOPER 0x02
 #define USBSUSP 0x03
 
-#define CCS (1 << 0)
+#define CCS (1 << 0) // current connect status
+#define PES (1 << 1) // port enable status
+#define PRS (1 << 4) // port reset status
+#define PRSC (1 << 20) // port reset change
+
+
+#define RESET_PULSE 10
+#define RESET_TIMEOUT 20
+#define RESET_PULSES 5
 
 u64 ohci_base = 0;
 
@@ -170,6 +178,7 @@ static inline u32 ohci_read_port(u8 port) {
     return ohci_read_register(offset);
 }
 
+
 int ohci_controller::enumrate_ports() {
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
     
@@ -188,4 +197,105 @@ int ohci_controller::enumrate_ports() {
 
     return (int)ohci_port_count;
 
+}
+
+int ohci_controller::reset_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+
+    u64 port_base = controller.io_base + 0x54 + ((port - 1) << 1); // calculate the port_base address
+
+    volatile u32 *port_reg = (volatile u32 *)port_base;
+
+    u32 status = *port_reg;
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+
+    if (!(status & CCS))
+        return NO_DEVICE; // no device connected on port
+
+
+    bool idle = false; // wait for any reset in progress to finish
+
+    for (u32 elasped = 0; elapsed < RESET_TIMEOUT; elasped++) {
+        status = *port_reg;
+
+        if (status == 0xFFFFFFFF)
+            return INVALID_STATUS;
+
+        if (!(status & CCS))
+            return NO_DEVICE;
+
+        if (!(status & PRS)) {
+            idle = true;
+            break;
+        }
+
+        wait_ms(timer, 1);
+    }
+
+    if (!idle)
+        return RESET_STILL_ASSERTED;
+
+    
+    // repeat the hardware pulse to provide 50 ms of reset signaling
+    for (u32 pulse = 0; pulse < RESET_PULSES; pulse++) {
+        status = *port_reg;
+
+        if (status == 0xFFFFFFFF)
+            return INVALID_STATUS;
+
+        // clear a stale reset-completion flag
+        // clear the W1C bit
+        if (status & PRSC) 
+            *port_reg = PRSC;
+
+        // write the command bit to start reset
+        *port_reg = PRS;
+
+
+        bool completed = false;
+
+        for (u32 elapsed = 0; elapsed < RESET_TIMEOUT; elapsed++) {
+            wait_ms(timer, 1);
+            status = *port_reg;
+
+            if (status == 0xFFFFFFFF)
+                return INVALID_STATUS;
+
+            if (!(status & CCS))
+                return NO_DEVICE;
+
+            // require both reset deassert and the hardware reset-completion flag
+            if (!(status & PRS) && (status & PRSC)) {
+                completed = true;
+                break;
+            }
+        }
+
+        if (!completed)
+            return RESET_FAILED;
+    }
+
+    wait_ms(timer, 10); // USB reset recovery period
+
+
+    status = *port_reg;
+
+    // verify the port's final state
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (!(status & CCS))
+        return NO_DEVICE;
+
+    if (status & PRS)
+        return RESET_STILL_ASSERTED;
+
+    if (!(status & PES))
+        return RESET_FAILED;
+
+    return RESET_SUCCESS;
 }

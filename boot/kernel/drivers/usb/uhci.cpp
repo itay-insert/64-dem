@@ -8,7 +8,13 @@
 #include "drivers/display/vga.h"
 
 #define UHCI_PORT_COUNT 2
-#define UHCI_CCS (1 << 0)
+#define UHCI_CCS (1 << 0) // current connect status
+
+ #define PR (1 << 9) // port reset
+#define PE (1 << 2) // port enable
+
+#define UHCI_W1C_MASK 0x0A0A
+#define UHCI_WZ_MASK  0xE000
 
 #define UHCI_CMD_RS       0x0001
 #define UHCI_CMD_HCRESET  0x0002
@@ -167,4 +173,46 @@ int uhci_controller::enumrate_ports() {
 
 
     return UHCI_PORT_COUNT; // return the number of ports
+}
+
+int uhci_controller::reset_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > 2)
+        return INVALID_PORT;  // invalid port index
+
+
+    u16 reg = (u16)(controller.io_base + 0x10 + ((port - 1) << 1));
+    u16 status = inw(reg);
+    if (!(status & UHCI_CCS))
+        return NO_DEVICE; // no device is connected
+
+    // assert reset
+    outw(reg, (status & 0x1FF & ~UHCI_W1C_MASK) | PR);
+    wait_ms(timer, 50)
+
+    // deassert reset
+    status = inw(reg);
+    outw(reg, (status & ~(PR | UHCI_W1C_MASK | UHCI_WZ_MASK)) & ~PR);
+    wait_ms(timer, 10);
+
+
+    // read final port state
+    status = inw(reg);
+
+
+    if (status & PR)
+        return RESET_STILL_ASSERTED; // reset still asserted
+
+
+    if (!(status & PE)) { // enable the port if not enabled after reset
+        status &= ~(UHCI_W1C_MASK | UHCI_WZ_MASK);
+        status |= PE;
+        outw(reg, status);
+        wait_ms(timer, 1);
+        status = inw(reg);
+    }
+
+
+    if ((status & UHCI_CCS) && (status & PE) && !(status & PR))
+        return RESET_SUCCESS;
+    else return RESET_FAILED;
 }

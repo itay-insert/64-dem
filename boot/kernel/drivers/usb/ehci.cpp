@@ -59,7 +59,23 @@ ehci_controller::ehci_controller() { // initialize the ehci_controller fields
 #define HCRESET (1u << 1) // USBCMD.HCRESET bit 1 
 
 #define EHCI_PORTSC 0x44
-#define CCS (1 << 0)
+
+#define CCS (1 << 0) // current connect status
+#define CSC (1 << 1) // connect change
+#define PE (1 << 2) // port enable
+#define PEC (1 << 3)  // port enable change
+#define OCA (1 << 4) // over-current active
+#define OCC (1 << 5) // over-current change
+#define FPR (1 << 6) // force port resume
+#define SUSP (1 << 7) // suspended
+#define PR (1 << 8) // port reset
+#define LINE_MASK (3 << 10) // line status
+#define LINE_K (1 << 10)
+#define POWER (1 << 12) // port power
+#define OWNER (1 << 13) // companion controller owns port
+
+#define W1C_MASK (CSC | PEC | OCC)
+
 
 int ehci_controller::controller_init(TimerSource &timer) {
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base; // ehci_cap_regs is at controller.io_base
@@ -206,4 +222,129 @@ int ehci_controller::enumrate_ports() {
     }
 
     return (int)ehci_port_count;
+}
+
+
+int ehci_controller::reset_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+
+    u64 op_base = controller.io_base + cap_regs->cap_length;
+
+    volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)op_base;
+
+    volatile u32 *portsc = (volatile u32 *)(op_base + EHCI_PORTSC + (u64)((port - 1) << 2));
+
+    if (USBSTS & HCHalted)
+        return CONTROLLER_HALTED;
+
+    
+    u32 status = *portsc;
+
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (status & OWNER)
+        return COMPANION_REQUIRED;
+
+    if (!(status & CCS))
+        return NO_DEVICE;
+
+    if (status & FPR)
+        return PORT_BUSY; // resume signaling is in progress
+
+    // low-speed devices should be handed to the companion
+    // controller before performing an EHCI port reset
+    if (!(status & PE) && (status & LINE_MASK) == LINE_K) {
+        u32 value = status & ~W1C_MASK;
+        value &= ~PE;
+        value |= OWNER;
+
+        *portsc = value;
+        (void)*portsc; // read back to flush MMIO register write
+        
+        return COMPANION_REQUIRED;
+    }
+
+
+    // assert reset and set PE to 0
+    u32 value = status & ~W1C_MASK;
+    value &= ~PE;
+    value |= PR;
+
+    *portsc = value;
+    (void)*portsc; // read back to flush MMIO register write
+
+    wait_ms(timer, 50); // wait 50 ms for USB 2.0
+
+    status = *portsc;
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (!(status & CCS))
+        return NO_DEVICE;
+
+    // deassert reset
+    value = status & ~W1C_MASK;
+    value &= ~(PE | PR);
+
+    *portsc = value;
+    (void)*portsc; // read back to flush MMIO register write
+
+
+    // the controller must finish reset and stablize the port
+    bool reset_complete = false;
+
+    for (u32 elapsed = 0; elapsed < 10; elapsed++) {  // 10 ms timeout
+        status = *portsc;
+
+        if (status == 0xFFFFFFFF)
+            return INVALID_STATUS;
+
+        if (!(status & CCS))
+            return NO_DEVICE;
+
+        if (!(status & PR)) {
+            reset_complete = true;
+            break;
+        } 
+
+        wait_ms(timer, 1);
+    }
+
+
+    if (!reset_complete)
+        return RESET_STILL_ASSERTED;
+
+    wait_ms(timer, 10); // USB reset recovery wait
+
+    status = *portsc;
+
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    if (!(status & CCS)) 
+        return NO_DEVICE;
+
+    if (status & PR)
+        return RESET_STILL_ASSERTED;
+
+    // hardware enables a high-speed port automatically
+    if (status & PE)
+        return RESET_SUCCESS;
+
+    // if connected but not enabled after reset, hand off to companion controller
+    value = status & ~W1C_MASK;
+    value &= ~PE;
+    value |= OWNER;
+
+    *portsc = value;
+    (void)*portsc; // MMIO read to flush the write
+
+    return COMPANION_REQUIRED;
+
 }
