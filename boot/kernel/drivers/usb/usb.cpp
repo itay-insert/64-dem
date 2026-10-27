@@ -182,6 +182,9 @@ void usb_controller::construct_controller() {
 
     if (!status) {
         ports_count = enumrate_ports();
+        for (int i = 0; i < ports_count; i++) 
+            reset_port(ports[i].port_number, timer);
+        
     }
 
     segment[Addr_count] = controller.pci_address.segment;
