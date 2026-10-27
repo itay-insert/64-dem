@@ -16,12 +16,13 @@
 #include "drivers/pci/pci_names.h"
 #include "drivers/dev.h"
 #include "boot_info.h"
-#include "drivers/usb/xhci.hpp"
 #include "drivers/acpiPM.hpp"
 #include "drivers/timers/timer.hpp"
 #include "drivers/pcspkr.h"
 #include "drivers/keyboard/keyboard.hpp"
 #include "drivers/keyboard/ps2.hpp"
+#include "drivers/usb/usb.hpp"
+#include "x86-64/tsc.h"
 
 #define RGB 0
 #define BGR 1
@@ -39,16 +40,29 @@ u64 IO_APIC = 0;
 u64 Kernel_end = 0;
 
 u64 timeradd = 0;
+u64 acpiadd = 0;
 
 extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
 
+extern u32 vga16_color[16];
+
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
-    speaker_on(880);
+    volatile u32 *fb = (volatile u32 *)info64->framebuffer_base;
+    for (u32 i = 0; i < 16; i++) {
+        for (int j = 0; j < (info32->horizontal_resolution*info32->vertical_resolution); j++) {
+            fb[j] = vga16_color[i];
+        }
+    }
     wait_secs(1);
-    speaker_off();
+    for (int i = 14; i >= 0; i--) {
+        for (int j = 0; j < (info32->horizontal_resolution*info32->vertical_resolution); j++) {
+            fb[j] = vga16_color[i];
+        }
+    }
     wait_secs(1);
+
     qemu_debug_print("[kernel] entered kernel_main\n");
 
     if (paging_enabled == 0) {
@@ -248,6 +262,9 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     APIC_init();
     
+    AcpiPM acpi;
+    acpiadd = reinterpret_cast<u64>(&acpi);
+
     ioapic_route_keyboard((u8)(ioapic_read(0x20) >> 24));
 
     printf("ps/2 controller init status: 0x%b\n", ps2_controller_init());
@@ -311,6 +328,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         wait_ms(*timer.Src, 1000);
     }
 
+    GlobalUSB USB;
 
     printf("\n");
     printf("Current timer tick is: %lx\n", timer.Src->read());

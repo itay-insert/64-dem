@@ -35,6 +35,8 @@ void MMIO_write16(u64 base, u64 offset, u16 value);
 u8 MMIO_read8(u64 base, u64 offset);
 void MMIO_write8(u64 base, u64 offset, u8 value);
 u64 Bsf(u64 mp);
+u64 read_tsc(void);
+u64 tsc_freq(void);
 
 KERNEL_EXTERN_C_END
 

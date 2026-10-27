@@ -5,10 +5,40 @@
 #include "drivers/pci/pci.h"
 #include "drivers/usb/usb.hpp"
 #include "drivers/timers/timer.hpp"
-
+#include "drivers/usb/uhci.hpp"
+#include "drivers/usb/ohci.hpp"
+#include "drivers/usb/ehci.hpp"
+#include "drivers/usb/xhci.hpp"
 
 extern u64 timeradd;
 
+typedef struct {
+    u8 class_code;
+    u8 subclass;
+    u8 prog_if;
+    u8 count;
+} USBCount;
+
+u16 *segment = NULL;
+u8 *bus = NULL;
+u8 *Device = NULL;
+u8 *function = NULL;
+
+u8 Addr_count = 0;
+
+void usb_count_controllers(const PCI_ret *device, void *context) {
+    USBCount *Match = static_cast<USBCount *>(context);
+
+    if (device->PCI_status != PCI_STATUS_SUCCESS)
+        return;
+
+    if (device->common.class_code != Match->class_code || 
+        device->common.subclass !=  Match->subclass ||
+        device->common.prog_if != Match->prog_if)
+        return;
+
+    Match->count++;
+}
 
 void usb_find_callback(const PCI_ret *device, void *context) {
     usb_controller_t *controller = static_cast<usb_controller_t *>(context);
@@ -21,6 +51,13 @@ void usb_find_callback(const PCI_ret *device, void *context) {
         device->common.prog_if != controller->prog_if)
         return;
 
+    for (u8 i = 0; i < Addr_count; i++) {
+        if (device->Segment == segment[i] &&
+            device->Bus == bus[i] && device->Device == Device[i] &&
+            device->Function == function[i])
+            return;
+
+    }
 
     controller->pci_address = (pci_address_t) {
         .segment  = device->Segment,
@@ -40,13 +77,13 @@ bool usb_controller::discover_controller(usb_controller_t *controller, u8 class_
     controller->class_code = class_code;
     controller->subclass = subclass;
     controller->prog_if = prog_if;
+    
 
     pci_enumerate(usb_find_callback, controller);
 
-    if (!controller->found) {
-        printf("USB: no controller found!\n");
+    if (!controller->found) 
         return false;
-    }
+    
 
     printf("%s controller found at %u:%u:%u.%u\n", str,
         (unsigned int)controller->pci_address.segment,
@@ -116,6 +153,7 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 }
 
 void usb_controller::construct_controller() {
+
     // controller discovery
     bool dists = discover_controller(&controller, class_code, subclass, prog_if, vendor); // find the controller's pci_address
     if (!dists) {
@@ -141,7 +179,62 @@ void usb_controller::construct_controller() {
     
     Timer *timer = reinterpret_cast<Timer *>(timeradd); // get a pointer to the global timer class
     status = controller_init(*timer->Src);
-    ports_count = enumrate_ports();
+
+    if (!status) {
+        ports_count = enumrate_ports();
+    }
+
+    segment[Addr_count] = controller.pci_address.segment;
+    bus[Addr_count] = controller.pci_address.bus;
+    Device[Addr_count] = controller.pci_address.device;
+    function[Addr_count] = controller.pci_address.function;
+
+    Addr_count++;
 }
 
 
+GlobalUSB::GlobalUSB() {
+    class_code = 0x0C;
+    subclass = 0x03;
+    
+    for (prog_if = 0x00; prog_if < 0x40; prog_if += 0x10) {
+        USBCount Match = {
+            class_code, subclass, prog_if, 0
+        };
+
+        pci_enumerate(usb_count_controllers, &Match);
+
+        if (Match.count == 0)
+            continue;
+
+        segment = new u16[Match.count];
+        bus = new u8[Match.count];
+        Device = new u8[Match.count];
+        function = new u8[Match.count];
+
+        Addr_count = 0;
+
+        switch (prog_if) {
+            case 0x00:
+                uhci_controllers = new uhci_controller[Match.count];
+                break;
+
+            case 0x10:
+                ohci_controllers = new ohci_controller[Match.count];
+                break;
+
+            case 0x20:
+                ehci_controllers = new ehci_controller[Match.count];
+                break;
+
+            case 0x30:
+                xhci_controllers = new xhci_controller[Match.count];
+                break;
+        }
+
+        delete[] segment;
+        delete[] bus;
+        delete[] Device;
+        delete[] function;
+    }
+}

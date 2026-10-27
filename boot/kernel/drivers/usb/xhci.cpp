@@ -11,71 +11,6 @@
 #include "drivers/usb/xhci_events.h"
 #include "drivers/usb/xhci.hpp"
 
-#define TIMEOUT 1000000
-
-#define XHCI_CMD_HCRST (1u << 1)
-#define XHCI_STS_HCH (1u << 0)
-#define XHCI_STS_CNR (1u << 11)
-
-
-#define XHCI_EXT_CAP_LEGACY 1
-#define XHCI_LEGACY_BIOS_OWNED (1u << 16)
-#define XHCI_LEGACY_OS_OWNED (1u << 24)
-
-#define XHCI_LEGACY_SMI_ENABLES ((1u << 0) | (1u << 4) | (1u << 13) | (1u << 14) | (1u << 15))
-
-#define CCS (1 << 0) // current connect status
-#define PED (1 << 1) // port enabled
-#define OCA (1 << 3) // over-current active
-#define PR (1 << 4) // port reset
-#define PLS_MASK (0xF << 5) // port link state
-#define U0 (0 << 5) // U0 link state
-#define PRC (1 << 21) // port reset change
-
-#define RESET_TIMEOUT 1000
-
-#define RO_MASK ((1 << 0) | (1 << 3) | (0xF << 10) | (1 << 30))
-#define RWS_MASK ((0xF << 5) | (1 << 9) | (0x3 << 14) | (0x7 << 25))
-
-#define XHCI_PORTSC_BASE 0x400
-#define XHCI_PORTSC_STRIDE 0x10
-
-u64 *scratch_pad = 0;
-u64 *dcbaa = 0;
-u64 scratchpad_physical = 0;
-
-
-typedef struct {
-    uint8_t  caplength;
-    uint8_t  reserved;
-    uint16_t hciversion;
-
-    uint32_t hcsparams1;
-    uint32_t hcsparams2;
-    uint32_t hcsparams3;
-
-    uint32_t hccparams1;
-
-    uint32_t dboff;
-    uint32_t rtsoff;
-
-    uint32_t hccparams2;
-} xhci_cap_regs;
-
-
-typedef struct {
-    uint32_t usbcmd;        
-    uint32_t usbsts;        
-    uint32_t pagesize;      
-    uint32_t rsvd0[2];      
-    uint32_t dnctrl;        
-    uint64_t crcr;          
-    uint32_t rsvd1[4];      
-    uint64_t dcbaap;        
-    uint32_t config;        
-    uint32_t rsvd2[241];
-} xhci_op_regs;
-
 
 
 xhci_controller::xhci_controller() {
@@ -87,8 +22,6 @@ xhci_controller::xhci_controller() {
     controller = {0};
     construct_controller();
 }
-
-u64 xhci_base = 0;
 
 static bool xhci_wait_clear(volatile u32 *reg, u32 mask) {
     u32 attempts = TIMEOUT;
@@ -119,7 +52,7 @@ static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
 }
 
 
-int xhci_reset() {
+int xhci_controller::xhci_reset() {
     volatile xhci_cap_regs *xhci_cap;
     xhci_cap = (volatile xhci_cap_regs *)xhci_base;
 
@@ -168,7 +101,7 @@ int xhci_reset() {
 }
 
 
-int allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
+int xhci_controller::allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
     dma_ret scratchpad = allocate_dma((u64)scratchpad_count * sizeof(u64));
 
     u64 bytes = scratchpad.SizeInPages * 4096;
@@ -200,7 +133,7 @@ int allocate_scracthpad(u32 scratchpad_count, bool addr_64) {
     return 0;
 }
 
-static volatile u32 *xhci_find_extended_capability(volatile xhci_cap_regs *cap, 
+volatile u32 *xhci_controller::xhci_find_extended_capability(volatile xhci_cap_regs *cap, 
 u8 wanted_id) {
     u32 offset = (cap->hccparams1 >> 16) & 0xFFFF;
 
@@ -225,7 +158,7 @@ u8 wanted_id) {
 }
 
 
-static bool xhci_take_ownership(volatile xhci_cap_regs *cap, TimerSource& timer) {
+bool xhci_controller::xhci_take_ownership(volatile xhci_cap_regs *cap, TimerSource& timer) {
     volatile u32 *legacy = xhci_find_extended_capability(cap, XHCI_EXT_CAP_LEGACY);
 
     if (legacy == NULL) {
@@ -352,48 +285,7 @@ static bool xhci_dma_alloc(dma_ret *out, u64 bytes, bool ac64) {
 }
 
 
-struct XhciTrb {
-    u32 d0, d1, d2, d3;
-};
-
-static_assert(sizeof(XhciTrb) == 16);
-
-struct XhciErstEntry {
-    u64 segment_base;
-    u32 segment_size_trbs;
-    u32 reserved;
-};
-static_assert(sizeof(XhciErstEntry) == 16);
-
-struct XhciRings {
-    dma_ret command_dma;
-    dma_ret event_dma;
-    dma_ret erst_dma;
-
-    XhciTrb *command;
-    XhciTrb *event;
-
-    u64 doorbell_base;
-    u64 interrupter0_base;
-    bool ac64;
-
-    u32 command_index = 0;
-    u32 command_cycle = 1;
-    u32 event_index = 0;
-    u32 event_cycle = 1;
-};
-
-static XhciRings rings; // Keep this state after xhci_init() returns.
-
-/* The current command ring permits one outstanding command at a time. */
-static u64 pending_command_physical = 0;
-static XhciTrb pending_command_completion = {};
-static u32 pending_command_done = 0;
-static u32 interrupt_driven = 0;
-static u32 processing_events = 0;
-static u32 pending_port_changes[8] = {};
-
-static bool setup_rings(volatile xhci_cap_regs *cap,
+bool xhci_controller::setup_rings(volatile xhci_cap_regs *cap,
                           volatile xhci_op_regs *op, bool ac64) {
     constexpr u32 TRBS = 256;
     rings.ac64 = ac64;
@@ -442,7 +334,7 @@ static bool setup_rings(volatile xhci_cap_regs *cap,
     return true;
 }
 
-static u64 submit_command(XhciTrb command) {
+u64 xhci_controller::submit_command(XhciTrb command) {
     const u32 index = rings.command_index;
     const u64 physical =
           rings.command_dma.physical_address + index * sizeof(XhciTrb);
@@ -472,7 +364,7 @@ static u64 submit_command(XhciTrb command) {
 
 
 
-static bool poll_event(XhciTrb *out) {
+bool xhci_controller::poll_event(XhciTrb *out) {
     volatile XhciTrb *entry =
           reinterpret_cast<volatile XhciTrb *>(rings.event)
           + rings.event_index;
@@ -494,7 +386,7 @@ static bool poll_event(XhciTrb *out) {
     return true;
 }
 
-extern "C" u32 xhci_process_events(void) {
+extern "C" u32 xhci_controller::xhci_process_events(void) {
     if (rings.event == nullptr)
         return 0;
     if (__atomic_exchange_n(&processing_events, 1u, __ATOMIC_ACQUIRE))
@@ -551,7 +443,7 @@ extern "C" u32 xhci_process_events(void) {
     return processed;
 }
 
-extern "C" int xhci_take_port_change(u8 port_number) {
+extern "C" int xhci_controller::xhci_take_port_change(u8 port_number) {
     if (port_number == 0)
         return 0;
     const u32 mask = 1u << (port_number & 31);
@@ -559,13 +451,13 @@ extern "C" int xhci_take_port_change(u8 port_number) {
                                ~mask, __ATOMIC_ACQ_REL) & mask) != 0;
 }
 
-extern "C" void xhci_set_interrupt_driven(int enabled) {
+extern "C" void xhci_controller::xhci_set_interrupt_driven(int enabled) {
     __atomic_store_n(&interrupt_driven, enabled != 0, __ATOMIC_RELEASE);
 }
 
 
 
-static bool wait_command(TimerSource& timer, u64 command_physical,
+bool xhci_controller::wait_command(TimerSource& timer, u64 command_physical,
                            XhciTrb *completion, u32 timeout_ms) {
     const u64 frequency = timer.read_freq();
     if (frequency == 0) return false;

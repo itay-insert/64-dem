@@ -388,16 +388,19 @@ ACPI_ret ACPI_discovery(const char *signature) {
                 case MADT_sig:
                     MADT *madt = (MADT *)table;
                     ret = handle_APICIO(madt, ret);
+                    ret.table.table1 = madt;
                     return ret;
 
                 case FACP_sig:
                     FADT *fadt = (FADT *)table;
                     ret = handle_PM_timer(fadt, ret);
+                    ret.table.table0 = fadt;
                     return ret;
                         
                 case HPET_sig:
                     ACPI_HPET *hpet = (ACPI_HPET *)table;
                     ret = handle_HPET(hpet, ret);
+                    ret.table.table2 = hpet;
                     return ret;
 
                 case MCFG_sig:

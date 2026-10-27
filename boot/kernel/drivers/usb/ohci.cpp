@@ -65,7 +65,6 @@ ohci_controller::ohci_controller() {
 #define RESET_TIMEOUT 20
 #define RESET_PULSES 5
 
-u64 ohci_base = 0;
 
 int ohci_controller::controller_init(TimerSource &timer) {
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
@@ -127,6 +126,7 @@ int ohci_controller::controller_init(TimerSource &timer) {
     }
 
     memset((void *)alloc.virtual_address, 0, 256); // zero-initialize the 256-byte HCCA
+    HCCA_base = alloc.virtual_address;
 
     u32 HcFmInterval = ohci_regs->fm_interval; // save the HcFmInterval from the Fm_interval register
 
@@ -168,15 +168,6 @@ int ohci_controller::controller_init(TimerSource &timer) {
     return 0;
 }
 
-static inline u32 ohci_read_register(u64 offset) {
-    volatile u32 *ohci_ptr = (volatile u32 *)(ohci_base + offset);
-    return (u32)(*ohci_ptr);
-}
-
-static inline u32 ohci_read_port(u8 port) {
-    u64 offset = 0x54 + (port << 2); // offset = 0x54 + (port * 4)
-    return ohci_read_register(offset);
-}
 
 
 int ohci_controller::enumrate_ports() {
@@ -203,7 +194,7 @@ int ohci_controller::reset_port(u8 port, TimerSource &timer) {
     if (port < 1 || port > ports_count)
         return INVALID_PORT;
 
-    u64 port_base = controller.io_base + 0x54 + ((port - 1) << 1); // calculate the port_base address
+    u64 port_base = controller.io_base + 0x54 + ((port - 1) << 2); // calculate the port_base address
 
     volatile u32 *port_reg = (volatile u32 *)port_base;
 
@@ -219,7 +210,7 @@ int ohci_controller::reset_port(u8 port, TimerSource &timer) {
 
     bool idle = false; // wait for any reset in progress to finish
 
-    for (u32 elasped = 0; elapsed < RESET_TIMEOUT; elasped++) {
+    for (u32 elapsed = 0; elapsed < RESET_TIMEOUT; elapsed++) {
         status = *port_reg;
 
         if (status == 0xFFFFFFFF)

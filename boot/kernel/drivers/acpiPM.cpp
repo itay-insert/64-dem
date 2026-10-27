@@ -7,8 +7,16 @@
 
 
 AcpiPM::AcpiPM() {
+    regs = {};
     ACPI_ret ret = ACPI_discovery("FACP");
     FADT *fadt = ret.table.table0;
+    if (fadt == nullptr) {
+        printf("ACPI: FADT unavailable, using keyboard controller reset\n");
+        regs.Reset.reset_reg.address = 0x64;
+        regs.Reset.reset_reg.address_space_id = IO;
+        regs.Reset.reset_value = 0xFE;
+        return;
+    }
     regs.pm1a_event = fadt->pm1a_event_block;
     regs.pm1b_event = fadt->pm1b_event_block;
     regs.pm1a_control = fadt->pm1a_control_block;

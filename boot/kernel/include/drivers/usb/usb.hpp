@@ -31,6 +31,7 @@ typedef struct {
     u8 class_code;
     u8 subclass;
     u8 prog_if;
+    u8 index;
 } usb_controller_t;
 
 typedef struct {
@@ -58,6 +59,7 @@ typedef struct {
     u16 vendor_id;
     u16 product_id;
 
+    usb_controller_t *controller;
     usb_device_descriptor descriptor;
 } usb_device;
 
@@ -87,8 +89,21 @@ class usb_controller {
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
-        
 
+};
+
+
+class GlobalUSB {
+    public: 
+        u8 class_code;
+        u8 subclass;
+        u8 prog_if;
+        usb_controller *xhci_controllers;
+        usb_controller *ehci_controllers;
+        usb_controller *ohci_controllers;
+        usb_controller *uhci_controllers;
+        GlobalUSB();
+        
 };
 
 

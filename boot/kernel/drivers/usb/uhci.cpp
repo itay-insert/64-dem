@@ -111,7 +111,7 @@ int uhci_controller::controller_init(TimerSource &timer) {
         printf("UHCI: Frame List allocation failed\n");  // handle allocation failure 
         return 1;
     }
-    u32 *frame_list = (u32 *)ret.virtual_address;
+    frame_list = (u32 *)ret.virtual_address;
 
     for (int i = 0; i < UHCI_FRAME_COUNT; i++)
         frame_list[i] = UHCI_LINK_TERMINATE; // fill all the frame list entries as disabled
@@ -187,7 +187,7 @@ int uhci_controller::reset_port(u8 port, TimerSource &timer) {
 
     // assert reset
     outw(reg, (status & 0x1FF & ~UHCI_W1C_MASK) | PR);
-    wait_ms(timer, 50)
+    wait_ms(timer, 50);
 
     // deassert reset
     status = inw(reg);

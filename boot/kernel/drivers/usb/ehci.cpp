@@ -166,13 +166,15 @@ int ehci_controller::controller_init(TimerSource &timer) {
         return 1; // abort if physical address too big
     }
 
-    u32 *Frame_list = (u32 *)PerFrameList.virtual_address;
+    Frame_list = (u32 *)PerFrameList.virtual_address;
     for (int i = 0; i < 1024; i++) 
         Frame_list[i] = 1; // fill all the 1024 periodic frame list entries with TERMINATE (1)
     
     PERIODICLISTBASE = (u32)PerFrameList.physical_address;
 
-    USBCMD = (USBCMD & ~((1u << 4) | (1u << 5))) | 1u; // start EHCI with periodic and async schedules disabled
+    // The periodic list contains only terminated entries. Keeping it enabled
+    // advances FRINDEX without submitting any transfers.
+    USBCMD = (USBCMD & ~(1u << 5)) | (1u << 4) | 1u;
     op_regs->config_flag = 1u;
 
     ms = 0;
@@ -186,10 +188,15 @@ int ehci_controller::controller_init(TimerSource &timer) {
         return 1;
     }
 
-    u32 before = FRINDEX;
-    wait_ms(timer, 1);
-    u32 after = FRINDEX;
-    if (before == after) {
+    const u32 before = FRINDEX;
+    for (u32 elapsed = 0; elapsed < 100 && FRINDEX == before; elapsed++) {
+        wait_ms(timer, 1);
+        if (USBSTS & HCHalted) {
+            printf("EHCI: controller halted while waiting for frame_index\n");
+            return 1;
+        }
+    }
+    if (FRINDEX == before) {
         printf("EHCI: frame_index not advancing\n");
         return 1;
     }
@@ -217,7 +224,7 @@ int ehci_controller::enumrate_ports() {
         u32 status = ehci_read_port(op_base, port);
         ports[port].port_number = port + 1;
         ports[port].port_status = status;
-        ports[port].connected = (status & CSS);
+        ports[port].connected = (status & CCS);
         ports[port].controller_type = EHCI;
     }
 

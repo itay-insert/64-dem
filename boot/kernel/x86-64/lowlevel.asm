@@ -29,7 +29,8 @@ global MMIO_write16
 global MMIO_read8
 global MMIO_write8
 global Bsf
-
+global read_tsc
+global tsc_freq
 
 section .text
 
@@ -240,3 +241,44 @@ no_bit:
 mov rax, 64
 ret
 
+read_tsc:
+rdtsc
+mov [rel low], eax
+mov [rel high], edx
+mov eax, [rel high]
+shl rax, 32
+mov edx, [rel low]
+add rax, rdx
+ret
+
+low dd 0
+high dd 0
+
+tsc_freq:
+push rbx
+mov eax, 0x15  ; cpuid leaf 0x15
+cpuid
+test eax, eax
+jz .invalid
+test ebx, ebx
+jz .invalid
+test ecx, ecx
+jz .invalid
+xor edx, edx
+mov esi, eax ; store eax in esi for later use
+mov eax, ebx
+mul ecx ; multiply eax by ecx
+div esi ;  divide by esi to get the tsc frequency
+mov [rel low], eax
+mov [rel high], edx
+mov eax, [rel high]
+shl rax, 32
+mov edx, [rel low]
+add rax, rdx
+pop rbx
+ret
+
+.invalid:
+mov eax, 0x3B9ACA00 ; 1 ghz as an assumption
+pop rbx
+ret

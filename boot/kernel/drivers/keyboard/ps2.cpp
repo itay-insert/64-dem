@@ -2,8 +2,11 @@
 #include "drivers/keyboard/keyboard.hpp"
 #include "drivers/keyboard/ps2.hpp"
 #include "x86-64/memory/memory.h"
+#include "drivers/acpiPM.hpp"
 
 extern GlobalKeyboard *globalkeyboard;
+
+extern u64 acpiadd;
 
 void PS2K::init() {
     memcpy(vendor, "PS2", 4);
@@ -289,6 +292,11 @@ extern "C" void keyboard_handler() {
 
     if (status & 1) {
         u8 scancode = inb(0x60);
+        if (scancode == 0x57) {
+            AcpiPM *acpi = (AcpiPM *)acpiadd;
+            acpi->AcpiReset();
+        }
+            
         globalkeyboard->keyboards[0]->buffer[globalkeyboard->keyboards[0]->scancode_top] = scancode;
         globalkeyboard->keyboards[0]->scancode_top++;
         char ascii = scancode_to_ascii(scancode);
