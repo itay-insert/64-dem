@@ -46,21 +46,9 @@ extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
 
-extern u32 vga16_color[16];
+
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
-    volatile u32 *fb = (volatile u32 *)info64->framebuffer_base;
-    for (u32 i = 0; i < 16; i++) {
-        for (int j = 0; j < (info32->horizontal_resolution*info32->vertical_resolution); j++) {
-            fb[j] = vga16_color[i];
-        }
-    }
-    wait_secs(1);
-    for (int i = 14; i >= 0; i--) {
-        for (int j = 0; j < (info32->horizontal_resolution*info32->vertical_resolution); j++) {
-            fb[j] = vga16_color[i];
-        }
-    }
     wait_secs(1);
 
     qemu_debug_print("[kernel] entered kernel_main\n");
