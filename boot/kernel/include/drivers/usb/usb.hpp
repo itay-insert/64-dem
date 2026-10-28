@@ -23,6 +23,15 @@
 #define OLD_FLAG_DID_NOT_CLEAR 9
 #define INVALID_STATUS 10
 
+
+typedef struct {
+    u8 BmRequestType;
+    u8 bRequest;
+    u16 wValue;
+    u16 wIndex;
+    u16 wLength;
+} usb_setup_packet;
+
 typedef struct {
     bool found;
     pci_address_t pci_address;
@@ -89,6 +98,7 @@ class usb_controller {
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
+        virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
 
 };
 

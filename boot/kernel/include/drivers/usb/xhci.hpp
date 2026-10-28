@@ -136,6 +136,7 @@ u8 wanted_id);
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
+        usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         xhci_controller();
 
 };

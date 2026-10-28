@@ -216,3 +216,8 @@ int uhci_controller::reset_port(u8 port, TimerSource &timer) {
         return RESET_SUCCESS;
     else return RESET_FAILED;
 }
+
+
+usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &timer) {
+    
+}
