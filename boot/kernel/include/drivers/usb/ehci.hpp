@@ -5,6 +5,9 @@
 class ehci_controller : public usb_controller {
     private:
         u32 *Frame_list;
+        u64 port_to_address(u8 port);
+        int disable_port(u8 port, TimerSource &timer);
+
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();

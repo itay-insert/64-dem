@@ -152,6 +152,31 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 
 }
 
+
+usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
+    usb_device device = {0};
+    pci_address_t pci_address = controller.pci_address;
+    u32 segment = (u32)pci_address.segment;
+    u32 bus = (u32)pci_address.bus;
+    u32 device = (u32)pci_address.device;
+    u32 function = (u32)pci_address.function
+
+    int rests = reset_port(port, timer);
+    if (rests != RESET_SUCCESS) {
+        printf("%s at %u:%u:%u.%u: resetting port %b failed, error_code(%u): %s\n", vendor, 
+            segment, 
+            bus, 
+            device, 
+            function, port, rests, codes[rests-1]);
+        device.discovered = false;
+        return device;
+    }
+
+
+
+
+}
+
 void usb_controller::construct_controller() {
 
     // controller discovery
@@ -182,8 +207,15 @@ void usb_controller::construct_controller() {
 
     if (!status) {
         ports_count = enumrate_ports();
-        for (int i = 0; i < ports_count; i++) 
-            reset_port(ports[i].port_number, timer);
+
+        for (int i = 0; i < ports_count; i++) {
+            if (ports[i].connected) {
+                ports[i].device = new usb_device{};
+                usb_device device = *ports[i].device;
+                device = get_device(ports[i].port_number, timer);
+                *ports[i].device = device;
+            }
+        }
         
     }
 
@@ -194,6 +226,7 @@ void usb_controller::construct_controller() {
 
     Addr_count++;
 }
+
 
 
 GlobalUSB::GlobalUSB() {

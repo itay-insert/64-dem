@@ -29,6 +29,9 @@
 #define UHCI_CMD_RS 0x0001
 #define UHCI_STS_HCH 0x0020
 
+#define CLEAR_PE ~(PE | UHCI_W1C_MASK | UHCI_WZ_MASK)
+
+
 typedef enum {
     UHCI_USBCMD = 0x00,  // USB command
     UHCI_USBSTS = 0x02,  // USB status
@@ -39,6 +42,48 @@ typedef enum {
     UHCI_PORTSC1 = 0x10, // USB port 1 status and control
     UHCI_PORTSC2 = 0x12 // USB port 2 status and control
 } UHCI_Regs;
+
+typedef struct uhci_td uhci_td;
+
+struct alignas(16) uhci_td {
+    u32 link;
+    u32 status;
+    u32 token;
+    u32 buffer;
+};
+
+static_assert(sizeof(uhci_td) == 16);
+
+typedef struct uhci_qh uhci_qh;
+
+struct alignas(16) uhci_qh {
+    u32 head_link;
+    u32 element_link;
+    u32 reserved[2];
+};
+
+static_assert(sizeof(uhci_qh) == 16);
+
+namespace uhci {
+    namespace pid {
+        constexpr u8 setup = 0x2D;
+        constexpr u8 in    = 0x69;
+        constexpr u8 out   = 0xE1;
+    }
+
+    namespace td {
+        constexpr u32 active       = 1u << 23;
+        constexpr u32 interrupt   = 1u << 24;
+        constexpr u32 low_speed   = 1u << 26;
+        constexpr u32 error_count = 3u << 27;
+
+        // Length is encoded as (length - 1).
+        // A zero-length transaction is encoded as 0x7FF.
+        constexpr u32 encode_length(u32 length) {
+            return length == 0 ? 0x7FFu : length - 1;
+        }
+    }
+}
 
 uhci_controller::uhci_controller() {
     memcpy(vendor, "UHCI", sizeof(vendor));
@@ -217,7 +262,52 @@ int uhci_controller::reset_port(u8 port, TimerSource &timer) {
     else return RESET_FAILED;
 }
 
+int uhci_controller::disable_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > 2)
+        return INVALID_PORT;
+
+    u16 reg = (u16)(controller.io_base + 0x10 + ((port - 1) << 1));
+    u16 status = inw(reg);
+
+    if (status == 0xFFFF)
+        return INVALID_STATUS;
+
+    status &= CLEAR_PE;
+    
+
+    outw(reg, status);
+
+    for (int i = 0; i < 100; i++) { // poll the status with 100 ms timeout
+        status = inw(reg);
+        if (!(status & PE)) 
+            break;
+        wait_ms(timer, 1);
+    }
+
+    return (status & PE) ? RESET_FAILED : RESET_SUCCESS;
+
+}
 
 usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &timer) {
+    usb_device_descriptor device_descriptor = {0};
+    dma_ret alloc = allocate_dma(128);
+    if (alloc.physical_address > 0xffffffff) {
+        printf("UHCI: Setup packet address too big\n");
+        return device_descriptor;
+    }
+
+    uhci_qh *setup_qh = (uhci_qh *)alloc.virtual_address;
+    uhci_td *setup_td = (uhci_td *)(alloc.virtual_address + 16);
+    uhci_td *data_td = (uhci_td *)(alloc.virtual_address + 16 + 32);
+    uhci_td *status_td = (uhci_td *)(alloc.virtual_address + 16 + 64);
+    usb_setup_packet *setup = (usb_setup_packet *)(alloc.virtual_address + 16 + 64 + 32);
+    setup_qh->head_link = 1;
+    setup_qh->element_link = (u32)(alloc.physical_address + ((u64)setup_td - alloc.virtual_address));
+    setup_qh->reserved[0] = 0;
+    setup_qh->reserved[1] = 0;
+
+    setup_td->link = (u32)(alloc.physical_address + ((u64)data_td - alloc.virtual_address));
+    setup_td->status = uhci::td::active;
+    setup_td->token =
     
 }

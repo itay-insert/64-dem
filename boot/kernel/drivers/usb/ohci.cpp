@@ -190,11 +190,16 @@ int ohci_controller::enumrate_ports() {
 
 }
 
+static inline u64 port_to_address(u8 port, u64 io_base) {
+    return (io_base + 0x54 + ((port - 1) << 2));  // calculate the port_base address
+}
+
+
 int ohci_controller::reset_port(u8 port, TimerSource &timer) {
     if (port < 1 || port > ports_count)
         return INVALID_PORT;
 
-    u64 port_base = controller.io_base + 0x54 + ((port - 1) << 2); // calculate the port_base address
+    u64 port_base = port_to_address(port, controller.io_base);
 
     volatile u32 *port_reg = (volatile u32 *)port_base;
 
@@ -289,4 +294,27 @@ int ohci_controller::reset_port(u8 port, TimerSource &timer) {
         return RESET_FAILED;
 
     return RESET_SUCCESS;
+}
+
+
+int ohci_controller::disable_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+
+    u64 port_base = port_to_address(port, controller.io_base);
+    volatile u32 *port_reg = (volatile u32 *)port_base;
+
+    if (*port_reg == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    *port_reg = CCS; // write CCS command to disable port
+    (void)*port_reg; // read to flush MMIO write
+
+    for (int i = 0; i < 100; i++) { // poll the status with 100 ms timeout
+        if ((*port_reg & PES) == 0) 
+            break;
+        wait_ms(timer, 1);
+    }
+
+    return (*port_reg & PES) ? RESET_FAILED : RESET_SUCCESS; 
 }

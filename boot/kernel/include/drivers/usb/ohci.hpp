@@ -17,6 +17,8 @@ class ohci_controller : public usb_controller {
             return ohci_read_register(offset);
         }
 
+        int disable_port(u8 port, TimerSource &timer);
+
 
 
     public:

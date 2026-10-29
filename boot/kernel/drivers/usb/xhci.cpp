@@ -734,3 +734,37 @@ int xhci_controller::reset_port(u8 port, TimerSource &timer) {
 
     return RESET_FAILED;
 }
+
+
+u64 xhci_controller::port_to_address(u8 port) {
+    volatile xhci_cap_regs *cap_regs = (volatile xhci_cap_regs *)controller.io_base;
+
+    u64 op_base = controller.io_base + (u64)cap_regs->caplength;
+    u64 port_base = op_base + XHCI_PORTSC_BASE + ((port - 1) * XHCI_PORTSC_STRIDE);
+    return port_base;
+}
+
+
+int xhci_controller::disable_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+
+    volatile u32 *portsc = (volatile u32 *)port_to_address(port);
+
+    u32 status = *portsc;
+    if (status == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    status &= ~PR;   // don't request reset simultaneously
+    status |= ~PED; // writing 1 to the PED bit to disable the port
+    *portsc = status;
+    (void)*portsc; // register read to flush MMIO write
+
+    for (int i = 0; i < 100; i++) {  // poll with a 100 ms timeout
+        if ((*portsc & PED) == 0)
+            break;
+        wait_ms(timer, 1); // wait 1 milesecond
+    }
+
+    return (*portsc & PED) ? RESET_FAILED : RESET_SUCCESS;
+}

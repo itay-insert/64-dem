@@ -5,6 +5,7 @@
 class uhci_controller : public usb_controller {
     private:
         u32 *frame_list;
+        int disable_port(u8 port, TimerSource &timer);
 
     public:
         int controller_init(TimerSource &timer) override;

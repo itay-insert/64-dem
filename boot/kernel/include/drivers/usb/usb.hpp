@@ -2,6 +2,11 @@
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
 
+
+#define OUT 0x00
+#define IN 0x80
+#define GET_DESCRIPTOR 0x06
+
 #define MMIO 0
 #define IO 1
 
@@ -23,6 +28,18 @@
 #define OLD_FLAG_DID_NOT_CLEAR 9
 #define INVALID_STATUS 10
 
+const char *codes[] = {
+    "NO_DEVICE",
+    "RESET_STILL_ASSERTED", 
+    "RESET_FAILED",  
+    "INVALID_PORT", 
+    "CONTROLLER_HALTED",
+    "COMPANION_REQUIRED",
+    "PORT_BUSY",
+    "OVER_CURRENT_CONDITION", 
+    "OLD_FLAG_DID_NOT_CLEAR",
+    "INVALID_STATUS" 
+};
 
 typedef struct {
     u8 BmRequestType;
@@ -67,6 +84,7 @@ typedef struct {
 
     u16 vendor_id;
     u16 product_id;
+    bool discovered;
 
     usb_controller_t *controller;
     usb_device_descriptor descriptor;
@@ -95,6 +113,7 @@ class usb_controller {
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
         void MapController(usb_controller_t *controller, u8 type);
         void construct_controller(void);
+        usb_device get_device(u8 port, TimerSource &timer);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;

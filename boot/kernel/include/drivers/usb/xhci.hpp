@@ -131,12 +131,14 @@ u8 wanted_id);
         bool xhci_take_ownership(volatile xhci_cap_regs *cap, TimerSource& timer);
         
         int allocate_scracthpad(u32 scratchpad_count, bool addr_64);
+        u64 port_to_address(u8 port)
+        int disable_port(u8 port, TimerSource &timer);
                         
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
-        usb_device_descriptor identify_device(u8 port, TimerSource &timer);
+        usb_device identify_device(u8 port, TimerSource &timer);
         xhci_controller();
 
 };

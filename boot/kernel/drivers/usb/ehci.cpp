@@ -355,3 +355,38 @@ int ehci_controller::reset_port(u8 port, TimerSource &timer) {
     return COMPANION_REQUIRED;
 
 }
+
+
+u64 ehci_controller::port_to_address(u8 port) {
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+
+    u64 op_base = controller.io_base + (u64)cap_regs->cap_length;
+
+    u64 port_base = op_base + EHCI_PORTSC + (u64)((port - 1) << 2);
+    return port_base;
+}
+
+int ehci_controller::disable_port(u8 port, TimerSource &timer) {
+    if (port < 1 || port > ports_count)
+        return INVALID_PORT;
+    
+    volatile u32 *portsc = (volatile u32 *)port_to_address(port);
+    
+    u32 value = *portsc;
+
+    if (value == 0xFFFFFFFF)
+        return INVALID_STATUS;
+
+    value &= ~W1C_MASK;
+    value &= ~PE;
+    *portsc = value; // write to disable the port
+    (void)*portsc; // register read to flush MMIO write
+
+    for (int i = 0; i < 100; i++) { // poll the status with 100 ms timeout
+        if ((*portsc & PE) == 0)
+            break;
+        wait_ms(timer, 1);
+    }
+
+    return (*portsc & PE) ? RESET_FAILED : RESET_SUCCESS;
+}
