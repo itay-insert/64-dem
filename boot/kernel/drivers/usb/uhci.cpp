@@ -50,6 +50,9 @@ struct alignas(16) uhci_td {
     u32 status;
     u32 token;
     u32 buffer;
+
+
+    u32 software[4];
 };
 
 static_assert(sizeof(uhci_td) == 16);
@@ -84,6 +87,18 @@ namespace uhci {
         }
     }
 }
+
+constexpr u32 UHCI_LINK_TERMINATE = 1u;
+constexpr u32 UHCI_LINK_QH        = 2u;
+constexpr u32 UHCI_LINK_DEPTH     = 4u;
+
+constexpr u32 TD_ACTIVE      = 1u << 23;
+constexpr u32 TD_IOC         = 1u << 24;
+constexpr u32 TD_LOW_SPEED   = 1u << 26;
+constexpr u32 TD_ERROR_COUNT = 3u << 27;
+constexpr u32 TD_SPD         = 1u << 29;
+
+constexpr u32 TD_ACTLEN_INIT = 0x7FFu;
 
 uhci_controller::uhci_controller() {
     memcpy(vendor, "UHCI", sizeof(vendor));
@@ -288,6 +303,51 @@ int uhci_controller::disable_port(u8 port, TimerSource &timer) {
 
 }
 
+enum class uhci_transfer_result {
+    success,
+    timeout,
+    transfer_error
+};
+
+uhci_transfer_result wait_for_descriptor(volatile uhci_td *setup_td, volatile uhci_td *data_td, volatile uhci_td *status_td, 
+TimerSource &timer, u32 &received_bytes) {
+    received_bytes = 0;
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+        u32 setup_status = setup_td->status;
+        u32 data_status = data_td->status;
+        u32 status_status = status_td->status;
+
+         // If a TD has stopped and reports an error, fail.
+        if ((!(setup_status & uhci::td_status::active) &&
+              (setup_status & uhci::td_status::error_mask)) ||
+            (!(data_status & uhci::td_status::active) &&
+              (data_status & uhci::td_status::error_mask)) ||
+            (!(status_status & uhci::td_status::active) &&
+              (status_status & uhci::td_status::error_mask))) {
+            return uhci_transfer_result::transfer_error;
+        }
+
+        // All three stages must finish.
+        if (!(setup_status  & uhci::td_status::active) &&
+            !(data_status   & uhci::td_status::active) &&
+            !(status_status & uhci::td_status::active)) {
+
+            // UHCI encodes actual length as (length - 1).
+            // 0x7FF therefore represents zero bytes.
+            received_bytes =
+                ((data_status &
+                  uhci::td_status::actual_length_mask) + 1) & 0x7FF;
+
+            return uhci_transfer_result::success;
+        }
+
+        wait_ms(timer, 1);
+
+    }
+
+    return uhci_transfer_result::timeout;
+}
+
 usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
     dma_ret alloc = allocate_dma(128);
@@ -301,13 +361,84 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     uhci_td *data_td = (uhci_td *)(alloc.virtual_address + 16 + 32);
     uhci_td *status_td = (uhci_td *)(alloc.virtual_address + 16 + 64);
     usb_setup_packet *setup = (usb_setup_packet *)(alloc.virtual_address + 16 + 64 + 32);
+
+    *setup = {
+        0x80,
+        0x06,
+        0x0100,
+        0x0000,
+        8
+    };
+
     setup_qh->head_link = 1;
     setup_qh->element_link = (u32)(alloc.physical_address + ((u64)setup_td - alloc.virtual_address));
     setup_qh->reserved[0] = 0;
     setup_qh->reserved[1] = 0;
 
-    setup_td->link = (u32)(alloc.physical_address + ((u64)data_td - alloc.virtual_address));
-    setup_td->status = uhci::td::active;
+    setup_td->link = (u32)(alloc.physical_address + ((u64)data_td - alloc.virtual_address)) | UHCI_LINK_DEPTH;
+    setup_td->status = uhci::td::active | TD_ERROR_COUNT;
     setup_td->token =
+        0x2D |             // SETUP PID
+        (0u << 8) |        // Address 0
+        (0u << 15) |       // Endpoint 0
+        (0u << 19) |       // DATA0
+        (7u << 21);
+    setup_td->buffer = (u32)(alloc.physical_address + ((u64)setup - alloc.virtual_address));
+
+
+    data_td->link = (u32)(alloc.physical_address + ((u64)status_td - alloc.virtual_address)) | UHCI_LINK_DEPTh;
+    data_td->status = TD_ACTIVE |
+    TD_ERROR_COUNT |
+    TD_ACTLEN_INIT;            // Request interrupt on completion
+
+    data_td->token = 
+         0x69 |             // IN PID
+        (0u << 8) |        // Address 0
+        (0u << 15) |       // Endpoint 0
+        (1u << 19) |       // DATA1
+        (7u << 21);        // Up to eight bytes
+    data_td->buffer = (u32)(alloc.physical_address + ((u64)setup + 8 - alloc.virtual_address));
+
+
+    status_td->link = UHCI_LINK_TERMINATE;
+    status_td->status =
+    TD_ACTIVE |
+    TD_ERROR_COUNT |
+    TD_ACTLEN_INIT |
+    TD_IOC;            // Request interrupt on completion
+
+    status_td->token =
+        0xE1 |             // OUT PID
+        (0u << 8) |        // Address 0
+        (0u << 15) |       // Endpoint 0
+        (1u << 19) |       // DATA1
+        (0x7FFu << 21);    // Zero-length transaction
+
+    status_td->buffer = 0; // Unused for zero-length status
+
+    u32 qh_phys = (u32)alloc.physical_address;
+
+    for (u32 i = 0; i < 1024; i++) {
+        frame_list[i] = qh_phys | 0x2u;
+    }
+
+    u32 recieved = 0;
+
+    auto result = wait_for_descriptor(setup_td, data_td, status_td, timer, recieved);
+    if (result != uhci_transfer_result::success) {
+        printf("UHCI: device descriptor transfer error\n");
+        return device_descriptor;
+    }
+
+    usb_device_descriptor *desc = (usb_device_descriptor *)((u64)setup + 8);
+
+    if (desc->bLength == 0x12 && desc->bDescriptorType == 0x01) {
+        usb_device_descriptor *device_ptr = &device_descriptor;
+        memcpy(device_ptr, desc, 8);
+
+    }
+
+    free_dma(alloc.virtual_address);
     
+    return device_descriptor;
 }
