@@ -348,8 +348,34 @@ TimerSource &timer, u32 &received_bytes) {
     return uhci_transfer_result::timeout;
 }
 
+
+bool wait_for_halted(u16 io_base, TimerSource &timer) {
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+        if (inw(io_base+UHCI_USBSTS) & UHCI_STS_HCH)
+            return true;
+        
+        wait_ms(timer, 1);
+    }
+
+    return (inw(io_base+UHCI_USBSTS) & UHCI_STS_HCH) != 0;
+}
+
+
+bool wait_for_start(u16 io_base, TimerSource &timer) {
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+        if (!(inw(io_base+UHCI_USBSTS) & UHCI_STS_HCH))
+            return true;
+
+        wait_ms(timer, 1);
+    }
+
+    return (inw(io_base+UHCI_USBSTS) & UHCI_STS_HCH) == 0;
+}
+
 usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
+
+    u16 io_base = (u16)controller.io_base;
     dma_ret alloc = allocate_dma(128);
     if (alloc.physical_address > 0xffffffff) {
         printf("UHCI: Setup packet address too big\n");
@@ -418,15 +444,62 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
 
     u32 qh_phys = (u32)alloc.physical_address;
 
+
+    u16 old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: failed to halt controller\n");
+        free_dma(alloc.virtual_address);
+        return device_descriptor;
+    }
+
+    u32 *backup = new u32[1024];
+
     for (u32 i = 0; i < 1024; i++) {
+        backup[i] = frame_list[i];
         frame_list[i] = qh_phys | 0x2u;
     }
+
+    asm volatile("mfence" ::: "memory");
+    outw(io_base+UHCI_USBCMD, (old_command | 1u));
+
+    if (!wait_for_start(io_base, timer)) {
+        printf("UHCI: failed to start controller\n");
+        free_dma(alloc.virtual_address);
+        delete[] backup;
+        return device_descriptor;
+    }
+
 
     u32 recieved = 0;
 
     auto result = wait_for_descriptor(setup_td, data_td, status_td, timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: device descriptor transfer error\n");
+        old_command = inw(io_base+UHCI_USBCMD);
+        outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+
+        if (!wait_for_halted(io_base, timer)) {
+            printf("UHCI: failed to halt controller\n");
+            free_dma(alloc.virtual_address);
+            delete[] backup;
+            return device_descriptor;
+        }
+
+        for (u32 i = 0; i < 1024; i++) {
+            frame_list[i] = backup[i];
+        }
+        asm volatile("mfence" ::: "memory");
+        outw(io_base+UHCI_USBCMD, (old_command | 1u));
+
+        if (!wait_for_start(io_base, timer)) {
+            printf("UHCI: failed to start controller\n");
+        }
+
+        delete[] backup;
+
+        free_dma(alloc.virtual_address);
         return device_descriptor;
     }
 
@@ -438,6 +511,29 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
 
     }
 
+
+    old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: failed to halt controller\n");
+        free_dma(alloc.virtual_address);
+        delete[] backup;
+        return device_descriptor;
+    }
+
+    for (u32 i = 0; i < 1024; i++) {
+        frame_list[i] = backup[i];
+    }
+
+    asm volatile("mfence" ::: "memory");
+    outw(io_base+UHCI_USBCMD, (old_command | 1u));
+
+    if (!wait_for_start(io_base, timer)) {
+        printf("UHCI: failed to start controller\n");
+    }
+
+    delete[] backup;
     free_dma(alloc.virtual_address);
     
     return device_descriptor;

@@ -555,6 +555,7 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
     auto result = wait_for_descriptor(setup_td, data_td, status_td, timer, recieved);
     if (result != ohci_transfer_result::success) {
         printf("OHCI: device descriptor transfer error\n");
+        free_dma(alloc.virtual_address);
         return device_descriptor;
     }
 
