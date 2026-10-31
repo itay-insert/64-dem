@@ -80,6 +80,11 @@ ehci_controller::ehci_controller() { // initialize the ehci_controller fields
 
 #define ASS (1u << 15)
 
+#define EHCI_USBCMD_IAAD  (1u << 6)
+#define EHCI_USBSTS_IAA   (1u << 5)
+
+#define EHCI_QTD_ACTIVE   (1u << 7)
+
 int ehci_controller::controller_init(TimerSource &timer) {
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base; // ehci_cap_regs is at controller.io_base
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + cap_regs->cap_length); // adding cap_length to get op_regs base
@@ -519,7 +524,19 @@ ehci_transfer_result wait_for_descriptor(
 }
 
 
-void insert_async_qh(ehci_qh *head, u32 head_phys, ehci_qh *qh, u32 qh_phys) {
+struct ehci_async_link_state {
+    ehci_qh* previous;
+    ehci_qh* inserted;
+    u32 old_next;
+    bool linked;
+};
+
+void insert_async_qh(ehci_qh *head, u32 head_phys, ehci_qh *qh, u32 qh_phys, ehci_async_link_state& state) {
+    state.previous = head;
+    state.inserted = qh;
+    state.old_next = head->horizontal_link;
+    state.linked = true;
+
     // Preserve the previous successor.
     u32 old_next = head->horizontal_link;
 
@@ -535,8 +552,61 @@ void insert_async_qh(ehci_qh *head, u32 head_phys, ehci_qh *qh, u32 qh_phys) {
 }
 
 
+bool unlink_async_qh(volatile ehci_op_regs_t* regs, ehci_async_link_state& state, ehci_qh* qh,
+     ehci_qtd* setup_qtd, ehci_qtd* data_qtd, ehci_qtd* status_qtd, TimerSource &timer) {
+        if (!state.linked)
+            return true;
+
+        if ((qh->token & EHCI_QTD_ACTIVE) || (setup_qtd->token & EHCI_QTD_ACTIVE) ||
+        (data_qtd->token & EHCI_QTD_ACTIVE) || (status_qtd->token & EHCI_QTD_ACTIVE)) {
+            printf("EHCI: qh or qtd still active\n");
+            return false;
+        }
+
+        if (regs->command & EHCI_USBCMD_IAAD)
+            return false;
+
+        regs->status = EHCI_USBSTS_IAA;
+
+        state.previous->horizontal_link = state.old_next;
+        
+
+        qh->horizontal_link = state.old_next;
+
+        asm volatile("mfence" ::: "memory");
+
+        u32 command = regs->command;
+        regs->command = command | EHCI_USBCMD_IAAD;
+
+        volatile u32 readback = regs->command;
+        (void)readback;
+
+
+        for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+            if (regs->status & EHCI_USBSTS_IAA) {
+
+                regs->status = EHCI_USBSTS_IAA;
+
+                asm volatile("mefence" ::: "memory");
+
+                state.linked = false;
+                return true;
+            }
+
+            wait_ms(timer, 1);
+        }
+
+        printf("EHCI: timeout waiting for asynchronous advance\n");
+        return false;
+}
+
+
+
 usb_device_descriptor ehci_controller:identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
+
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+    volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
 
     dma_ret alloc = allocate_dma(320);
 
@@ -645,11 +715,34 @@ usb_device_descriptor ehci_controller:identify_device(u8 port, TimerSource &time
         (1u << 7); // active
 
     
-    insert_async_qh(async_head, async_head_phys, qh, qh_phys);
+    ehci_async_link_state link_state = {};
+
+
+    insert_async_qh(async_head, async_head_phys, qh, qh_phys, link_state);
 
     u32 recieved = 0;
 
     auto result = wait_for_descriptor(setup_qtd, data_qtd, status_qtd, timer, recieved);
     
+    if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, data_qtd, status_qtd, timer)) {
+        controller.needs_reinit = true;
+        controller.quarantined_dma = alloc;
+        return device_descriptor;
+    }
 
+    if (result != ehci_transfer_result::success) {
+        printf("EHCI: descriptor transfer error\n");
+        free_dma(alloc.virtual_address);
+        return device_descriptor;
+    }
+
+    usb_device_descriptor *desc = (usb_device_descriptor *)(alloc.virtual_address + desc_off);
+
+    if (recieved == 8 && desc->bLength == 18 && desc->bDescriptorType == 1) {
+        usb_device_descriptor *device_ptr = &device_descriptor;
+        memcpy(device_ptr, desc, 8);
+    }
+
+    free_dma(alloc.virtual_address);
+    return device_descriptor;
 }
