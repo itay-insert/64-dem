@@ -524,7 +524,7 @@ void process_done_queue(
 
     u32 td_phys = done_head & 0xFFFFFFF0;
 
-    while (td_phys != 0) {
+    while (td_phys != 0 && count++ < 128) {
 
         u64 td_virt = dma_phys_to_virt(td_phys);
         if (td_virt == 1) {
