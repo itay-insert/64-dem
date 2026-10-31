@@ -177,6 +177,7 @@ int ohci_controller::controller_init(TimerSource &timer) {
 
     memset((void *)alloc.virtual_address, 0, 256); // zero-initialize the 256-byte HCCA
     HCCA_base = alloc.virtual_address;
+    hcca = (ohci_hcca *)HCCA_base;
 
     u32 HcFmInterval = ohci_regs->fm_interval; // save the HcFmInterval from the Fm_interval register
 
@@ -438,6 +439,38 @@ ohci_transfer_result wait_for_descriptor(
     return ohci_transfer_result::timeout;
 }
 
+#define OHCI_CLE (1u << 4)
+#define OHCI_CLF (1u << 1)
+#define OHCI_ED_SKIP (1u << 14)
+
+bool wait_for_next_frame(volatile u16& frame_number, TimerSource& timer) {
+    u16 initial = frame_number;
+
+    for (u32 i = 0; i < 20; i++) { // 20 ms timeout
+        if (frame_number != initial) 
+            return true;
+        
+        wait_ms(timer, 1);
+    }
+
+    return false;
+}
+
+bool wait_for_controller_list_idle(volatile ohci_registers_t* regs, TimerSource& timer) {
+    for (u32 i = 0; i < 100; i++) { // 100 ms timeout
+        bool no_pending_work = (regs->command_status & OHCI_CLF) == 0;
+
+        bool no_current_ed = regs->control_current_ed == 0;
+
+        if (no_pending_work && no_current_ed)
+            return true;
+
+        wait_ms(timer, 1);
+    }
+    return false;
+}
+
+
 usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
 
@@ -484,13 +517,6 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
     ed->headp = setup_phys;
     ed->next_ed = 0;
 
-    u32 ed_phys = (u32)alloc.physical_address;
-    u32 setup_phys = ed_phys + 16;
-    u32 data_phys = ed_phys + 32;
-    u32 status_phys = ed_phys + 48;
-    u32 dummy_phys = ed_phys + 64;
-    u32 setup_buffer_phys = ed_phys + 80;
-    u32 descriptor_buffer_phys = ed_phys + 88;
 
     ed->control =
         (0u << 0)  |     // Function address 0
@@ -545,14 +571,69 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
     dummy_td->next_td = 0;
     dummy_td->be = 0;
 
+
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
+    
+    u32 old_control = ohci_regs->control;
+
+    ohci_regs->control = old_control & ~OHCI_CLE;
+
+
+    if (!wait_for_next_frame(hcca->frame_number, timer)) {
+        printf("OHCI: timeout disabling control list\n");
+        ohci_regs->control = old_control;
+        free_dma(alloc.virtual_address);
+        return device_descriptor;
+    }
+
+    u32 old_head = ohci_regs->control_head_ed;
+    u32 old_current = ohci_regs->control_current_ed;
+
+
+    bool old_clf = (ohci_regs->command_status & OHCI_CLF) != 0;
+
     ohci_regs->control_head_ed = ed_phys;
-    ohci_regs->command_status = ed_phys;
-    ohci_regs->control = ed_phys;
+
+    ohci_regs->control_current_ed = 0;
+
+
+    ohci_regs->command_status = OHCI_CLF;
+
+    asm volatile("mfence" ::: "memory");
+
+    ohci_regs->control = old_control | OHCI_CLE;
 
     u32 recieved = 0;
 
     auto result = wait_for_descriptor(setup_td, data_td, status_td, timer, recieved);
+
+    // prevent further processing of this ed
+    ed->control = OHCI_ED_SKIP;
+
+    asm volatile("mfence" ::: "memory");
+
+    if (!wait_for_controller_list_idle(ohci_regs, timer)) {
+        printf("OHCI: timeout detaching temporary ED\n");
+        return device_descriptor;
+    }
+
+    ohci_regs->control = old_control & ~OHCI_CLE;
+
+    if (!wait_for_next_frame(hcca->frame_number, timer)) {
+        printf("OHCI: timeout stopping temporary schedule\n");
+        return device_descriptor;
+    }
+
+    ohci_regs->control_head_ed = old_head;
+    ohci_regs->control_current_ed = old_current;
+
+    if (old_clf)
+        ohci_regs->command_status = OHCI_CLF;
+    
+    asm volatile("mfence" ::: "memory");
+
+    ohci_regs->control = old_control;
+
     if (result != ohci_transfer_result::success) {
         printf("OHCI: device descriptor transfer error\n");
         free_dma(alloc.virtual_address);
