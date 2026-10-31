@@ -16,6 +16,8 @@ typedef struct {
 dma_ret allocate_dma(u64 size);
 void free_dma(u64 base);
 
+u64 dma_phys_to_virt(u64 phys);
+
 KERNEL_EXTERN_C_END
 
 #endif

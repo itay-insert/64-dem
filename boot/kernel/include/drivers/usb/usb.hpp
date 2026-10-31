@@ -51,6 +51,8 @@ typedef struct {
 
 typedef struct {
     bool found;
+    bool needs_reinit;
+    dma_ret quarantined_dma;
     pci_address_t pci_address;
     pci_bar_t bar;
     u64 io_base;
