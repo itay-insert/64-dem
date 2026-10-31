@@ -26,6 +26,10 @@ KERNEL_EXTERN_C_BEGIN
 #define VA_V 0xffffb10000000000
 #endif
 
+#define KB 0
+#define MB 1
+#define GB 2
+
 typedef struct {
     u64 physical_address;
     u16 attributes;
