@@ -515,15 +515,48 @@ bool restore_control_schedule(
     return true;
 }
 
-void process_done_queue(volatile ohci_hcca* hcca, volatile ohci_registers_t* regs) {
+
+void process_done_queue(
+    volatile ohci_hcca* hcca,
+    volatile ohci_registers_t* regs)
+{
     u32 done_head = hcca->done_head;
 
     u32 td_phys = done_head & 0xFFFFFFF0;
 
     while (td_phys != 0) {
-        ohci_td* td = (ohci_td*)dma_
+
+        u64 td_virt = dma_phys_to_virt(td_phys);
+        if (td_virt == 1) {
+           printf("OHCI: td virtual address lookup error/n");
+           return;
+        }
+
+        ohci_td* td = (ohci_td *)td_virt;
+
+        if (!td) {
+            printf("OHCI: Invalid DoneHead TD address\n");
+            return;
+        }
+
+        // Save the next completed TD before processing.
+        u32 next_phys = td->next_td & 0xFFFFFFF0;
+
+        // Notify the appropriate transfer/endpoint handler.
+        process_completed_td(td_phys, td);
+
+        td_phys = next_phys;
     }
+
+    // Tell HC that software consumed the DoneHead.
+    hcca->done_head = 0;
+
+    asm volatile("mfence" ::: "memory");
+
+    // WDH is write-one-to-clear.
+    regs->interrupt_status = OHCI_INTR_WDH;
 }
+
 
 usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
