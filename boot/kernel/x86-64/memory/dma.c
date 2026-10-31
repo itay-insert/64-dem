@@ -229,16 +229,9 @@ u64 dma_phys_to_virt(u64 phys) {
     u64 page_phys = phys & ~0xFFFULL;
     u64 offset = phys & 0xFFFULL;
 
-    for (u64 i = DMA_BASE; i < (DMA_BASE + 0x10000000); i += 0x1000) {
-        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(i, KernelPML4);
-        if (lookup.status != 0) {
-            printf("paging: lookup error\n");
-            return 1;
-        }
-
-        if (lookup.physical_address == page_phys) 
-            return i + offset;
-    }
-
+    
+    u64 i = DMA_BASE;
+    while (i < (DMA_BASE + 0x10000000) {
+        
     return 1;
 }
