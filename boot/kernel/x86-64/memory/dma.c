@@ -245,7 +245,15 @@ u64 dma_phys_to_virt(u64 phys) {
         if (lookup.physical_address == page_phys) 
            return i + offset;
         
-        if (lookup.page_type 
+        if (lookup.Page_Type == KB)
+            i += 0x1000;
+        else if (lookup.Page_Type == MB)
+            i += 0x200000;
+        else if (lookup,Page_Type == GB)
+            i += 0x40000000;
+
+
+   }
  
     return 1;
 }
