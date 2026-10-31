@@ -235,7 +235,7 @@ u64 dma_phys_to_virt(u64 phys) {
 
     
     u64 i = DMA_BASE;
-    while (i < (DMA_BASE + 0x10000000) {
+    while (i < (DMA_BASE + 0x10000000)) {
         PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(i, KernelPML4);
         if (lookup.status != 0) {
            printf("paging: dma paging lookup failed\n");

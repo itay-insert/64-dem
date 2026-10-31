@@ -370,6 +370,191 @@ int ohci_controller::disable_port(u8 port, TimerSource &timer) {
     return (*port_reg & PES) ? RESET_FAILED : RESET_SUCCESS; 
 }
 
+#define OHCI_CLE (1u << 4)
+#define OHCI_CLF (1u << 1)
+#define OHCI_ED_SKIP (1u << 14)
+
+#define OHCI_INTR_WDH (1u << 1)
+
+#define OHCI_CC_NO_ERROR       0x0
+#define OHCI_CC_CRC_ERROR      0x1
+#define OHCI_CC_BIT_STUFFING   0x2
+#define OHCI_CC_DATA_TOGGLE    0x3
+#define OHCI_CC_STALL          0x4
+#define OHCI_CC_DEV_NOT_RESP   0x5
+#define OHCI_CC_PID_CHECK      0x6
+#define OHCI_CC_UNEXPECTED_PID 0x7
+#define OHCI_CC_DATA_OVERRUN   0x8
+#define OHCI_CC_DATA_UNDERRUN  0x9
+#define OHCI_CC_BUFFER_OVERRUN 0xC
+#define OHCI_CC_BUFFER_UNDERRUN 0xD
+#define OHCI_CC_NOT_ACCESSED   0xF
+
+const char* ohci_condition_code_name(u32 cc) {
+    switch (cc) {
+        case OHCI_CC_NO_ERROR:
+            return "No error";
+
+        case OHCI_CC_CRC_ERROR:
+            return "CRC error";
+
+        case OHCI_CC_BIT_STUFFING:
+            return "Bit stuffing error";
+
+        case OHCI_CC_DATA_TOGGLE:
+            return "Data toggle mismatch";
+
+        case OHCI_CC_STALL:
+            return "STALL";
+
+        case OHCI_CC_DEV_NOT_RESP:
+            return "Device not responding";
+
+        case OHCI_CC_PID_CHECK:
+            return "PID check failure";
+
+        case OHCI_CC_UNEXPECTED_PID:
+            return "Unexpected PID";
+
+        case OHCI_CC_DATA_OVERRUN:
+            return "Data overrun";
+
+        case OHCI_CC_DATA_UNDERRUN:
+            return "Data underrun";
+
+        case OHCI_CC_BUFFER_OVERRUN:
+            return "Buffer overrun";
+
+        case OHCI_CC_BUFFER_UNDERRUN:
+            return "Buffer underrun";
+
+        case OHCI_CC_NOT_ACCESSED:
+            return "Not accessed";
+
+        default:
+            return "Reserved condition code";
+    }
+}
+
+void process_completed_td(u32 td_phys, const ohci_td* td)
+{
+    if (!td) {
+        printf("OHCI: NULL completed TD\n");
+        return;
+    }
+
+    u32 condition_code = (td->control >> 28) & 0xF;
+    u32 error_count = (td->control >> 26) & 0x3;
+
+    // Successful transfer.
+    if (condition_code == OHCI_CC_NO_ERROR)
+        return;
+
+    printf(
+        "OHCI: TD 0x%x completed with CC=0x%x (%s), EC=%u\n",
+        td_phys,
+        condition_code,
+        ohci_condition_code_name(condition_code),
+        error_count
+    );
+}
+
+struct ohci_transfer_watch {
+    u32 setup_phys;
+    u32 data_phys;
+    u32 status_phys;
+
+    // Bit 0 = SETUP retired
+    // Bit 1 = DATA retired
+    // Bit 2 = STATUS retired
+    u8 retired_mask;
+};
+
+#define OHCI_TD_SETUP_DONE  (1u << 0)
+#define OHCI_TD_DATA_DONE   (1u << 1)
+#define OHCI_TD_STATUS_DONE (1u << 2)
+#define OHCI_TD_ALL_DONE    0x07
+
+#define OHCI_TD_CC_NOT_ACCESSED 0xF
+
+struct ohci_done_entry {
+    u32 phys;
+    ohci_td* td;
+};
+
+bool process_done_queue(
+    volatile ohci_hcca* hcca,
+    volatile ohci_registers_t* regs,
+    ohci_transfer_watch* watch = nullptr)
+{
+    // No published DoneHead queue to consume.
+    if (!(regs->interrupt_status & OHCI_INTR_WDH))
+        return true;
+
+    // HC must not modify HccaDoneHead while WDH remains asserted.
+    asm volatile("mfence" ::: "memory");
+
+    u32 td_phys = hcca->done_head & 0xFFFFFFF0;
+
+    ohci_done_entry entries[128];
+    u32 count = 0;
+
+    // First pass: validate and save the entire chain.
+    while (td_phys != 0) {
+
+        if (count >= 128) {
+            printf("OHCI: DoneHead chain exceeded limit\n");
+            return false;
+        }
+
+        u64 td_virt = dma_phys_to_virt(td_phys);
+
+        if (td_virt == 0 || td_virt == 1) {
+            printf("OHCI: Invalid DoneHead TD address\n");
+            return false;
+        }
+
+        ohci_td* td = (ohci_td*)td_virt;
+
+        entries[count].phys = td_phys;
+        entries[count].td = td;
+        count++;
+
+        // HC overwrites NextTD with the DoneHead linkage.
+        td_phys = td->next_td & 0xFFFFFFF0;
+    }
+
+    // Second pass: process the validated entries.
+    for (u32 i = 0; i < count; i++) {
+
+        u32 phys = entries[i].phys;
+        ohci_td* td = entries[i].td;
+
+        if (watch) {
+            if (phys == watch->setup_phys)
+                watch->retired_mask |= OHCI_TD_SETUP_DONE;
+
+            else if (phys == watch->data_phys)
+                watch->retired_mask |= OHCI_TD_DATA_DONE;
+
+            else if (phys == watch->status_phys)
+                watch->retired_mask |= OHCI_TD_STATUS_DONE;
+        }
+
+        process_completed_td(phys, td);
+    }
+
+    // Tell HC that software consumed the published queue.
+    hcca->done_head = 0;
+
+    asm volatile("mfence" ::: "memory");
+
+    // WDH is write-one-to-clear.
+    regs->interrupt_status = OHCI_INTR_WDH;
+
+    return true;
+}
+
 
 enum class ohci_transfer_result {
     success,
@@ -385,12 +570,18 @@ ohci_transfer_result wait_for_descriptor(
     u32 dummy_phys,
     u32 data_buffer_phys,
     u32 data_length,
+    ohci_hcca* hcca,
+    volatile ohci_registers_t* regs,
     TimerSource& timer,
     u32& received_bytes
 ) {
     received_bytes = 0;
 
     for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+        
+        // Process completed TDs whenever the HC writes back DoneHead
+        if (regs->interrupt_status & OHCI_INTR_WDH)
+            process_done_queue(hcca, regs);
 
         u32 headp = ed->headp;
 
@@ -434,74 +625,154 @@ ohci_transfer_result wait_for_descriptor(
     return ohci_transfer_result::timeout;
 }
 
-#define OHCI_CLE (1u << 4)
-#define OHCI_CLF (1u << 1)
-#define OHCI_ED_SKIP (1u << 14)
 
-#define OHCI_INTR_WDH (1u << 1)
-
-bool wait_for_next_frame(volatile u16& frame_number, TimerSource& timer) {
-    u16 initial = frame_number;
-
-    for (u32 i = 0; i < 20; i++) { // 20 ms timeout
-        if (frame_number != initial) 
+bool wait_for_next_frame(
+    volatile u16& frame_number,
+    u16 previous_frame,
+    TimerSource& timer)
+{
+    for (u32 i = 0; i < 20; i++) {
+        if (frame_number != previous_frame)
             return true;
-        
+
         wait_ms(timer, 1);
     }
 
     return false;
 }
 
-
-bool stop_control_schedule(volatile ohci_registers_t* regs, volatile u16& frame_number, TimerSource& timer) {
-    // disable processing of the control list
+bool stop_control_schedule(
+    volatile ohci_registers_t* regs,
+    volatile u16& frame_number,
+    TimerSource& timer)
+{
     u32 control = regs->control;
+
+    // Already disabled: HC cannot process this list.
+    if (!(control & OHCI_CLE))
+        return true;
+
+    // Capture the frame before disabling CLE.
+    u16 previous_frame = frame_number;
+
     regs->control = control & ~OHCI_CLE;
 
-    // flush MMIO write
+    // Flush the MMIO write.
     volatile u32 readback = regs->control;
     (void)readback;
 
     asm volatile("mfence" ::: "memory");
 
-    // CLE takes effect after the next SOF
-    return wait_for_next_frame(frame_number, timer);
+    // Wait until disabling CLE has taken effect.
+    return wait_for_next_frame(
+        frame_number,
+        previous_frame,
+        timer
+    );
+}
+
+
+bool wait_for_transfer_reap(
+    volatile ohci_td* setup_td,
+    volatile ohci_td* data_td,
+    volatile ohci_td* status_td,
+    volatile ohci_hcca* hcca,
+    volatile ohci_registers_t* regs,
+    ohci_transfer_watch* watch,
+    TimerSource& timer)
+{
+    for (u32 elapsed = 0; elapsed < 20; elapsed++) {
+
+        if (!process_done_queue(hcca, regs, watch))
+            return false;
+
+        u32 setup_cc = (setup_td->control >> 28) & 0xF;
+        u32 data_cc = (data_td->control >> 28) & 0xF;
+        u32 status_cc = (status_td->control >> 28) & 0xF;
+
+        // A TD with CC=NotAccessed was never retired.
+        // Otherwise, it must have appeared in DoneHead.
+        bool setup_reaped =
+            setup_cc == OHCI_TD_CC_NOT_ACCESSED ||
+            (watch->retired_mask & OHCI_TD_SETUP_DONE);
+
+        bool data_reaped =
+            data_cc == OHCI_TD_CC_NOT_ACCESSED ||
+            (watch->retired_mask & OHCI_TD_DATA_DONE);
+
+        bool status_reaped =
+            status_cc == OHCI_TD_CC_NOT_ACCESSED ||
+            (watch->retired_mask & OHCI_TD_STATUS_DONE);
+
+        if (setup_reaped && data_reaped && status_reaped)
+            return true;
+
+        wait_ms(timer, 1);
+    }
+
+    // Final attempt.
+    if (!process_done_queue(hcca, regs, watch))
+        return false;
+
+    return false;
 }
 
 
 bool restore_control_schedule(
     volatile ohci_registers_t* regs,
-    volatile u16& frame_number,
+    volatile ohci_hcca* hcca,
     TimerSource& timer,
     volatile ohci_ed* ed,
+    volatile ohci_td* setup_td,
+    volatile ohci_td* data_td,
+    volatile ohci_td* status_td,
+    ohci_transfer_watch* watch,
     u32 old_control,
     u32 old_head,
     u32 old_current,
     bool old_clf)
 {
-    // Prevent further transactions on the temporary ED.
+    // Prevent additional transactions on the temporary ED.
     ed->control |= OHCI_ED_SKIP;
 
     asm volatile("mfence" ::: "memory");
 
-    // Stop the control schedule and synchronize with the HC.
-    if (!stop_control_schedule(regs, frame_number, timer)) {
-        printf("OHCI: could not quiesce control schedule\n");
+    // Stop the control list and wait for CLE to take effect.
+    if (!stop_control_schedule(
+            regs, hcca->frame_number, timer)) {
+        printf("OHCI: could not stop control schedule\n");
         return false;
     }
 
-    // Restore the original schedule.
+    // Make sure no retired TD from our allocation remains
+    // linked in an unconsumed DoneHead queue.
+    if (!wait_for_transfer_reap(
+            setup_td,
+            data_td,
+            status_td,
+            hcca,
+            regs,
+            watch,
+            timer)) {
+        printf("OHCI: could not reap transfer TDs\n");
+        return false;
+    }
+
+    // CLF is a list-processing notification, not completion status.
+    // Preserve any pending notification from either schedule.
+    bool temporary_clf =
+        (regs->command_status & OHCI_CLF) != 0;
+
+    // CLE is disabled, so it is now safe to restore these pointers.
     regs->control_head_ed = old_head;
     regs->control_current_ed = old_current;
 
     asm volatile("mfence" ::: "memory");
 
-    // Restore the original pending notification if necessary.
-    if (old_clf)
+    if (old_clf || temporary_clf)
         regs->command_status = OHCI_CLF;
 
-    // Restore the original CLE state.
+    // Restore the original CLE state, preserving other control bits.
     u32 control = regs->control;
 
     control = (control & ~OHCI_CLE) |
@@ -512,49 +783,9 @@ bool restore_control_schedule(
     volatile u32 readback = regs->control;
     (void)readback;
 
-    return true;
-}
-
-
-void process_done_queue(
-    volatile ohci_hcca* hcca,
-    volatile ohci_registers_t* regs)
-{
-    u32 done_head = hcca->done_head;
-
-    u32 td_phys = done_head & 0xFFFFFFF0;
-
-    while (td_phys != 0 && count++ < 128) {
-
-        u64 td_virt = dma_phys_to_virt(td_phys);
-        if (td_virt == 1) {
-           printf("OHCI: td virtual address lookup error/n");
-           return;
-        }
-
-        ohci_td* td = (ohci_td *)td_virt;
-
-        if (!td) {
-            printf("OHCI: Invalid DoneHead TD address\n");
-            return;
-        }
-
-        // Save the next completed TD before processing.
-        u32 next_phys = td->next_td & 0xFFFFFFF0;
-
-        // Notify the appropriate transfer/endpoint handler.
-        process_completed_td(td_phys, td);
-
-        td_phys = next_phys;
-    }
-
-    // Tell HC that software consumed the DoneHead.
-    hcca->done_head = 0;
-
     asm volatile("mfence" ::: "memory");
 
-    // WDH is write-one-to-clear.
-    regs->interrupt_status = OHCI_INTR_WDH;
+    return true;
 }
 
 
@@ -612,7 +843,6 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     setup_td->control =
     ohci::td::condition_not_accessed |
-    ohci::td::no_interrupt |
     ohci::td::setup |
     ohci::td::toggle_data0;
 
@@ -623,7 +853,6 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     data_td->control =
         ohci::td::condition_not_accessed |
-        ohci::td::no_interrupt |
         ohci::td::rounding |
         ohci::td::in |
         ohci::td::toggle_data1;
@@ -635,7 +864,6 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     status_td->control =
         ohci::td::condition_not_accessed |
-        ohci::td::interrupt |
         ohci::td::out |
         ohci::td::toggle_data1;
 
@@ -686,7 +914,15 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     ohci_regs->control = old_control | OHCI_CLE;
 
-    u32 recieved = 0;
+    ohci_transfer_watch watch = {
+        setup_phys,
+        data_phys,
+        status_phys,
+        0
+    };
+
+
+    u32 received = 0;
 
     auto result = wait_for_descriptor(
         ed,
@@ -696,19 +932,33 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
         dummy_phys,
         descriptor_buffer_phys,
         8,
+        hcca,
+        ohci_regs,
+        &watch,
         timer,
-        recieved
+        received
     );
 
-    if (!restore_control_schedule(ohci_regs, 
-        hcca->frame_number, timer, ed, 
-        old_control, old_head, 
-        old_current, old_clf)) {
-            printf("OHCI: controller recovery failed\n");
+    if (!restore_control_schedule(
+        ohci_regs,
+        hcca,
+        timer,
+        ed,
+        setup_td,
+        data_td,
+        status_td,
+        &watch,
+        old_control,
+        old_head,
+        old_current,
+        old_clf)) {
 
-            controller.needs_reinit = true;
-            controller.quarantined_dma = alloc;
-            return device_descriptor;
+        printf("OHCI: controller recovery failed\n");
+
+        controller.needs_reinit = true;
+        controller.quarantined_dma = alloc;
+
+        return device_descriptor;
     }
 
     if (result != ohci_transfer_result::success) {
@@ -719,7 +969,7 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     usb_device_descriptor *desc = (usb_device_descriptor *)(((u64)descriptor_buffer_phys - alloc.physical_address) + alloc.virtual_address);
 
-    if (recieved == 8 && desc->bLength == 18 && desc->bDescriptorType == 1) {
+    if (received == 8 && desc->bLength == 18 && desc->bDescriptorType == 1) {
         usb_device_descriptor *device_ptr = &device_descriptor;
         memcpy(device_ptr, desc, 8);
     }
