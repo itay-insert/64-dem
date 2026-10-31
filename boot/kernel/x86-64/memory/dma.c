@@ -6,6 +6,7 @@
 #include "x86-64/memory/virtual_allocator.h"
 #include "x86-64/memory/dma.h"
 #include "x86-64/memory/dma_internal.h"
+#include "drivers/display/vga.h"
 
 
 
@@ -225,6 +226,9 @@ void free_dma(u64 Base) {
     spin_unlock(&dma_lock);
 }
 
+
+
+
 u64 dma_phys_to_virt(u64 phys) {
     u64 page_phys = phys & ~0xFFFULL;
     u64 offset = phys & 0xFFFULL;
@@ -232,6 +236,16 @@ u64 dma_phys_to_virt(u64 phys) {
     
     u64 i = DMA_BASE;
     while (i < (DMA_BASE + 0x10000000) {
+        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(i, KernelPML4);
+        if (lookup.status != 0) {
+           printf("paging: dma paging lookup failed\n");
+           return 1;
+        }
         
+        if (lookup.physical_address == page_phys) 
+           return i + offset;
+        
+        if (lookup.page_type 
+ 
     return 1;
 }
