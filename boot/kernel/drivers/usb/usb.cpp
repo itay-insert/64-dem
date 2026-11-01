@@ -10,6 +10,20 @@
 #include "drivers/usb/ehci.hpp"
 #include "drivers/usb/xhci.hpp"
 
+const char *codes[] = {
+    "NO_DEVICE",
+    "RESET_STILL_ASSERTED", 
+    "RESET_FAILED",  
+    "INVALID_PORT", 
+    "CONTROLLER_HALTED",
+    "COMPANION_REQUIRED",
+    "PORT_BUSY",
+    "OVER_CURRENT_CONDITION", 
+    "OLD_FLAG_DID_NOT_CLEAR",
+    "INVALID_STATUS" 
+};
+
+
 extern u64 timeradd;
 
 typedef struct {
@@ -154,12 +168,12 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 
 
 usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
-    usb_device device = {0};
+    usb_device Device = {0};
     pci_address_t pci_address = controller.pci_address;
     u32 segment = (u32)pci_address.segment;
     u32 bus = (u32)pci_address.bus;
     u32 device = (u32)pci_address.device;
-    u32 function = (u32)pci_address.function
+    u32 function = (u32)pci_address.function;
 
     int rests = reset_port(port, timer);
     if (rests != RESET_SUCCESS) {
@@ -168,12 +182,12 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
             bus, 
             device, 
             function, port, rests, codes[rests-1]);
-        device.discovered = false;
-        return device;
+        Device.discovered = false;
+        return Device;
     }
 
 
-
+    return Device;
 
 }
 
@@ -207,15 +221,6 @@ void usb_controller::construct_controller() {
 
     if (!status) {
         ports_count = enumrate_ports();
-
-        for (int i = 0; i < ports_count; i++) {
-            if (ports[i].connected) {
-                ports[i].device = new usb_device{};
-                usb_device device = *ports[i].device;
-                device = get_device(ports[i].port_number, timer);
-                *ports[i].device = device;
-            }
-        }
         
     }
 

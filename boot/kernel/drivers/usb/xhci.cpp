@@ -768,3 +768,8 @@ int xhci_controller::disable_port(u8 port, TimerSource &timer) {
 
     return (*portsc & PED) ? RESET_FAILED : RESET_SUCCESS;
 }
+
+usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &timer) {
+    usb_device_descriptor device_descriptor = {0};
+    return device_descriptor;
+}

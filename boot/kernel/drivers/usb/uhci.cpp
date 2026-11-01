@@ -55,7 +55,7 @@ struct alignas(16) uhci_td {
     u32 software[4];
 };
 
-static_assert(sizeof(uhci_td) == 16);
+static_assert(alignof(uhci_td) == 16);
 
 typedef struct uhci_qh uhci_qh;
 
@@ -79,6 +79,9 @@ namespace uhci {
         constexpr u32 interrupt   = 1u << 24;
         constexpr u32 low_speed   = 1u << 26;
         constexpr u32 error_count = 3u << 27;
+        constexpr u32 error_mask = 0x007E0000u;
+        constexpr u32 actual_length_mask = 0x7FFu;
+    
 
         // Length is encoded as (length - 1).
         // A zero-length transaction is encoded as 0x7FF.
@@ -88,7 +91,6 @@ namespace uhci {
     }
 }
 
-constexpr u32 UHCI_LINK_TERMINATE = 1u;
 constexpr u32 UHCI_LINK_QH        = 2u;
 constexpr u32 UHCI_LINK_DEPTH     = 4u;
 
@@ -318,25 +320,25 @@ TimerSource &timer, u32 &received_bytes) {
         u32 status_status = status_td->status;
 
          // If a TD has stopped and reports an error, fail.
-        if ((!(setup_status & uhci::td_status::active) &&
-              (setup_status & uhci::td_status::error_mask)) ||
-            (!(data_status & uhci::td_status::active) &&
-              (data_status & uhci::td_status::error_mask)) ||
-            (!(status_status & uhci::td_status::active) &&
-              (status_status & uhci::td_status::error_mask))) {
+        if ((!(setup_status & uhci::td::active) &&
+              (setup_status & uhci::td::error_mask)) ||
+            (!(data_status & uhci::td::active) &&
+              (data_status & uhci::td::error_mask)) ||
+            (!(status_status & uhci::td::active) &&
+              (status_status & uhci::td::error_mask))) {
             return uhci_transfer_result::transfer_error;
         }
 
         // All three stages must finish.
-        if (!(setup_status  & uhci::td_status::active) &&
-            !(data_status   & uhci::td_status::active) &&
-            !(status_status & uhci::td_status::active)) {
+        if (!(setup_status  & uhci::td::active) &&
+            !(data_status   & uhci::td::active) &&
+            !(status_status & uhci::td::active)) {
 
             // UHCI encodes actual length as (length - 1).
             // 0x7FF therefore represents zero bytes.
             received_bytes =
                 ((data_status &
-                  uhci::td_status::actual_length_mask) + 1) & 0x7FF;
+                  uhci::td::actual_length_mask) + 1) & 0x7FF;
 
             return uhci_transfer_result::success;
         }
@@ -412,7 +414,7 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     setup_td->buffer = (u32)(alloc.physical_address + ((u64)setup - alloc.virtual_address));
 
 
-    data_td->link = (u32)(alloc.physical_address + ((u64)status_td - alloc.virtual_address)) | UHCI_LINK_DEPTh;
+    data_td->link = (u32)(alloc.physical_address + ((u64)status_td - alloc.virtual_address)) | UHCI_LINK_DEPTH;
     data_td->status = TD_ACTIVE |
     TD_ERROR_COUNT |
     TD_ACTLEN_INIT;            // Request interrupt on completion

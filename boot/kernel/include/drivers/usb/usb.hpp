@@ -28,18 +28,8 @@
 #define OLD_FLAG_DID_NOT_CLEAR 9
 #define INVALID_STATUS 10
 
-const char *codes[] = {
-    "NO_DEVICE",
-    "RESET_STILL_ASSERTED", 
-    "RESET_FAILED",  
-    "INVALID_PORT", 
-    "CONTROLLER_HALTED",
-    "COMPANION_REQUIRED",
-    "PORT_BUSY",
-    "OVER_CURRENT_CONDITION", 
-    "OLD_FLAG_DID_NOT_CLEAR",
-    "INVALID_STATUS" 
-};
+extern const char *codes[];
+
 
 typedef struct {
     u8 BmRequestType;

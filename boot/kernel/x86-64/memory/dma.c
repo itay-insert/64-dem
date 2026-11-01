@@ -249,7 +249,7 @@ u64 dma_phys_to_virt(u64 phys) {
             i += 0x1000;
         else if (lookup.Page_Type == MB)
             i += 0x200000;
-        else if (lookup,Page_Type == GB)
+        else if (lookup.Page_Type == GB)
             i += 0x40000000;
 
 

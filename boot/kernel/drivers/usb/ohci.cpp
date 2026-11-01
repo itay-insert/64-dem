@@ -116,6 +116,13 @@ namespace ohci {
     }
 }
 
+
+constexpr u32 OHCI_ED_HEAD_HALTED = 1u << 1;
+constexpr u32 OHCI_ED_HEAD_MASK   = 0xFFFFFFF0;
+
+
+constexpr u32 OHCI_RHPS_LSDA = 1u << 9;
+
 int ohci_controller::controller_init(TimerSource &timer) {
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
 
@@ -572,6 +579,7 @@ ohci_transfer_result wait_for_descriptor(
     u32 data_length,
     ohci_hcca* hcca,
     volatile ohci_registers_t* regs,
+    ohci_transfer_watch& watch,
     TimerSource& timer,
     u32& received_bytes
 ) {
@@ -834,6 +842,8 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
         (0u << 11) |     // Direction from TD
         (8u << 16);      // Maximum packet size 8
 
+    volatile u32 *portreg = (volatile u32 *)port_to_address(port, controller.io_base);
+    bool device_is_low_speed = (*portreg & OHCI_RHPS_LSDA) != 0;
     if (device_is_low_speed)
         ed->control |= ohci::ed::low_speed;
 
@@ -934,7 +944,7 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
         8,
         hcca,
         ohci_regs,
-        &watch,
+        watch,
         timer,
         received
     );

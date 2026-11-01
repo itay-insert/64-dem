@@ -587,7 +587,7 @@ bool unlink_async_qh(volatile ehci_op_regs_t* regs, ehci_async_link_state& state
 
                 regs->status = EHCI_USBSTS_IAA;
 
-                asm volatile("mefence" ::: "memory");
+                asm volatile("mfence" ::: "memory");
 
                 state.linked = false;
                 return true;
@@ -602,7 +602,7 @@ bool unlink_async_qh(volatile ehci_op_regs_t* regs, ehci_async_link_state& state
 
 
 
-usb_device_descriptor ehci_controller:identify_device(u8 port, TimerSource &timer) {
+usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
 
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;

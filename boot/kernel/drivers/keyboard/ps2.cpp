@@ -295,6 +295,9 @@ extern "C" void keyboard_handler() {
         if (scancode == 0x57) {
             AcpiPM *acpi = (AcpiPM *)acpiadd;
             acpi->AcpiReset();
+        } else if (scancode == 0x58) {
+            AcpiPM *acpi = (AcpiPM *)acpiadd;
+            acpi->AcpiShutDown();
         }
             
         globalkeyboard->keyboards[0]->buffer[globalkeyboard->keyboards[0]->scancode_top] = scancode;
