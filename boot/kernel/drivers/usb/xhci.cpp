@@ -786,23 +786,36 @@ int xhci_controller::disable_port(u8 port, TimerSource &timer) {
     return (*portsc & PED) ? RESET_FAILED : RESET_SUCCESS;
 }
 
+#define XHCI_ENABLE_SLOT 9
+#define XHCI_ENABLE_TIMEOUT 500
+
+u8 xhci_controller::enable_device_slot(u8 port, TimerSource &timer) {
+    XhciTrb trb = {};
+
+
+}
+
+
 usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
 
-    xhci_trb setup_trb = {};
+    XhciTrb setup_trb = {};
 
-    setup_trb.dword[0] = 0x01000680;
-    setup_trb.dword[1] = 0x00080000;
+    setup_trb.d0 = 0x01000680;
+    setup_trb.d1 = 0x00080000;
 
-    setup_trb.dword[2] =
+    setup_trb.d2 =
         8;                  // Setup packet length is always 8
 
-    setup_trb.dword[3] =
+    setup_trb.d3 =
         TRB_TYPE(TRB_SETUP) |
         TRB_IDT |
         (TRT_IN << 16) |
         cycle;
 
         
+    XhciTrb data_trb = {};
+
+    data_trb.d0 = 
     return device_descriptor;
 }

@@ -133,6 +133,7 @@ u8 wanted_id);
         int allocate_scracthpad(u32 scratchpad_count, bool addr_64);
         u64 port_to_address(u8 port);
         int disable_port(u8 port, TimerSource &timer);
+        u8 enable_device_slot(u8 port, TimerSource &timer);
                         
     public:
         int controller_init(TimerSource &timer) override;
