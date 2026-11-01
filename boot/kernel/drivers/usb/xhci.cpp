@@ -11,6 +11,23 @@
 #include "drivers/usb/xhci_events.h"
 #include "drivers/usb/xhci.hpp"
 
+#define TRB_CYCLE       (1u << 0)
+#define TRB_ISP         (1u << 2)
+#define TRB_CHAIN       (1u << 4)
+#define TRB_IOC         (1u << 5)
+#define TRB_IDT         (1u << 6)
+
+#define TRB_TYPE(n)     ((u32)(n) << 10)
+
+#define TRB_DIR_IN      (1u << 16)
+
+#define TRB_SETUP       2
+#define TRB_DATA        3
+#define TRB_STATUS      4
+
+#define TRT_NO_DATA     0
+#define TRT_OUT         2
+#define TRT_IN          3
 
 
 xhci_controller::xhci_controller() {
@@ -771,5 +788,21 @@ int xhci_controller::disable_port(u8 port, TimerSource &timer) {
 
 usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
+
+    xhci_trb setup_trb = {};
+
+    setup_trb.dword[0] = 0x01000680;
+    setup_trb.dword[1] = 0x00080000;
+
+    setup_trb.dword[2] =
+        8;                  // Setup packet length is always 8
+
+    setup_trb.dword[3] =
+        TRB_TYPE(TRB_SETUP) |
+        TRB_IDT |
+        (TRT_IN << 16) |
+        cycle;
+
+        
     return device_descriptor;
 }
