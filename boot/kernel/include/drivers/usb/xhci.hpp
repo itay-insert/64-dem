@@ -100,6 +100,7 @@ struct XhciRings {
 
 class xhci_controller : public usb_controller {
     private:
+        volatile u32 *doorbells = 0;
         u64 *scratch_pad = 0;
         u64 *dcbaa = 0;
         u64 scratchpad_physical = 0;
@@ -115,6 +116,15 @@ class xhci_controller : public usb_controller {
         u32 interrupt_driven = 0;
         u32 processing_events = 0;
         u32 pending_port_changes[8] = {};
+
+        bool transfer_waiting = false;
+        bool transfer_completed = false;
+
+        u8 transfer_slot = 0;
+        u8 transfer_endpoint = 0;
+        u64 transfer_trb_pointer = 0;
+
+        XhciTrb transfer_completion = {};
 
         bool setup_rings(volatile xhci_cap_regs *cap,
                           volatile xhci_op_regs *op, bool ac64);
@@ -135,6 +145,7 @@ u8 wanted_id);
         int disable_port(u8 port, TimerSource &timer);
         u8 read_protocol_slot_type(u8 port);
         u8 enable_device_slot(u8 port, TimerSource &timer);
+        bool wait_transfer_event(TimerSource &timer, u8 slot_id, u64 expected_trb, XhciTrb *result, u32 timeout);
                         
     public:
         int controller_init(TimerSource &timer) override;

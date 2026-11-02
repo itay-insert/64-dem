@@ -438,8 +438,26 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
                 __atomic_fetch_or(&pending_port_changes[port >> 5],
                                   1u << (port & 31), __ATOMIC_RELEASE);
             }
-        } else if (type == 32) { // Transfer Event
-            // Add endpoint completion dispatch when transfer rings exist.
+        } else if (type == 32) { 
+            u8 slot_id = (event.d3 >> 24) & 0xFF;
+            u8 endpoint_id = (event.d3 >> 16) & 0x1F;
+
+            bool event_data = (event.d3 & (1u << 2)) != 0;
+
+            u64 trb_pointer =
+                ((u64)event.d1 << 32) | event.d0;
+
+            if (transfer_waiting &&
+                !event_data &&
+                    slot_id == transfer_slot &&
+                    endpoint_id == transfer_endpoint &&
+                    trb_pointer == transfer_trb_pointer) {
+
+                transfer_completion = event;
+                transfer_completed = true;
+            } else {
+            // Handle or queue unrelated Transfer Events.
+            }
         } else if (type == 37) { // Host Controller Event
             // Add controller error reporting when recovery is implemented.
         }
@@ -517,6 +535,7 @@ int xhci_controller::controller_init(TimerSource &timer) {
     u64 virtual_address = BASE + physical;
 
     controller.io_base = virtual_address + page_offset;
+
    
     xhci_base = controller.io_base; // pass controller.io_base to xhci_base for compatibillity issues
     volatile xhci_cap_regs *cap;
@@ -543,6 +562,11 @@ int xhci_controller::controller_init(TimerSource &timer) {
     bool context_64 = (hcc1 & (1u << 2)) != 0; // CSZ
     bool addr_64 = (hcc1 & 1u) != 0; // AC64
 
+    u32 dboff = cap->dboff;
+
+    u32 doorbell_offset = dboff & ~0x3u;
+
+    doorbells = (volatile u32 *)((u8 *)controller.io_base + doorbell_offset);
 
     if (!(op->pagesize & 1)) {
         printf("xHCI: 4 KiB pages unsupported\n");
@@ -832,6 +856,7 @@ u8 xhci_controller::read_protocol_slot_type(u8 port) {
 #define XHCI_ENABLE_SLOT (9u << 10)
 #define XHCI_ENABLE_TIMEOUT 500
 
+
 u8 xhci_controller::enable_device_slot(u8 port, TimerSource &timer) {
 
     // Get the protocol slot type
@@ -876,27 +901,290 @@ u8 xhci_controller::enable_device_slot(u8 port, TimerSource &timer) {
     return slot_id;
 }
 
+#define CSZ (1u << 2)
+#define EP0_SIZE (sizeof(XhciTrb) << 8) // sizeof(trb) * 256
+#define EP0_LINK 255
+
+
+static bool get_initial_mps(u64 op, u8 port, u16 &initial_mps) {
+    u64 portsc_offset = 0x400 + ((port - 1) * XHCI_PORTSC_STRIDE);
+
+    volatile u32 *port_reg = (volatile u32 *)((u8 *)op + portsc_offset);
+
+    u32 status = *port_reg;
+
+    u8 speed_id = (status >> 10) & 0xF;
+
+    initial_mps = 0;
+
+    switch (speed_id) {
+        case 1: // full speed
+        case 2: // low speed
+            initial_mps = 8;
+            break;
+
+        case 3: // high speed
+            initial_mps = 64;
+            break;
+
+        case 4: // SuperSpeed
+            initial_mps = 512;
+            break;
+
+        default:
+            printf("xHCI: unsupported speed_id on port 0x%b, speed_id=0x%b\n", port, speed_id);
+            return false;
+        
+    }
+
+    return true;
+}
+
+
+static inline u8 get_port_speed_id(u64 op, u8 port) {
+    u64 portsc_offset = 0x400 + ((port - 1) * XHCI_PORTSC_STRIDE);
+
+    volatile u32 *port_reg = (volatile u32 *)((u8 *)op + portsc_offset);
+
+    return (u8)((*port_reg >> 10) & 0xF);
+} 
+
+bool xhci_controller::wait_transfer_event(
+    TimerSource &timer,
+    u8 slot_id,
+    u8 endpoint_id,
+    u64 expected_trb,
+    XhciTrb *result,
+    u32 timeout)
+{
+    transfer_slot = slot_id;
+    transfer_endpoint = endpoint_id;
+    transfer_trb_pointer = expected_trb;
+
+    transfer_completed = false;
+    transfer_waiting = true;
+
+
+    u32 i = 0;
+    while (!transfer_completed) {
+        xhci_process_events();
+
+        if (i >= timeout) {
+            transfer_waiting = false;
+            return false;
+        }
+        wait_ms(timer, 1);
+        i++;
+    }
+
+    *result = transfer_completion;
+    transfer_waiting = false;
+
+    return true;
+}
+
 
 usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
+    u8 slot_id = enable_device_slot(port, timer);
+    if (slot_id == 0)
+        return device_descriptor;
+        
+    volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)controller.io_base;
+
+    u32 hccparams1 = cap->hccparams1;
+    u64 context_size = (hccparams1 & CSZ) ? 64 : 32;
+
+    bool addr_64 = (hccparams1 & 1u) != 0;  // ac64
+    u64 op_base = controller.io_base + (u64)cap->caplength;
+
+    u16 initial_mps = 0;
+
+    if (!get_initial_mps(op_base, port, initial_mps)) {
+        printf("xHCI: failed to get initial_mps from port 0x%b\n", port);
+        return device_descriptor;
+    }
+
+    dma_ret input_context = allocate_dma(context_size*33);
+    dma_ret output_device_context = allocate_dma(context_size*32);
+
+    if ((!addr_64 && input_context.physical_address > 0xFFFFFFFF) || input_context.status != 0) {
+        printf("xHCI: failed to allocate the input context\n");
+        return device_descriptor;
+    }
+
+    if ((!addr_64 && output_device_context.physical_address > 0xFFFFFFFF) || output_device_context.status != 0) {
+        printf("xHCI: failed to allocate the output device context\n");
+        return device_descriptor;
+    }
+
+
+    memset((void *)input_context.virtual_address, 0, context_size*33); // zero-init input_context
+    memset((void *)output_device_context.virtual_address, 0, context_size*32); // zero-init output_device_context
+
+    dma_ret alloc = {0}; // define a variable of struct dma_ret
+    dma_ret *alloc_ptr = &alloc; // make a pointer to that variable
+
+    if (!xhci_dma_alloc(alloc_ptr, EP0_SIZE, addr_64)) {
+        printf("xHCI: EP0 transfer ring allocation failed\n");
+        return device_descriptor;
+    }
+
+    XhciTrb* trbs = (XhciTrb *)alloc_ptr->virtual_address;
+    
+    XhciTrb& link = trbs[EP0_LINK];
+
+    u64 ring_phys = alloc_ptr->physical_address;
+
+    link.d0 = (u32)ring_phys;  // low 32 bits of ring_phys address
+    link.d1 = (u32)(ring_phys >> 32); // higher 32 bits
+
+    // link TRB
+    // Type = 6
+    // Toggle Cycle = 1
+    link.d3 = (6u << 10) | (1u << 1);
+
+    u32 *ep0 = (u32 *)((u8 *)input_context.virtual_address + (2 * context_size));
+
+    u64 dequene = alloc_ptr->physical_address | 1ULL; // DCS = 1
+
+    ep0[2] = (u32)dequene;
+    ep0[3] = (u32)(dequene >> 32);
+
+
+    ep0[1] = (3u << 1) | (4u << 3) | ((u32)initial_mps << 16);
+
+    // Average TRB Length
+    ep0[4] = 8;
+
+
+    u32 *icc = (u32 *)input_context.virtual_address;
+
+    icc[0] = 0; // Drop Context Flags
+    icc[1] = (1u << 0) | (1u << 1); // add Slot + EP0
+
+    // Input Slot context: index 1
+    u32 *slot = (u32 *)(input_context.virtual_address + context_size);
+
+
+    u8 speed_id = get_port_speed_id(op_base, port);
+
+
+    slot[0] = ((u32)speed_id << 20) | (1u << 27);
+    // Speed = bits 23:20
+    // Context Entries = 1, bits 31:27
+
+    slot[1] = ((u32)port << 16);
+    // Root Hub Port Number = bits 23:16
+
+    dcbaa[slot_id] = output_device_context.physical_address;
+
+
+    XhciTrb command = {};
+    u64 input_phys = input_context.physical_address;
+
+    command.d0 = (u32)input_phys;
+    command.d1 = (u32)(input_phys >> 32);
+
+    command.d3 = (11u << 10) | ((u32)slot_id << 24);
+
+    u64 command_phys = submit_command(command);
+
+    XhciTrb completion = {};
+
+    if (!wait_command(timer, command_phys, &completion, 500)) {
+        printf("xHCI: Address Device Timed out\n");
+        return device_descriptor;
+    }
+
+    if ((completion.d2 >> 24) != 1) {
+        printf("xHCI: Address Device failed: %u\n", completion.d2 >> 24);
+        return device_descriptor;
+    }
+
+    dma_ret Descriptor = {0};
+    dma_ret *desc_dma = &Descriptor;
+
+    if (!xhci_dma_alloc(desc_dma, 8, addr_64)) {
+        printf("xHCI: failed to allocate the descriptor buffer\n");
+        return device_descriptor;
+    }
 
     XhciTrb setup_trb = {};
 
     setup_trb.d0 = 0x01000680;
     setup_trb.d1 = 0x00080000;
+    setup_trb.d2 = 8;
 
-    setup_trb.d2 =
-        8;                  // Setup packet length is always 8
+    setup_trb.d3 = 
+        (2u << 10) | // TRB Type = Setup Stage
+        (1u << 6) | // IDT = 1
+        (3u << 16); // TRT = IN Data Stage
 
-    setup_trb.d3 =
-        TRB_TYPE(TRB_SETUP) |
-        TRB_IDT |
-        (TRT_IN << 16) |
-        cycle;
+    
 
-        
     XhciTrb data_trb = {};
 
-    data_trb.d0 = 
+    u64 buffer_phys = desc_dma->physical_address;
+
+    data_trb.d0 = (u32)buffer_phys;
+    data_trb.d1 = (u32)(buffer_phys >> 32);
+    data_trb.d2 = 8;
+
+    data_trb.d3 = 
+        (3u << 10) | // TRB Type = Data Stage
+        (1u << 16);  // DIR = IN
+
+    
+    XhciTrb status_trb = {};
+
+    status_trb.d3 = 
+        (4u << 10) | // TRB Type = Status Stage
+        (1u << 5); // IOC = 1
+
+    // Prepare TRBs without publishing their Cycle bits.
+    setup_trb.d3 &= ~1u;
+    data_trb.d3 &= ~1u;
+    status_trb.d3 &= ~1u;
+
+    trbs[0] = setup_trb;
+    trbs[1] = data_trb;
+    trbs[2] = status_trb;
+    
+    asm volatile("sfence" ::: "memory");
+
+    // Set cycle bit on all three trbs
+    trbs[0].d3 |= 1u;
+    trbs[1].d3 |= 1u;
+    trbs[2].d3 |= 1u;
+
+    u64 status_trb_phys = desc_dma->physical_address + (sizeof(XhciTrb) << 1);
+
+    asm volatile("sfence" ::: "memory");
+
+    doorbells[slot_id] = 1;
+
+    XhciTrb transfer_event = {};
+
+    if (!wait_transfer_event(timer, slot_id, 1, status_trb_phys, &transfer_event, 500)) {
+        printf("xHCI: GET DESCRIPTOR for port 0x%b timed out\n", port);
+        return device_descriptor;
+    }
+
+    u8 completion_code = transfer_event.d2 >> 24;
+
+    if (completion_code != 1) {
+        printf("xHCI: GET_DESCRIPTOR on port 0x%b failed: 0x%b\n", port,
+            completion_code);
+        return device_descriptor;
+    }
+
+
+    usb_device_descriptor *desc = (usb_device_descriptor *)desc_dma->virtual_address;
+
+    if (desc->bDescriptorType != 1 && desc->bLength != 18) {
+        printf("xHCI: invalid device descriptor from port 0x%b\n", port);
+        return device_descriptor;
+    }
     return device_descriptor;
 }
