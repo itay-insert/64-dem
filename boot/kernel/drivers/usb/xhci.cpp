@@ -762,7 +762,7 @@ u64 xhci_controller::port_to_address(u8 port) {
 }
 
 
-int xhci_controller::disable_port(u8 port, TimerSource &timer) {
+int xhci_controller::disable_port(u8 port) {
     if (port < 1 || port > ports_count)
         return INVALID_PORT;
 
@@ -786,13 +786,94 @@ int xhci_controller::disable_port(u8 port, TimerSource &timer) {
     return (*portsc & PED) ? RESET_FAILED : RESET_SUCCESS;
 }
 
-#define XHCI_ENABLE_SLOT 9
+
+u8 xhci_controller::read_protocol_slot_type(u8 port) {
+    // define pointers
+    volatile xhci_cap_regs *cap_regs = (volatile xhci_cap_regs *)controller.io_base;
+    volatile u32 *cap = (volatile u32 *)controller.io_base;
+    
+    u32 hccparams1 = cap_regs->hccparams1; // get hccparams1 from cap_regs
+
+
+    u32 xecap = (hccparams1 >> 16) & 0xFFFF; // extract xecap from hccparams1
+
+    u32 offset = xecap * 4; // calculate the offset from xecap
+
+    
+    while (offset != 0) {
+        u32 header = cap[offset / 4];
+
+        u8 cap_id = header & 0xFF;
+        u8 next = (header >> 8) & 0xFF;
+
+        if (cap_id == 2) {
+            u32 port_info = cap[(offset + 0x08) / 4];
+            u32 slot_info = cap[(offset + 0x0C) / 4];
+
+            u8 port_offset = port_info & 0xFF;
+            u8 port_count = (port_info >> 8) & 0xFF;
+
+            u8 slot_type = slot_info & 0x1F;
+
+            if (port >= port_offset && port < (u32)(port_offset+port_count))
+                return slot_type;
+        }
+
+        if (next == 0)
+            break;
+        
+        offset += (u32)next * 4;
+    }
+
+    printf("xHCI: failed to find a valid slot_type for port 0x%b\n", port);
+    return 0xFF; // 0xFF for invalid slot_type
+} 
+
+#define XHCI_ENABLE_SLOT (9u << 10)
 #define XHCI_ENABLE_TIMEOUT 500
 
 u8 xhci_controller::enable_device_slot(u8 port, TimerSource &timer) {
-    XhciTrb trb = {};
+
+    // Get the protocol slot type
+    u8 slot_type = read_protocol_slot_type(port);
+
+    if (slot_type == 0xFF)
+        return 0; // if the slot_type is invalid (slot_type == 0xFF), return invalid slot_id (slot_id == 0)
 
 
+    XhciTrb command = {}; // initialize the XhciTrb enable slot command
+
+    command.d3 = XHCI_ENABLE_SLOT | ((u32)slot_type << 16);
+
+
+    // submit command
+    u64 command_phys = submit_command(command);
+
+
+    // wait for completiom
+    XhciTrb completion = {};
+
+    if (!wait_command(timer, command_phys, &completion, 500)) {
+        printf("xHCI: Enable Slot for port 0x%b Timed out!\n", port);
+        return 0;
+    }
+
+    u8 completion_code = completion.d2 >> 24;
+
+    if (completion_code != 1) {
+        printf("xHCI: Enable slot failed, code=0x%b\n", completion_code);
+        return 0;
+    }
+
+    u8 slot_id = completion.d3 >> 24;
+
+    if (slot_id == 0) {
+        printf("xHCI: invalid slot_id for port 0x%b\n", port);
+        return 0;
+    }
+
+    printf("xHCI: enabled slot 0x%b for port 0x%b\n", slot_id, port);
+    return slot_id;
 }
 
 
