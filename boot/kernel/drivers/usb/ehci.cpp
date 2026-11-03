@@ -7,6 +7,8 @@
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/ehci.hpp"
 #include "drivers/display/vga.h"
+#include "x86-64/memory/kmalloc.h"
+
 
 typedef struct {
     u8 cap_length;            // 0x00 CAPLENGTH

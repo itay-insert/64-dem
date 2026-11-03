@@ -243,6 +243,7 @@ u32 calc_size(void *ptr, u16 ephentsize, u16 ephnum) {
         if (*p_type == PT_LOAD) {
             u64 *p_memsz = (u64 *)((u8 *)ptr + P_MEMSZ);
             size += (u32)*p_memsz;
+            size = (size + 4095) & ~4095u;
         }
         ptr = (void *)((u8 *)ptr + ephentsize);
     }

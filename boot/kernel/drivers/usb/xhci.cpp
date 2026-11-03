@@ -10,6 +10,7 @@
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/xhci_events.h"
 #include "drivers/usb/xhci.hpp"
+#include "x86-64/memory/kmalloc.h"
 
 #define TRB_CYCLE       (1u << 0)
 #define TRB_ISP         (1u << 2)
@@ -788,7 +789,7 @@ u64 xhci_controller::port_to_address(u8 port) {
 }
 
 
-int xhci_controller::disable_port(u8 port) {
+int xhci_controller::disable_port(u8 port, TimerSource &timer) {
     if (port < 1 || port > ports_count)
         return INVALID_PORT;
 

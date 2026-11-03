@@ -146,7 +146,7 @@ u8 wanted_id);
         u8 read_protocol_slot_type(u8 port);
         u8 enable_device_slot(u8 port, TimerSource &timer);
         bool disable_device_slot(u8 slot_id, TimerSource &timer);
-        bool wait_transfer_event(TimerSource &timer, u8 slot_id, u64 expected_trb, XhciTrb *result, u32 timeout);
+        bool wait_transfer_event(TimerSource &timer, u8 slot_id, u8 endpoint_id, u64 expected_trb, XhciTrb *result, u32 timeout);
                         
     public:
         int controller_init(TimerSource &timer) override;

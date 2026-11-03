@@ -6,6 +6,7 @@
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/ohci.hpp"
 #include "drivers/display/vga.h"
+#include "x86-64/memory/kmalloc.h"
 
 typedef struct {
     u32 revision;             // 0x00 HcRevision

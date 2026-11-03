@@ -6,6 +6,7 @@
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/uhci.hpp"
 #include "drivers/display/vga.h"
+#include "x86-64/memory/kmalloc.h"
 
 #define UHCI_PORT_COUNT 2
 #define UHCI_CCS (1 << 0) // current connect status
