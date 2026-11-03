@@ -128,6 +128,7 @@ class usb_controller {
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
+        virtual int set_address(usb_device_descriptor desc, TimerSource &timer) = 0;
 
 };
 

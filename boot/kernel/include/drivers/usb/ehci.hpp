@@ -47,6 +47,7 @@ class ehci_controller : public usb_controller {
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
+        int set_address(usb_device_descriptor desc, TimerSource &timer);
         ehci_controller();
 
 };

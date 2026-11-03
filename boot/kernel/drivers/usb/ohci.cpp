@@ -118,7 +118,7 @@ namespace ohci {
 }
 
 
-constexpr u32 OHCI_ED_HEAD_HALTED = 1u << 1;
+constexpr u32 OHCI_ED_HEAD_HALTED = 1u << 0;
 constexpr u32 OHCI_ED_HEAD_MASK   = 0xFFFFFFF0;
 
 
@@ -590,7 +590,7 @@ ohci_transfer_result wait_for_descriptor(
         
         // Process completed TDs whenever the HC writes back DoneHead
         if (regs->interrupt_status & OHCI_INTR_WDH)
-            process_done_queue(hcca, regs);
+            process_done_queue(hcca, regs, &watch);
 
         u32 headp = ed->headp;
 

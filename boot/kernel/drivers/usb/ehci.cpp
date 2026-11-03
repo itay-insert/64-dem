@@ -616,6 +616,12 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
         printf("EHCI: failed to allocate the setup packet\n");
         return device_descriptor;
     }
+    const u32 setup_qtd_phys =
+          (u32)(alloc.physical_address + sizeof(ehci_qh));
+    const u32 data_qtd_phys =
+          setup_qtd_phys + sizeof(ehci_qtd);
+    const u32 status_qtd_phys =
+          data_qtd_phys + sizeof(ehci_qtd);
     
     u64 setup_off = sizeof(ehci_qh) + (sizeof(ehci_qtd) * 3);
     u64 desc_off = setup_off + 8;
@@ -670,13 +676,13 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
     qh->alternate_next_qtd = 1;
     qh->token = 0;
 
-    qh->next_qtd = (u32)(alloc.physical_address + 64); // setup_td is at offset 64
+    qh->next_qtd = setup_qtd_phys;
 
     *setup_qtd = {};   // zero-intialize
 
 
 
-    setup_qtd->next_qtd = (u32)(alloc.physical_address + 128); // data_td is at offset 128
+    setup_qtd->next_qtd = data_qtd_phys;
     setup_qtd->alternate_next_qtd = 1;
 
     setup_qtd->token = 
@@ -690,7 +696,7 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
 
     *data_qtd = {};   // zero-intialize
 
-    u32 status_qtd_phys = (u32)(alloc.physical_address + 192); // status_qtd is at offset 192
+    
     data_qtd->next_qtd = status_qtd_phys;
     data_qtd->alternate_next_qtd = status_qtd_phys;
 
