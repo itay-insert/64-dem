@@ -91,6 +91,8 @@ bool usb_controller::discover_controller(usb_controller_t *controller, u8 class_
     controller->class_code = class_code;
     controller->subclass = subclass;
     controller->prog_if = prog_if;
+    controller->cached.cache = NULL;
+    controller->cached.max = 0;
     
 
     pci_enumerate(usb_find_callback, controller);

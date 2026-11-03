@@ -719,3 +719,25 @@ void kfree(void *alloc) {
    spin_unlock(&klock);
 
 }
+
+
+void *krealloc(void *alloc, u64 old_size, u64 new_size) {
+    void *new_alloc = kmalloc(new_size);
+    if (new_alloc == NULL)
+        return NULL;
+
+
+    if (alloc != NULL && old_size > 0) {
+        if (new_size >= old_size) {
+            memcpy(new_alloc, alloc, old_size);
+            memset((u8 *)new_alloc + old_size, 0, (new_size-old_size));
+        } else
+            memcpy(new_alloc, alloc, new_size);
+        kfree(alloc);
+    } else {
+        memset(new_alloc, 0, new_size);
+    }
+
+    return new_alloc;
+}
+

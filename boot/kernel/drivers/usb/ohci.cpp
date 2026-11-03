@@ -966,7 +966,25 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
         printf("OHCI: controller recovery failed\n");
 
         controller.needs_reinit = true;
-        controller.quarantined_dma = alloc;
+
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+        
+        *new_cache.error_code = (OHCI << 8) | NEEDS_REINIT;
+        *new_cache.dma = alloc;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+
+        controller.cached.cache = cache;
+        controller.cached.max++;
+        
 
         return device_descriptor;
     }

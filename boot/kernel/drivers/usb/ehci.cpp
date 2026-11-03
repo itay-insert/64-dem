@@ -726,7 +726,24 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
     
     if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, data_qtd, status_qtd, timer)) {
         controller.needs_reinit = true;
-        controller.quarantined_dma = alloc;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+        *new_cache.error_code = (EHCI << 8) | LINK_ISSUE;
+        *new_cache.dma = alloc;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+        
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
         return device_descriptor;
     }
 

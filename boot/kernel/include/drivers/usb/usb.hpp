@@ -3,6 +3,13 @@
 #include "drivers/timers/timer.hpp"
 
 
+#define NEEDS_REINIT 0
+#define LINK_ISSUE 1
+#define ADDRESS_DEVICE_TIMEOUT 2
+#define DISABLE_SLOT_ERROR 3
+#define GET_DESC_TIMEOUT 4
+
+
 #define OUT 0x00
 #define IN 0x80
 #define GET_DESCRIPTOR 0x06
@@ -30,6 +37,17 @@
 
 extern const char *codes[];
 
+typedef struct {
+    int max;
+    dma_ret *dma;
+    u16 *error_code;
+} dma_cache;
+
+
+typedef struct {
+    int max;
+    dma_cache *cache;
+} quar_dma;
 
 typedef struct {
     u8 BmRequestType;
@@ -42,7 +60,7 @@ typedef struct {
 typedef struct {
     bool found;
     bool needs_reinit;
-    dma_ret quarantined_dma;
+    quar_dma cached;
     pci_address_t pci_address;
     pci_bar_t bar;
     u64 io_base;

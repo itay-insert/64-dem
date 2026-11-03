@@ -9,7 +9,7 @@ KERNEL_EXTERN_C_BEGIN
 
 void *kmalloc(u64 Size);
 void kfree(void *alloc);
-
+void *krealloc(void *alloc, u64 old_size, u64 new_size);
 
 
 
