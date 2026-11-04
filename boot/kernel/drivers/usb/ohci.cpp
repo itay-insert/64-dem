@@ -602,29 +602,32 @@ ohci_transfer_result wait_for_descriptor(
         if ((headp & OHCI_ED_HEAD_MASK) == dummy_phys) {
 
             u32 setup_cc = setup_td->control >> 28;
-            u32 data_cc = data_td->control >> 28;
+            u32 data_cc = 0;
+
+            if (data_td)
+                data_cc = data_td->control >> 28;
             u32 status_cc = status_td->control >> 28;
 
-            if (setup_cc != 0 ||
-                data_cc != 0 ||
+            if (setup_cc != 0 || (!data_td || data_cc != 0) ||
                 status_cc != 0) {
                 return ohci_transfer_result::transfer_error;
             }
 
-            u32 cbp = data_td->cbp;
+            if (data_td) {
+                u32 cbp = data_td->cbp;
 
-            if (cbp == 0) {
-                received_bytes = data_length;
-            }
-            else if (cbp >= data_buffer_phys &&
-                     cbp <= data_buffer_phys + data_length - 1) {
+                if (cbp == 0) {
+                    received_bytes = data_length;
+                }
+                else if (cbp >= data_buffer_phys &&
+                         cbp <= data_buffer_phys + data_length - 1) {
 
-                received_bytes = cbp - data_buffer_phys;
+                    received_bytes = cbp - data_buffer_phys;
+                }
+                else {
+                    return ohci_transfer_result::transfer_error;
+                }
             }
-            else {
-                return ohci_transfer_result::transfer_error;
-            }
-
             return ohci_transfer_result::success;
         }
 
@@ -1005,4 +1008,453 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
     free_dma(alloc.virtual_address);
     return device_descriptor;
+}
+
+
+
+u8 next_usb_address = 1;
+
+static inline u8 allocate_usb_address(void) {
+    if (next_usb_address > 127) 
+        return 0;  // no addresses left
+
+    return next_usb_address++;
+}
+
+usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
+    usb_device device = {0};
+
+    u64 size = sizeof(ohci_ed) + (sizeof(ohci_td) * 3) + 8;
+
+    dma_ret alloc = allocate_dma(size);
+    if (alloc.status != 0) {
+        printf("OHCI: set address allocation failed\n");
+        device.discovered = false;
+        return device;
+    }
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("OHCI: set address physical address too big\n");
+        device.discovered = false;
+        return device;
+    }
+
+    u32 ed_phys = (u32)alloc.physical_address;
+    u32 setup_td_phys = ed_phys + sizeof(ohci_ed);
+    u32 status_phys = setup_td_phys + sizeof(ohci_td);
+    u32 dummy_phys = status_phys + sizeof(ohci_td);
+    u32 setup_phys = dummy_phys + sizeof(ohci_td);
+
+    ohci_ed *ed = (ohci_ed *)alloc.virtual_address;
+    ohci_td *setup_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
+    ohci_td *status_td = (ohci_td *)((u8 *)setup_td + sizeof(ohci_td));
+    ohci_td *dummy_td = (ohci_td *)((u8 *)status_td + sizeof(ohci_td));
+    usb_setup_packet *setup =
+    (usb_setup_packet *)((u8 *)dummy_td + sizeof(ohci_td));
+
+    u8 address = allocate_usb_address();
+
+    *setup = {
+        .BmRequestType = 0x00,
+        .bRequest      = 0x05,
+        .wValue        = address,
+        .wIndex        = 0,
+        .wLength       = 0
+    };
+
+    u32 max_packet_size = desc.bMaxPacketSize0;
+
+    volatile u32 *portreg =
+        (volatile u32 *)port_to_address(port, controller.io_base);
+
+    bool low_speed = (*portreg & OHCI_RHPS_LSDA) != 0;
+
+    if (low_speed && max_packet_size != 8) {
+        device.discovered = false;
+        free_dma(alloc.virtual_address);
+        return device;
+    }
+
+    if (!low_speed &&
+        max_packet_size != 8 &&
+        max_packet_size != 16 &&
+        max_packet_size != 32 &&
+        max_packet_size != 64) {
+            device.discovered = false;
+            free_dma(alloc.virtual_address);
+            return device;
+    }
+
+    *ed = {};
+
+    ed->control =
+        (0u << 0) |                  // Function address 0
+        (0u << 7) |                  // Endpoint 0
+        (0u << 11) |                 // Direction from TD
+        (low_speed ? ohci::ed::low_speed : 0) |
+        (max_packet_size << 16);
+
+    ed->tailp = dummy_phys;
+    ed->headp = setup_td_phys;
+    ed->next_ed = 0;
+
+    *setup_td = {};
+
+    setup_td->control =
+        ohci::td::condition_not_accessed |
+        ohci::td::setup |
+        ohci::td::toggle_data0;
+
+    setup_td->cbp = setup_phys;
+    setup_td->next_td = status_phys;
+    setup_td->be = setup_phys + 7;
+
+    *status_td = {};
+
+    status_td->control =
+        ohci::td::condition_not_accessed |
+        ohci::td::in |
+        ohci::td::toggle_data1;
+
+    status_td->cbp = 0;
+    status_td->next_td = dummy_phys;
+    status_td->be = 0;
+
+    *dummy_td = {};
+
+    volatile ohci_registers_t *ohci_regs =
+    (volatile ohci_registers_t *)controller.io_base;
+
+    u32 old_control = ohci_regs->control;
+
+    if (!stop_control_schedule(
+            ohci_regs, hcca->frame_number, timer)) {
+
+        printf("OHCI: timeout disabling control list\n");
+
+        ohci_regs->control = old_control;
+        volatile u32 readback = ohci_regs->control;
+        (void)readback;
+
+        controller.needs_reinit = true;
+        free_dma(alloc.virtual_address);
+        return device;
+    }
+
+    u32 old_head = ohci_regs->control_head_ed;
+    u32 old_current = ohci_regs->control_current_ed;
+
+    bool old_clf =
+        (ohci_regs->command_status & OHCI_CLF) != 0;
+
+    // Install our ED.
+    ohci_regs->control_head_ed = ed_phys;
+    ohci_regs->control_current_ed = 0;
+
+    // Tell OHCI that the control list has new work.
+    ohci_regs->command_status = OHCI_CLF;
+
+    asm volatile("mfence" ::: "memory");
+
+    // Enable the control list.
+    ohci_regs->control = old_control | OHCI_CLE;
+
+    ohci_transfer_watch watch = {
+        setup_td_phys,
+        0,
+        status_phys,
+        0
+    };
+
+    u32 received = 0;
+
+    auto result = wait_for_descriptor(ed, setup_td, nullptr, status_td, dummy_phys, 0, o, hcca, ohci_regs, watch, timer, received);
+    if (!restore_control_schedule(
+        ohci_regs,
+        hcca,
+        timer,
+        ed,
+        setup_td,
+        nullptr,
+        status_td,
+        &watch,
+        old_control,
+        old_head,
+        old_current,
+        old_clf)) {
+
+        printf("OHCI: controller recovery failed\n");
+
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+
+        *new_cache.dma = alloc;
+        *new_cache.error_code = (OHCI << 8) | RESTORATION_FAILURE;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        device.discovered = false;
+
+        return device;
+    }
+
+    if (result != ohci_transfer_result::success) {
+        printf("OHCI: SET ADDRESS failed\n");
+        device.discovered = false;
+
+        int rests = reset_port(port, timer);
+        if (rests != 0) {
+            printf("OHCI: failed to reset port 0x%b\n", port);
+        } else {
+            next_usb_address = address;
+        }
+        free_dma(alloc.virtual_address);
+        return device;
+    }
+
+    wait_ms(timer, 2);
+
+    device.address = address;
+
+    free_dma(alloc.virtual_address);
+
+    size = sizeof(ohci_ed) + (sizeof(ohci_td) * 4) + 8 + 18;
+
+    alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("OHCI: GET DESCRIPTOR allocation failed\n");
+        device.discovered = false;
+        return device;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("OHCI: GET DESCRIPTOR physical address too big\n");
+        device.discovered = false;
+        return device;
+    }
+
+    ed_phys = (u32)alloc.physical_address;
+    setup_td_phys = ed_phys + sizeof(ohci_ed);
+    u64 data_td_phys = setup_td_phys + sizeof(ohci_td);
+    status_phys = data_td_phys + sizeof(ohci_td);
+    dummy_phys = status_phys + sizeof(ohci_td);
+    setup_phys = dummy_phys + sizeof(ohci_td);
+    u64 desc_phys = setup_phys + 8;
+
+    ed = (ohci_ed *)alloc.virtual_address;
+    setup_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
+    ohci_td *data_td = (ohci_td *)((u8 *)setup_td + sizeof(ohci_td));
+    status_td = (ohci_td *)((u8 *)data_td + sizeof(ohci_td));
+    dummy_td = (ohci_td *)((u8 *)status_td + sizeof(ohci_td));
+    setup = (usb_setup_packet *)((u8 *)dummy_td + sizeof(ohci_td));
+
+    *setup = {
+        .BmRequestType = 0x80,
+        .bRequest = 0x06,
+        .wValue = 0x0100,
+        .wIndex = 0,
+        .wLength = 18
+    };
+
+   
+    if (low_speed && max_packet_size != 8) {
+        free_dma(alloc.virtual_address);
+        device.discovered = false;
+        return device;
+    }
+
+    if (!low_speed &&
+        max_packet_size != 8 &&
+        max_packet_size != 16 &&
+        max_packet_size != 32 &&
+        max_packet_size != 64) {
+        free_dma(alloc.virtual_address);
+        device.discovered = false;
+        return device;
+    }
+
+    *ed = {};
+
+    ed->control =
+        ((u32)address << 0) |
+        (0u << 7) |
+        (0u << 11) |
+        (low_speed ? ohci::ed::low_speed : 0) |
+        (max_packet_size << 16);
+
+    ed->tailp = dummy_phys;
+    ed->headp = setup_td_phys;
+    ed->next_ed = 0;
+
+    *setup_td = {};
+
+    setup_td->control =
+        ohci::td::condition_not_accessed |
+        ohci::td::setup |
+        ohci::td::toggle_data0;
+
+    setup_td->cbp = setup_phys;
+    setup_td->next_td = data_td_phys;
+    setup_td->be = setup_phys + 7;
+
+    *data_td = {};
+
+    data_td->control =
+        ohci::td::condition_not_accessed |
+        ohci::td::rounding |
+        ohci::td::in |
+        ohci::td::toggle_data1;
+
+    data_td->cbp = descriptor_phys; 
+    data_td->next_td = status_phys;
+    data_td->be = descriptor_phys + 17;
+
+    *status_td = {};
+
+    status_td->control =
+        ohci::td::condition_not_accessed |
+        ohci::td::out |
+        ohci::td::toggle_data1;
+
+    status_td->cbp = 0;
+    status_td->next_td = dummy_phys;
+    status_td->be = 0;
+
+    *dummy_td = {};
+
+    old_control = ohci_regs->control;
+
+    if (!stop_control_schedule(
+            ohci_regs, hcca->frame_number, timer)) {
+
+        printf("OHCI: timeout disabling control list\n");
+
+        ohci_regs->control = old_control;
+        volatile u32 readback = ohci_regs->control;
+        (void)readback;
+
+        controller.needs_reinit = true;
+        free_dma(alloc.virtual_address);
+        return device;
+    }
+
+    old_head = ohci_regs->control_head_ed;
+    old_current = ohci_regs->control_current_ed;
+
+    old_clf =
+        (ohci_regs->command_status & OHCI_CLF) != 0;
+
+    // Install our ED.
+    ohci_regs->control_head_ed = ed_phys;
+    ohci_regs->control_current_ed = 0;
+
+    // Tell OHCI that the control list has new work.
+    ohci_regs->command_status = OHCI_CLF;
+
+    asm volatile("mfence" ::: "memory");
+
+    // Enable the control list.
+    ohci_regs->control = old_control | OHCI_CLE;
+
+    ohci_transfer_watch watch = {
+        setup_td_phys,
+        data_td_phys,
+        status_phys,
+        0
+    };
+
+    received = 0;
+    auto result = wait_for_descriptor(
+        ed,
+        setup_td,
+        data_td,
+        status_td,
+        dummy_phys,
+        descriptor_phys,
+        18,                // Request length
+        hcca,
+        ohci_regs,
+        watch,
+        timer,
+        received
+    );
+
+    if (!restore_control_schedule(
+        ohci_regs,
+        hcca,
+        timer,
+        ed,
+        setup_td,
+        nullptr,
+        status_td,
+        &watch,
+        old_control,
+        old_head,
+        old_current,
+        old_clf)) {
+
+        printf("OHCI: controller recovery failed\n");
+
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+
+        *new_cache.dma = alloc;
+        *new_cache.error_code = (OHCI << 8) | RESTORATION_FAILURE;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        device.discovered = false;
+
+        return device;
+    }
+
+
+    if (result != ohci_transfer_result::success) {
+        printf("OHCI: SET ADDRESS failed\n");
+        device.discovered = false;
+
+        int rests = reset_port(port, timer);
+        if (rests != 0) {
+            printf("OHCI: failed to reset port 0x%b\n", port);
+        } else {
+            next_usb_address = address;
+        }
+        free_dma(alloc.virtual_address);
+        return device;
+    } 
+
+    usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
+    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+        usb_device_descriptor *device_ptr = desc;
+        memcpy(device_ptr, desc_ptr, 18);
+    }
+
+    device.descriptor = desc;
+    device.discovered = true;
+    free_dma(alloc.virtual_address);
+    return device;
 }

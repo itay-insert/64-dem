@@ -8,6 +8,7 @@
 #define ADDRESS_DEVICE_TIMEOUT 2
 #define DISABLE_SLOT_ERROR 3
 #define GET_DESC_TIMEOUT 4
+#define RESTORATION_FAILURE 5
 
 
 #define OUT 0x00
@@ -88,6 +89,28 @@ typedef struct {
 } __attribute__((packed)) usb_device_descriptor;
 
 typedef struct {
+    u8  bLength;
+    u8  bDescriptorType;
+    u8  bEndpointAddress;
+    u8  bmAttributes;
+    u16 wMaxPacketSize;
+    u8  bInterval;
+} __attribute__((packed)) usb_endpoint_descriptor;
+
+typedef struct {
+    u8 address;
+    u8 transfer_type;
+    u16 max_packet_size;
+    u8 interval;
+
+    u8 data_toggle;
+
+    u8 interface_number;
+    u8 alternate_setting;
+    usb_endpoint_descriptor descriptor;
+} usb_endpoint;
+
+typedef struct {
     u8 port_number;
     u8 address;
     u8 speed;
@@ -98,6 +121,8 @@ typedef struct {
 
     usb_controller_t *controller;
     usb_device_descriptor descriptor;
+
+    usb_endpoint endpoint;
 } usb_device;
 
 
@@ -128,7 +153,7 @@ class usb_controller {
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
-        virtual int set_address(usb_device_descriptor desc, TimerSource &timer) = 0;
+        virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer) = 0;
 
 };
 
