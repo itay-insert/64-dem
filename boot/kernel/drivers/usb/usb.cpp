@@ -11,6 +11,11 @@
 #include "drivers/usb/xhci.hpp"
 #include "x86-64/memory/kmalloc.h"
 
+#define config_case 0x02
+#define interface_case 0x04
+#define endpoint_case 0x05
+
+
 const char *codes[] = {
     "NO_DEVICE",
     "RESET_STILL_ASSERTED", 
@@ -192,6 +197,101 @@ configuration_descriptor usb_controller::get_config(u8 address, TimerSource &tim
     return desc;
 }
 
+
+static inline u16 count_tree(u8 *tree, u16 max_length, u8 Case) {
+    u16 count = 0;
+    u16 offset = 0;
+
+    while (offset < max_length) {
+        if (max_length - offset < 2)
+            return count;
+
+        const u8 *entry = tree + offset;
+        u8 length = entry[0];
+        u8 type = entry[1];
+
+        if (length < 2 || length > max_length - offset)
+            return count;
+
+        if (type == Case)
+            count++;
+
+        offset += length;
+    }
+
+    return count;
+}
+
+static inline void fill_interfaces(u8 *tree, u16 max_length, usb_interface *interfaces, u16 interfaces_count) {
+    u16 count = 0;
+    u16 offset = 0;
+    u16 i = 0;
+    while (offset < max_length && i < interfaces_count) {
+        if (max_length - offset < 2)
+            return;
+
+        const u8 *entry = tree + offset;
+        u8 length = entry[0];
+        u8 type = entry[1];
+
+        if (length < 2 || length > max_length - offset)
+            return;
+
+        if (type == 0x04) {
+            memcpy(&interfaces[i].descriptor, entry, sizeof(usb_interface_descriptor));
+            interfaces[i].endpoints = new usb_endpoint[interfaces[i].descriptor.bNumEndpoints];
+            interfaces[i].endpoint_count = interfaces[i].descriptor.bNumEndpoints;
+
+            while (type != 0x05 && interfaces[i].endpoint_count) {
+                if (max_length - offset < 2)
+                    return;
+                if (length < 2 || length > max_length - offset)
+                    return;
+                
+                offset += length;
+                entry = tree + offset;
+                length = entry[0];
+                type = entry[1];
+            }
+
+            bool was_endpoint = false;
+            for (u8 j = 0; j < interfaces[i].endpoint_count; j += was_endpoint) {
+
+                was_endpoint = (type == 0x05);
+
+                if (type == 0x05) {
+                    memcpy(&interfaces[i].endpoints[j].descriptor, entry, sizeof(usb_endpoint_descriptor));
+
+                    interfaces[i].endpoints[j].address = interfaces[i].endpoints[j].descriptor.bEndpointAddress;
+                    interfaces[i].endpoints[j].alternate_setting = interfaces[i].descriptor.bAlternateSetting;
+                    interfaces[i].endpoints[j].data_toggle = 0;
+                    interfaces[i].endpoints[j].interface_number = interfaces[i].descriptor.bInterfaceNumber;
+                    interfaces[i].endpoints[j].interval = interfaces[i].endpoints[j].descriptor.bInterval;
+                    interfaces[i].endpoints[j].max_packet_size = interfaces[i].endpoints[j].descriptor.wMaxPacketSize & 0x07ff;
+                    interfaces[i].endpoints[j].transfer_type = interfaces[i].endpoints[j].descriptor.bmAttributes & 0x03;
+                }
+
+                offset += length;
+
+                if (max_length - offset < 2)
+                    break;
+                if (length < 2 || length > max_length - offset)
+                    break;
+
+                entry = tree + offset;
+                length = entry[0];
+                type = entry[1];
+            }
+            i++;
+        }
+
+        offset += length;
+    }
+
+
+}
+
+
 usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
     usb_device Device = {0};
     pci_address_t pci_address = controller.pci_address;
@@ -221,6 +321,37 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
 
     Device.config = get_config(Device.address, timer, (u32)Device.descriptor.bMaxPacketSize0, port);
 
+    u16 total = Device.config.wTotalLength;
+
+    if (!(total < sizeof(configuration_descriptor))) {
+        usb_setup_packet packet = {
+            0x80,
+            0x06,
+            0x0200,
+            0,
+            9
+        };
+
+        u8 *tree = (u8 *)usb_send_packet(packet, (u32)Device.descriptor.bMaxPacketSize0, total, Device.address, timer, port);
+
+        if (!tree) 
+            printf("USB: tree failure\n");
+        else {
+            u16 interfaces_count = count_tree(tree, total, interface_case);
+
+            Device.interfaces = new usb_interface[interfaces_count];
+
+
+            
+
+            exit:
+
+            kfree(tree);
+
+            
+           
+        }
+    }
 
 
     return Device;

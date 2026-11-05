@@ -1801,6 +1801,6 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         return ptr1;
     } else {
         free_dma(alloc.virtual_address);
-        return nullptr;
+        return (void *)1;
     }
 }

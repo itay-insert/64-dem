@@ -44,29 +44,6 @@ typedef enum {
     UHCI_PORTSC2 = 0x12 // USB port 2 status and control
 } UHCI_Regs;
 
-typedef struct uhci_td uhci_td;
-
-struct alignas(16) uhci_td {
-    u32 link;
-    u32 status;
-    u32 token;
-    u32 buffer;
-
-
-    u32 software[4];
-};
-
-static_assert(alignof(uhci_td) == 16);
-
-typedef struct uhci_qh uhci_qh;
-
-struct alignas(16) uhci_qh {
-    u32 head_link;
-    u32 element_link;
-    u32 reserved[2];
-};
-
-static_assert(sizeof(uhci_qh) == 16);
 
 namespace uhci {
     namespace pid {
@@ -234,6 +211,7 @@ int uhci_controller::enumrate_ports() {
         ports[port].controller_type = UHCI;
     }
 
+    states = new uhci_endpoint_state[UHCI_PORT_COUNT];
 
     return UHCI_PORT_COUNT; // return the number of ports
 }
@@ -1288,7 +1266,27 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         return ptr1;
     } else { 
         free_dma(alloc.virtual_address);
-        return nullptr;
+        return (void *)1;
     }
+
+}
+
+
+int uhci_controller::configure_endpoint(usb_endpoint_descriptor endpoint, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer, u8 port) {
+    usb_setup_packet packet = {
+        0x00,
+        0x09,
+        bConfigurationValue,
+        0,
+        0
+    };
+
+    u64 code = (u64)usb_send_packet(packet, maxpacketsize, 0, address, timer, port);
+
+    if (code != 1) {
+        printf("UHCI: SET_CONFIGURATION for the device on port 0x%b failed\n", port);
+        return 1; // return 1 for failure
+    }
+
 
 }

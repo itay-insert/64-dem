@@ -1676,5 +1676,8 @@ void *xhci_controller::usb_send_packet(usb_setup_packet packet,
     if (response)
         memcpy(response, (const void *)data_dma.virtual_address, length);
     free_dma(data_dma.virtual_address);
-    return response;
+    if (response)
+        return response;
+    else
+        return (void *)1;
 }

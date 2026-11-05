@@ -1279,6 +1279,14 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     *qh = {};
 
+    qh->endpoint_characteristics =
+        EHCI_QH_RL(4) |
+        EHCI_QH_ADDR(address) |
+        EHCI_QH_EP(0) |
+        EHCI_QH_SPEED(EHCI_SPEED_HIGH) |
+        EHCI_QH_DTC |
+        EHCI_QH_MPS(maxpacketsize);
+    qh->endpoint_capabilities = 0;
     qh->current_qtd = 0;
     qh->next_qtd = setup_td_phys;
     qh->alternate_next_qtd = EHCI_LINK_TERMINATE;
@@ -1337,7 +1345,7 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         return ptr1;
     } else {
         free_dma(alloc.virtual_address);
-        return nullptr;
+        return (void *)1;
     }
 
 }

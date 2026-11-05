@@ -134,19 +134,28 @@ typedef struct {
 } usb_endpoint;
 
 typedef struct {
+    usb_interface_descriptor descriptor;
+    usb_endpoint *endpoints;
+    u8 endpoint_count;
+} usb_interface;
+
+
+
+typedef struct {
     u8 port_number;
     u8 address;
     u8 speed;
 
     u16 vendor_id;
     u16 product_id;
+
     bool discovered;
 
     usb_controller_t *controller;
     usb_device_descriptor descriptor;
     configuration_descriptor config;
-    usb_interface_descriptor interface;
-    usb_endpoint endpoint;
+    usb_interface *interfaces;
+    u16 usb_interface_count;
 } usb_device;
 
 
@@ -180,6 +189,7 @@ class usb_controller {
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
+        virtual int configure_endpoint(usb_endpoint_descriptor endpoint, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer, u8 port) = 0;
         configuration_descriptor get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port);
 
 };
