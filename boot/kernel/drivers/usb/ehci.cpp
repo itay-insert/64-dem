@@ -482,8 +482,11 @@ ehci_transfer_result wait_for_descriptor(
         asm volatile("mfence" ::: "memory");
 
         u32 setup_token  = setup_td->token;
-        u32 data_token   = data_td->token;
+        u32 data_token   = 0;
         u32 status_token = status_td->token;
+
+        if (data_td)
+            data_token = data_td->token;
 
         bool setup_active  = setup_token & QTD_STATUS_ACTIVE;
         bool data_active   = data_token & QTD_STATUS_ACTIVE;
@@ -498,23 +501,24 @@ ehci_transfer_result wait_for_descriptor(
 
         // Wait until all three stages finish.
         if (!setup_active && !data_active && !status_active) {
+            if (data_td) {
+                u32 setup_remaining  = (setup_token >> 16) & 0x7FFF;
+                u32 data_remaining   = (data_token >> 16) & 0x7FFF;
+                u32 status_remaining = (status_token >> 16) & 0x7FFF;
 
-            u32 setup_remaining  = (setup_token >> 16) & 0x7FFF;
-            u32 data_remaining   = (data_token >> 16) & 0x7FFF;
-            u32 status_remaining = (status_token >> 16) & 0x7FFF;
+                // SETUP must transfer all 8 bytes.
+                if (setup_remaining != 0)
+                    return ehci_transfer_result::transfer_error;
 
-            // SETUP must transfer all 8 bytes.
-            if (setup_remaining != 0)
-                return ehci_transfer_result::transfer_error;
+                // STATUS is a zero-length transfer.
+                if (status_remaining != 0)
+                    return ehci_transfer_result::transfer_error;
 
-            // STATUS is a zero-length transfer.
-            if (status_remaining != 0)
-                return ehci_transfer_result::transfer_error;
+                if (data_remaining > REQUESTED_BYTES)
+                    return ehci_transfer_result::transfer_error;
 
-            if (data_remaining > REQUESTED_BYTES)
-                return ehci_transfer_result::transfer_error;
-
-            received_bytes = REQUESTED_BYTES - data_remaining;
+                received_bytes = REQUESTED_BYTES - data_remaining;
+            }
 
             return ehci_transfer_result::success;
         }
@@ -559,8 +563,11 @@ bool unlink_async_qh(volatile ehci_op_regs_t* regs, ehci_async_link_state& state
         if (!state.linked)
             return true;
 
+        u32 data_token = 0;
+        if (data_qtd)
+            data_token = data_qtd->token;
         if ((qh->token & EHCI_QTD_ACTIVE) || (setup_qtd->token & EHCI_QTD_ACTIVE) ||
-        (data_qtd->token & EHCI_QTD_ACTIVE) || (status_qtd->token & EHCI_QTD_ACTIVE)) {
+        (data_token & EHCI_QTD_ACTIVE) || (status_qtd->token & EHCI_QTD_ACTIVE)) {
             printf("EHCI: qh or qtd still active\n");
             return false;
         }
@@ -733,6 +740,7 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
     auto result = wait_for_descriptor(setup_qtd, data_qtd, status_qtd, timer, recieved);
     
     if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, data_qtd, status_qtd, timer)) {
+        printf("EHCI: unlink async_qh error in identify_device\n");
         controller.needs_reinit = true;
         
         dma_cache new_cache = {0};
@@ -770,4 +778,368 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
 
     free_dma(alloc.virtual_address);
     return device_descriptor;
+}
+
+
+// Link pointers
+#define EHCI_LINK_TERMINATE  (1u << 0)
+#define EHCI_LINK_TYPE_QH    (1u << 1)
+
+// qTD token
+#define EHCI_QTD_TOGGLE      (1u << 31)
+#define EHCI_QTD_BYTES(n)    ((u32)(n) << 16)
+#define EHCI_QTD_IOC         (1u << 15)
+#define EHCI_QTD_CERR(n)     ((u32)(n) << 10)
+
+#define EHCI_QTD_PID_OUT     (0u << 8)
+#define EHCI_QTD_PID_IN      (1u << 8)
+#define EHCI_QTD_PID_SETUP   (2u << 8)
+
+#define EHCI_QTD_ACTIVE      (1u << 7)
+
+// QH endpoint characteristics
+#define EHCI_QH_CONTROL      (1u << 27)
+#define EHCI_QH_MAX_PACKET(n) ((u32)(n) << 16)
+#define EHCI_QH_HEAD         (1u << 15)
+#define EHCI_QH_DTC          (1u << 14)
+
+#define EHCI_QH_FULL_SPEED   (0u << 12)
+#define EHCI_QH_LOW_SPEED    (1u << 12)
+#define EHCI_QH_HIGH_SPEED   (2u << 12)
+
+#define EHCI_QH_ENDPOINT(n)  ((u32)(n) << 8)
+#define EHCI_QH_ADDRESS(n)   ((u32)(n))
+#define EHCI_QH_NAK_RELOAD(n) ((u32)(n) << 28)
+
+// Asynchronous schedule
+#define EHCI_USBCMD_ASE      (1u << 5)
+#define EHCI_USBCMD_IAAD     (1u << 6)
+#define EHCI_USBSTS_ASS      (1u << 15)
+#define EHCI_USBSTS_IAA      (1u << 5)
+
+
+u8 next_usb_address = 1;
+
+static inline u8 allocate_usb_address(void) {
+    if (next_usb_address > 127) 
+        return 0;  // no addresses left
+
+    return next_usb_address++;
+}
+
+
+usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
+    usb_device device = {0};
+
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+    volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
+
+
+    u64 size = sizeof(ehci_qh) + (sizeof(ehci_qtd) << 1) + 8;
+    dma_ret alloc = allocate_dma(size); // allocate the dma for set_address
+
+    if (alloc.status != 0) {
+        printf("EHCI: SET ADDRESS allocation failed\n");
+        device.discovered = false;
+        return device;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("EHCI: SET ADDRESS physical address too big\n");
+        free_dma(alloc.virtual_address);
+        device.discovered = false;
+        return device;
+    }
+
+    u32 qh_phys = (u32)alloc.physical_address;
+    u32 setup_qtd_phys = qh_phys + sizeof(ehci_qh);
+    u32 status_qtd_phys = setup_qtd_phys + sizeof(ehci_qtd);
+    u32 setup_phys = status_qtd_phys + sizeof(ehci_qtd);
+
+    ehci_qh *qh = (ehci_qh *)alloc.virtual_address;
+    ehci_qtd *setup_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
+    ehci_qtd *status_qtd = (ehci_qtd *)((u8 *)setup_qtd + sizeof(ehci_qtd));
+    usb_setup_packet *setup = (usb_setup_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
+
+
+    u8 address = allocate_usb_address();
+
+    // setup packet init
+    *setup = {
+        .BmRequestType = 0x00,
+        .bRequest = 0x05,
+        .wValue = address,
+        .wIndex = 0,
+        .wLength = 0
+    };
+
+    *qh = {};
+
+    qh->endpoint_characteristics =
+        EHCI_QH_NAK_RELOAD(4) |
+        EHCI_QH_ADDRESS(0) |
+        EHCI_QH_ENDPOINT(0) |
+        EHCI_QH_HIGH_SPEED |
+        EHCI_QH_DTC |
+        EHCI_QH_MAX_PACKET(64);
+
+
+    qh->endpoint_capabilities = 0;
+
+    qh->current_qtd = 0;
+    
+    qh->next_qtd = setup_qtd_phys;
+    qh->alternate_next_qtd = EHCI_LINK_TERMINATE;
+    qh->token = 0;
+
+    for (int i = 0; i < 5; i++) {
+        qh->buffer[i] = 0;
+        qh->extended_buffer[i] = 0;
+    }
+
+    // setup_qtd init
+    *setup_qtd = {};
+
+    setup_qtd->token =
+        EHCI_QTD_ACTIVE |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID_SETUP |
+        EHCI_QTD_BYTES(8);
+
+    setup_qtd->next_qtd = status_qtd_phys;
+    setup_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
+
+    setup_qtd->buffer[0] = setup_phys;
+
+    for (int i = 1; i < 5; i++) {
+        setup_qtd->buffer[i] = 0;
+        setup_qtd->extended_buffer[i] = 0;
+    }
+
+    setup_qtd->extended_buffer[0] = 0;
+
+
+    *status_qtd = {};
+
+    status_qtd->token =
+        EHCI_QTD_ACTIVE |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID_IN |
+        EHCI_QTD_TOGGLE |
+        EHCI_QTD_BYTES(0) |
+        EHCI_QTD_IOC;
+
+    for (int i = 0; i < 5; i++) {
+        status_qtd->buffer[i] = 0;
+        status_qtd->extended_buffer[i] = 0;
+    }
+
+    status_qtd->next_qtd = EHCI_LINK_TERMINATE;
+    status_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
+
+    ehci_async_link_state link_state = {};
+
+    insert_async_qh(async_head, async_head_phys, qh, qh_phys, link_state); // insert the qh to async_head
+
+    u32 recieved = 0;
+
+    auto result = wait_for_descriptor(setup_qtd, nullptr, status_qtd, timer, recieved);
+
+    if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, nullptr, status_qtd, timer)) {
+        printf("EHCI: unlink async_qh error in set_address\n");
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+        *new_cache.error_code = (EHCI << 8) | LINK_ISSUE;
+        *new_cache.dma = alloc;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+        
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        device.discovered = false;
+        return device;
+    }
+
+    if (result != ehci_transfer_result::success) {
+        printf("EHCI: SET ADDRESS for port 0x%b failed\n", port);
+        
+        next_usb_address = address;
+        device.discovered = false;
+        free_dma(alloc.virtual_address);
+        return device;
+    }
+
+    device.address = address; // save the usb address
+    wait_ms(timer, 2);
+
+    free_dma(alloc.virtual_address);
+
+    size = sizeof(ehci_qh) + (sizeof(ehci_qtd) * 3) + 8 + 18;
+    alloc = allocate_dma(size); // allocate GET DESCRIPTOR
+
+    if (alloc.status != 0) {
+        printf("EHCI: GET DESCRIPTOR allocation failed\n");
+        device.discovered = false;
+        return device;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("EHCI: GET DESCRIPTOR physical address too big\n");
+        free_dma(alloc.virtual_address);
+        device.discovered = false;
+        return device;
+    }
+
+    // calculate sizes
+    qh_phys = (u32)alloc.physical_address;
+    setup_qtd_phys = qh_phys + sizeof(ehci_qh);
+    u32 data_qtd_phys = setup_qtd_phys + sizeof(ehci_qtd)
+    status_qtd_phys = data_qtd_phys + sizeof(ehci_qtd);
+    setup_phys = status_qtd_phys + sizeof(ehci_qtd);
+    u32 desc_phys = setup_phys + 8;
+
+    qh = (ehci_qh *)alloc.virtual_address;
+    setup_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
+    ehci_qtd *data_qtd = (ehci_qtd *)((u8 *)setup_qtd + sizeof(ehci_qtd));
+    status_qtd = (ehci_qtd *)((u8 *)data_qtd + sizeof(ehci_qtd));
+    setup = (usb_setup_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
+
+    *setup = {
+        .BmRequestType = 0x80,
+        .bRequest = 0x06,
+        .wValue = 0x0100,
+        .wIndex = 0,
+        .wLength = 18
+    };
+
+
+    // qh init
+    *qh = {};
+
+    qh->endpoint_characteristics =
+        EHCI_QH_NAK_RELOAD(4) |
+        EHCI_QH_ADDRESS(address) |
+        EHCI_QH_ENDPOINT(0) |
+        EHCI_QH_HIGH_SPEED |
+        EHCI_QH_DTC |
+        EHCI_QH_MAX_PACKET(max_packet_size);
+
+    qh->endpoint_capabilities = 0;
+    qh->alternate_next_qtd = EHCI_LINK_TERMINATE;
+    qh->next_qtd = setup_qtd_phys;
+
+    qh->current_qtd = 0;
+
+    qh->token = 0;
+
+    *setup_qtd = {};
+
+    setup_qtd->token =
+        EHCI_QTD_ACTIVE |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID_SETUP |
+        EHCI_QTD_BYTES(8); // DATA0
+
+    setup_qtd->next_qtd = data_qtd_phys;
+    setup_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
+
+    setup_qtd->buffer[0] = setup_phys;
+
+
+    *data_qtd = {};
+
+    data_qtd->token =
+        EHCI_QTD_ACTIVE |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID_IN |
+        EHCI_QTD_TOGGLE |
+        EHCI_QTD_BYTES(18);
+
+    data_qtd->next_qtd = status_qtd_phys;
+    data_qtd->alternate_next_qtd = status_qtd_phys;
+
+    data_qtd->buffer[0] = desc_phys;
+
+    *status_qtd = {};
+
+    status_qtd->token =
+        EHCI_QTD_ACTIVE |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID_OUT |
+        EHCI_QTD_TOGGLE |
+        EHCI_QTD_BYTES(0) |
+        EHCI_QTD_IOC;
+
+    status_qtd->next_qtd = EHCI_LINK_TERMINATE;
+    status_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
+
+    link_state = {};
+
+    insert_async_qh(async_head, async_head_phys, qh, qh_phys, link_state);
+
+    recieved = 0;
+
+    result = wait_for_descriptor(setup_qtd, data_qtd, status_qtd, timer, recieved);
+
+    if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, data_qtd, status_qtd, timer)) {
+        printf("EHCI: unlink async_qh error in GET DESCRIPTOR\n");
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+        *new_cache.error_code = (EHCI << 8) | LINK_ISSUE;
+        *new_cache.dma = alloc;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+        
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        device.discovered = false;
+        return device;
+    }
+
+    if (result != ehci_transfer_result::success) {
+        printf("EHCI: GET DESCRIPTOR for port 0x%b failed\n", port);
+
+        int rests = reset_port(port, timer);
+        if (rests != 0) {
+            printf("EHCI: failed to reset port 0x%b\n", port);
+        } else {
+            next_usb_address = address;
+        }
+
+        free_dma(alloc.virtual_address);
+        device.discovered = false;
+        device.address = 0;
+        return device;
+    }
+
+    usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
+    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+        usb_device_descriptor *device_ptr = desc;
+        memcpy(device_ptr, desc_ptr, 18);
+    }
+
+    device.descriptor = desc;
+    device.discovered = true;
+    free_dma(alloc.virtual_address);
+    return device;
 }

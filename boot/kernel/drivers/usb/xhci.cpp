@@ -676,6 +676,8 @@ int xhci_controller::enumrate_ports() {
     u8 xhci_port_count = (u8)((cap_regs->hcsparams1 >> 24) & 0xFF);
 
     ports = new usb_port_descriptor[xhci_port_count]; // allocate the port descriptors
+    slots = new usb_slot[xhci_port_count];
+
     if (ports == nullptr) // return -1 for allocation failure
         return -1;
 
@@ -1016,6 +1018,12 @@ bool xhci_controller::wait_transfer_event(
 }
 
 
+static u8 usb_address = 0;
+static u16 initial_mps = 0;
+static u8 speed_id = 0;
+
+static u64 context_size = 0;
+
 usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
     u8 slot_id = enable_device_slot(port, timer);
@@ -1025,12 +1033,14 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     volatile xhci_cap_regs *cap = (volatile xhci_cap_regs *)controller.io_base;
 
     u32 hccparams1 = cap->hccparams1;
-    u64 context_size = (hccparams1 & CSZ) ? 64 : 32;
+    context_size = (hccparams1 & CSZ) ? 64 : 32;
 
     bool addr_64 = (hccparams1 & 1u) != 0;  // ac64
+    addr64 = addr_64;
+
     u64 op_base = controller.io_base + (u64)cap->caplength;
 
-    u16 initial_mps = 0;
+    initial_mps = 0;
 
     if (!get_initial_mps(op_base, port, initial_mps)) {
         printf("xHCI: failed to get initial_mps from port 0x%b\n", port);
@@ -1054,6 +1064,9 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     if (!addr_64 && input_context.physical_address > 0xFFFFFFFF) {
         printf("xHCI: input_context physical address too big\n");
         free_dma(input_context.virtual_address);
+        if (!disable_device_slot(slot_id, timer)) {
+            printf("xHCI: failed to disable slot_id 0x%b\n", slot_id);
+        }
         return device_descriptor;
     }
 
@@ -1105,7 +1118,7 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     // link TRB
     // Type = 6
     // Toggle Cycle = 1
-    link.d3 = (6u << 10) | (1u << 1);
+    link.d3 = (6u << 10) | (1u << 1) | 1;
 
     u32 *ep0 = (u32 *)((u8 *)input_context.virtual_address + (2 * context_size));
 
@@ -1130,7 +1143,7 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     u32 *slot = (u32 *)(input_context.virtual_address + context_size);
 
 
-    u8 speed_id = get_port_speed_id(op_base, port);
+    speed_id = get_port_speed_id(op_base, port);
 
 
     slot[0] = ((u32)speed_id << 20) | (1u << 27);
@@ -1218,6 +1231,16 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
         }
         return device_descriptor;
     }
+
+    volatile u32 *output_slot_context =
+        (volatile u32 *)output_device_context.virtual_address;
+
+
+    usb_address = output_slot_context[3] & 0xFF;
+
+    // DWORD 3, bits 31:27 = Slot State.
+    u8 slot_state = (output_slot_context[3] >> 27) & 0x1F;
+
 
     dma_ret Descriptor = {0};
     dma_ret *desc_dma = &Descriptor;
@@ -1424,13 +1447,279 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
 
         controller.cached.cache = cache;
         controller.cached.max++;
-    } else {
-        dcbaa[slot_id] = 0;
-        asm volatile("sfence" ::: "memory");
-        free_dma(output_device_context.virtual_address);
-        free_dma(alloc_ptr->virtual_address);
+    }  
+
+    slots[port-1].port = port;
+    slots[port-1].slot_id = slot_id;
+    slots[port-1].EP0_physical = alloc_ptr->physical_address;
+    slots[port-1].EP0_virtual = alloc_ptr->virtual_address;
+    slots[port-1].output_context_physical = output_device_context.physical_address;
+    slots[port-1].output_context_virtual = output_device_context.virtual_address;
+
+    slots[port-1].output_context = output_device_context;
+    slots[port-1].EP0 = *alloc_ptr;
+    return device_descriptor;
+}
+
+
+usb_device xhci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
+    usb_device device = {0};
+
+    u64 output_context = slots[port-1].output_context_virtual;
+    u64 EP0_addr = slots[port-1].EP0_virtual;
+
+    u64 ring_phys = slots[port-1].EP0_physical;
+
+    device.address = usb_address;
+
+    dma_ret desc_dma = {};
+    if (!xhci_dma_alloc(&desc_dma, 18, addr64)) {
+        printf("xHCI: failed to allocate GET DESCRIPTOR buffer\n");
+        device.discovered = false;
+        return device;
     }
 
+    u8 actual_mps = desc.bMaxPacketSize0;
 
-    return device_descriptor;
+    if (speed_id == 4) {
+        if (actual_mps != 9) {
+            device.discovered = false;
+            return device;
+        }
+
+        actual_mps = 512;
+    }
+
+    if (actual_mps != initial_mps) {
+        dma_ret input_context = allocate_dma(context_size * 33);
+        if (input_context.status != 0) {
+            printf("xHCI: input_context allocation failed\n");
+            device.discovered = false;
+            return device;
+        }
+
+        if (input_context.physical_address > 0xFFFFFFFF) {
+            printf("xHCI: input_context physical address too big\n");
+            free_dma(input_context.virtual_address);
+            device.discovered = false;
+            return device;
+        }
+
+        memset(input_context.virtual_address, 0, context_size*33);
+
+        u32 *icc = (u32 *)input_context.virtual_address;
+
+        icc[0] = 0; // All Drop Context flags = 0
+        icc[1] = (1u << 1); // evaluate EP0
+
+        u8 *output_ep0 = (u8 *)(output_context + context_size);
+        u8 *input_ep0 = (u8 *)(input_context.virtual_address + (context_size << 1));
+
+        memcpy(input_ep0, output_ep0, context_size);
+
+        u32 *ep0 = (u32 *)(u64)input_ep0;
+
+        ep0[0] &= ~0x7u;
+        ep[1] = (ep[1] & 0x0000FFFF) | ((u32)actual_mps << 16);
+
+        XhciTrb evaluate_cmd = {};
+
+        u64 input_phys = input_context.physical_address;
+
+        evaluate_cmd.d0 = (u32)input_phys;
+        evaluate_cmd.d1 = (u32)(input_phys >> 32);
+
+        evaluate_cmd.d2 = 0;
+
+        evaluate_cmd.d3 = (13u << 10) | ((u32)slot_id << 24);
+
+        asm volatile("mfence" ::: "memory");
+
+        u64 command_phys = submit_command(evaluate_cmd);
+
+        XhciTrb completion = {};
+
+        if (!wait_command(timer, command_phys, &completion, 500)) {
+            printf("xHCI: evalaute context timed out\n");
+
+            dma_cache new_cache = {0};
+            new_cache.dma = new dma_ret[1];
+            new_cache.error_code = new u16[1];
+            new_cache.max = 1;
+
+            *new_cache.dma = input_context;
+            *new_cache.error_code = (xHCI << 8) | EVAL_CONTEXT_TIMEOUT;
+
+            dma_cache *cache = controller.cached.cache;
+
+            u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+            u64 new_size = old_size + sizeof(dma_cache);
+
+            cache = (dma_cache *)krealloc(cache, old_size, new_size);
+            cache[controller.cached.max] = new_cache;
+
+            controller.cached.cache = cache;
+            controller.cached.max++;
+
+            device.discovered = false;
+            return device;
+        }
+
+        u8 completion_code = completion.d2 >> 24;
+        if (completion_code != 1) {
+            printf("xHCI: evaluate context failed, port: 0x%b, initial_mps: 0x%w, actual_mps: 0x%b, code: 0x%b", 
+            port, initial_mps, actual_mps, completion_code);
+            free_dma(input_context.virtual_address);
+            device.discovered = false;
+            return device;
+        }
+
+        free_dma(input_context.virtual_address);
+    }
+
+    XhciTrb *trbs = (XhciTrb *)EP0_addr;
+    u64 desc_phys = desc_dma.physical_address;
+
+    XhciTrb setup_trb = {};
+
+    setup_trb.d0 = 0x01000680;
+    setup_trb.d1 = 0x00120000;
+    setup_trb.d2 = 8;
+
+    setup_trb.d3 =
+        (2 << 19) |
+        (1u << 6) |
+        (3u << 16);
+
+    XhciTrb data_trb = {};
+
+    data_trb.d0 = (u32)desc_phys;
+    data_trb.d1 = (u32)(desc_phys >> 32);
+    data_trb.d2 = 18;
+
+    data_trb.d3 =
+        (3u << 10) |
+        (1u << 16);
+
+    XhciTrb status_trb = {};
+
+    status_trb.d3 = 
+        (4u << 10) |
+        (1u << 5);
+
+    setup_trb.d3 &= ~1u;
+    data_trb.d3 &= ~1u;
+    status_trb.d3 &= ~1u;
+
+    trbs[3] = setup_trb;
+    trbs[4] = data_trb;
+    trbs[5] = status_trb;
+
+    asm volatile("mfence" ::: "memory");
+
+    trbs[5].d3 |= 1;
+    trbs[4].d3 |= 1;
+
+    asm volatile("mfence" ::: "memory");
+
+    trbs[3].d3 |= 1;
+
+    asm volatile("mfence" ::: "memory");
+
+    slots[port-1].ep0_index = 6;
+    
+    // link trb
+    trbs[255].d3 = (6u << 10) | (1u << 1) | 1;
+
+    u64 status_trb_phys = ring_phys + 5 * sizeof(XhciTrb);
+
+    doorbells[slots[port-1].slot_id] = 1;
+
+    asm volatile("mfence" ::: "memory");
+
+    XhciTrb transfer_event = {};
+
+    if (!wait_transfer_event(timer, slot_id, 1, status_trb_phys, &transfer_event, 500)) {
+        printf("xHCI: GET DESCRIPTOR for port 0x%b timed out\n", port);
+        
+        free_dma(input_context.virtual_address);
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[3];
+        new_cache.error_code = new u16[3];
+        new_cache.max = 3;
+
+        new_cache.dma[0] = output_device_context;
+        new_cache.dma[1] = *alloc_ptr;
+        new_cache.dma[2] = desc_dma;
+
+        new_cache.error_code[0] = (xHCI << 8) | GET_DESC_TIMEOUT;
+        new_cache.error_code[1] = new_cache.error_code[0];
+        new_cache.error_code[2] = new_cache.error_code[1];
+
+        dma_cache *cache = controller.cached.cache;
+
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+
+        controller.cached.cache = cache;
+        controller.cached.max++;
+            
+        
+        return device_descriptor;
+    }
+
+    u8 completion_code = transfer_event.d2 >> 24;
+
+    if (completion_code != 1) {
+        printf("xHCI: GET_DESCRIPTOR on port 0x%b failed: 0x%b\n", port,
+            completion_code);
+        free_dma(desc_dma.virtual_address);
+        if (!disable_device_slot(slot_id, timer)) {
+            printf("xHCI: failed to disable slot_id 0x%b\n", slot_id);
+
+            dma_cache new_cache = {0};
+            new_cache.dma = new dma_ret[2];
+            new_cache.error_code = new u16[2];
+            new_cache.max = 2;
+
+            new_cache.dma[0] = slots[port-1].output_context;
+            new_cache.dma[1] = slots[port-1].EP0;
+
+            new_cache.error_code[0] = (xHCI << 8) | DISABLE_SLOT_ERROR;
+            new_cache.error_code[1] = new_cache.error_code[0];
+
+            dma_cache *cache = controller.cached.cache;
+
+            u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+            u64 new_size = old_size + sizeof(dma_cache);
+
+            cache = (dma_cache *)krealloc(cache, old_size, new_size);
+            cache[controller.cached.max] = new_cache;
+
+            controller.cached.cache = cache;
+            controller.cached.max++;
+        } else {
+            dcbaa[slot_id] = 0;
+            asm volatile("sfence" ::: "memory");
+            free_dma(slots[port-1].output_context_physical);
+            free_dma(slots[port-1].EP0_virtual);
+        }
+
+        device.discovered = false;
+        return device;
+    }
+
+    usb_device_descriptor *desc_ptr = (usb_device_descriptor *)desc_dma.virtual_address;
+    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+        usb_device_descriptor *device_ptr = desc;
+        memcpy(device_ptr, desc_ptr, 18);
+    }
+
+    free_dma(desc_dma.virtual_address);
+    device.discovered = true;
+    device.descriptor = desc;
+    return device;
 }

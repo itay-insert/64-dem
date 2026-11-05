@@ -98,6 +98,18 @@ struct XhciRings {
     u32 event_cycle = 1;
 };
 
+typedef struct {
+    u8 port;
+    u8 slot_id;
+    u64 output_context_virtual;
+    u64 EP0_virtual;
+    u64 output_context_physical;
+    u64 EP0_physical;
+    u32 ep0_index;
+    dma_ret output_context;
+    dma_ret EP0;
+} usb_slot;
+
 class xhci_controller : public usb_controller {
     private:
         volatile u32 *doorbells = 0;
@@ -106,6 +118,7 @@ class xhci_controller : public usb_controller {
         u64 scratchpad_physical = 0;
 
         u64 xhci_base = 0;
+        bool addr64;
 
         XhciRings rings; // Keep this state after xhci_init() returns.
 
@@ -126,6 +139,9 @@ class xhci_controller : public usb_controller {
 
         XhciTrb transfer_completion = {};
 
+        usb_slot *slots = 0;
+
+
         bool setup_rings(volatile xhci_cap_regs *cap,
                           volatile xhci_op_regs *op, bool ac64);
         u64 submit_command(XhciTrb command);
@@ -142,7 +158,6 @@ u8 wanted_id);
         
         int allocate_scracthpad(u32 scratchpad_count, bool addr_64);
         u64 port_to_address(u8 port);
-        int disable_port(u8 port, TimerSource &timer);
         u8 read_protocol_slot_type(u8 port);
         u8 enable_device_slot(u8 port, TimerSource &timer);
         bool disable_device_slot(u8 slot_id, TimerSource &timer);
@@ -152,6 +167,7 @@ u8 wanted_id);
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
+        int disable_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         xhci_controller();

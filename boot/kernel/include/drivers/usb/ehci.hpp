@@ -40,12 +40,12 @@ class ehci_controller : public usb_controller {
         ehci_qh *async_head;
         u32 async_head_phys;
         u64 port_to_address(u8 port);
-        int disable_port(u8 port, TimerSource &timer);
-
+        
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
+        int disable_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         ehci_controller();

@@ -188,6 +188,14 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
         return Device;
     }
 
+    usb_device_descriptor desc = identify_device(port, timer);
+    Device = set_address(desc, timer, port);
+
+    Device.controller = controller;
+    Device.product_id = Device.descriptor.idProduct;
+    Device.vendor_id = Device.descriptor.idVendor;
+    Device.port_number = port;
+
 
     return Device;
 
@@ -223,6 +231,11 @@ void usb_controller::construct_controller() {
 
     if (!status) {
         ports_count = enumrate_ports();
+        for (int i = 0; i < ports_count; i++) {
+            if (ports[i].connected) {
+
+            }
+        }
         
     }
 

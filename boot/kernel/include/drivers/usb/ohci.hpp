@@ -35,14 +35,13 @@ class ohci_controller : public usb_controller {
             return ohci_read_register(offset);
         }
 
-        int disable_port(u8 port, TimerSource &timer);
-
-
+        
 
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
         int reset_port(u8 port, TimerSource &timer);
+        int disable_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         ohci_controller();

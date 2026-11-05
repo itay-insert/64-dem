@@ -807,6 +807,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
         if (!wait_for_start(io_base, timer)) {
             printf("UHCI: controller failed to start\n");
         }
+        next_usb_address = address;
 
         free_dma(alloc.virtual_address);
         delete[] backup;
@@ -988,7 +989,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
         return device;
     }
 
-    auto result = wait_for_control_transfer(qh, setup_td, data_tds, 3, status_td, status_phys, timer, recieved);
+    result = wait_for_control_transfer(qh, setup_td, data_tds, 3, status_td, status_phys, timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: GET DESCRIPTOR error\n");
         old_command = inw(io_base+UHCI_USBCMD);
@@ -1013,9 +1014,17 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
             printf("UHCI: controller failed to start\n");
         }
 
+        int rests = reset_port(port, timer);
+        if (rests != 0) {
+            printf("UHCI: failed to reset port 0x%b\n", port);
+        } else {
+            next_usb_address = address;
+        }
+
         free_dma(alloc.virtual_address);
         delete[] backup;
         device.discovered = false;
+        device.address = 0;
         return device;
     }
 

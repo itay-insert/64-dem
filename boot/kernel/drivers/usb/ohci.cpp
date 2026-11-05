@@ -1021,6 +1021,8 @@ static inline u8 allocate_usb_address(void) {
     return next_usb_address++;
 }
 
+
+
 usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
 
@@ -1213,12 +1215,9 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
         printf("OHCI: SET ADDRESS failed\n");
         device.discovered = false;
 
-        int rests = reset_port(port, timer);
-        if (rests != 0) {
-            printf("OHCI: failed to reset port 0x%b\n", port);
-        } else {
-            next_usb_address = address;
-        }
+        
+        next_usb_address = address;
+        
         free_dma(alloc.virtual_address);
         return device;
     }
@@ -1376,7 +1375,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     };
 
     received = 0;
-    auto result = wait_for_descriptor(
+    result = wait_for_descriptor(
         ed,
         setup_td,
         data_td,
@@ -1434,7 +1433,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
     if (result != ohci_transfer_result::success) {
-        printf("OHCI: SET ADDRESS failed\n");
+        printf("OHCI: GET DESCRIPTOR failed\n");
         device.discovered = false;
 
         int rests = reset_port(port, timer);
@@ -1444,6 +1443,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
             next_usb_address = address;
         }
         free_dma(alloc.virtual_address);
+        device.address = 0;
         return device;
     } 
 

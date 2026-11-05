@@ -9,6 +9,7 @@
 #define DISABLE_SLOT_ERROR 3
 #define GET_DESC_TIMEOUT 4
 #define RESTORATION_FAILURE 5
+#define EVAL_CONTEXT_TIMEOUT 6
 
 
 #define OUT 0x00
@@ -152,8 +153,9 @@ class usb_controller {
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
+        virtual int disable_port(u8 port, TimerSource &timer) = 0;
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
-        virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer) = 0;
+        virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
 
 };
 
