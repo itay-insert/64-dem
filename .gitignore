@@ -2,3 +2,4 @@ kernel.asm
 stage4.asm
 BOOTX64.asm
 bios-disk.img
+clocscr.sh
