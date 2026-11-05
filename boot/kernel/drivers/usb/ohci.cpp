@@ -1458,3 +1458,347 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     free_dma(alloc.virtual_address);
     return device;
 }
+
+
+// ========================================
+// OHCI Endpoint Descriptor (ED)
+// ========================================
+
+// ED info
+#define OHCI_ED_FA(addr)       (((u32)(addr) & 0x7F) << 0)
+#define OHCI_ED_EN(ep)         (((u32)(ep) & 0x0F) << 7)
+#define OHCI_ED_D(dir)         (((u32)(dir) & 0x03) << 11)
+#define OHCI_ED_LS             (1u << 13)
+#define OHCI_ED_MPS(size)      (((u32)(size) & 0x7FF) << 16)
+
+// ED direction
+#define OHCI_ED_DIR_FROM_TD    0
+#define OHCI_ED_DIR_OUT        1
+#define OHCI_ED_DIR_IN         2
+
+// ED HeadP flags
+#define OHCI_ED_HEAD_HALTED    (1u << 0)
+#define OHCI_ED_HEAD_CARRY     (1u << 1)
+#define OHCI_ED_HEAD_MASK      0xFFFFFFF0u
+
+// ED pointers
+#define OHCI_ED_PTR_MASK       0xFFFFFFF0u
+
+
+// ========================================
+// OHCI Transfer Descriptor (General TD)
+// ========================================
+
+// TD INFO
+#define OHCI_TD_CC(cc)         (((u32)(cc) & 0x0F) << 28)
+#define OHCI_TD_EC(ec)         (((u32)(ec) & 0x03) << 26)
+#define OHCI_TD_T(toggle)      (((u32)(toggle) & 0x03) << 24)
+#define OHCI_TD_DP(dir)        (((u32)(dir) & 0x03) << 19)
+#define OHCI_TD_DI(di)         (((u32)(di) & 0x07) << 21)
+#define OHCI_TD_R              (1u << 18)
+
+// TD condition codes
+#define OHCI_TD_CC_NO_ERROR    0x0
+#define OHCI_TD_CC_CRC         0x1
+#define OHCI_TD_CC_BITSTUFF    0x2
+#define OHCI_TD_CC_TOGGLE      0x3
+#define OHCI_TD_CC_STALL       0x4
+#define OHCI_TD_CC_NO_RESPONSE 0x5
+#define OHCI_TD_CC_PID_CHECK   0x6
+#define OHCI_TD_CC_UNEXPECTED  0x7
+#define OHCI_TD_CC_DATA_OVERRUN 0x8
+#define OHCI_TD_CC_DATA_UNDERRUN 0x9
+#define OHCI_TD_CC_BUFFER_OVERRUN 0xC
+#define OHCI_TD_CC_BUFFER_UNDERRUN 0xD
+#define OHCI_TD_CC_NOT_ACCESSED 0xF
+
+// TD toggle values
+#define OHCI_TD_T_DATA0        0x02
+#define OHCI_TD_T_DATA1        0x03
+#define OHCI_TD_T_CARRY        0x00
+
+// TD direction / PID values
+#define OHCI_TD_DP_SETUP       0x00
+#define OHCI_TD_DP_OUT         0x01
+#define OHCI_TD_DP_IN          0x02
+
+// TD buffer rounding
+#define OHCI_TD_R_ROUNDING     OHCI_TD_R
+#define OHCI_TD_R_NO_ROUNDING  0
+
+
+// ========================================
+// OHCI General TD pointers
+// ========================================
+
+#define OHCI_TD_PTR_MASK       0xFFFFFFF0u
+
+// ========================================
+// OHCI Control
+// ========================================
+
+#define OHCI_CONTROL_CLE       (1u << 4)
+#define OHCI_CONTROL_BLE       (1u << 5)
+#define OHCI_CONTROL_PLE       (1u << 2)
+#define OHCI_CONTROL_IE        (1u << 3)
+
+
+
+void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer) {
+    u32 data_td_count = (length + maxpacketsize-1) / maxpacketsize;
+    u64 size = sizeof(ohci_ed) + ((data_td_count + 2) * sizeof(ohci_td)) + 8 + length;
+
+    dma_ret alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("OHCI: packet allocation failed\n");
+        return nullptr;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("OHCI: packet physical address too big!\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }    
+    
+    volatile u32 *portreg =
+        (volatile u32 *)port_to_address(port, controller.io_base);
+
+    bool low_speed = (*portreg & OHCI_RHPS_LSDA) != 0;
+
+    u32 ed_phys = (u32)alloc.physical_address;
+    u32 setup_td_phys = ed_phys + sizeof(ohci_ed);
+    u32 data_td_phys = setup_td_phys + sizeof(ohci_td);
+    u32 status_td_phys = data_td_phys + (data_td_count * sizeof(ohci_td));
+    u32 dummy_phys = status_td_phys + sizeof(ohci_td);
+    u32 setup_phys = dummy_phys + sizeof(ohci_td);
+
+    ohci_ed *ed = (ohci_ed *)alloc.virtual_address;
+    ohci_td *setup_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
+    ohci_td *data_td = nullptr;
+
+    if (data_td_count)
+        data_td = (ohci_td *)((u8 *)setup_td + sizeof(ohci_td));
+    ohci_td *status_td = (ohci_td *)((u8 *)setup_td + sizeof(ohci_td) + (data_td_count * sizeof(ohci_td)));
+    ohci_td *dummy_td = (ohci_td *)((u8 *)status_td + sizeof(ohci_td));
+    usb_setup_packet *setup = (usb_setup_packet *)((u8 *)dummy_td + sizeof(ohci_td));
+
+    *setup = packet;
+
+    *setup_td = {};
+    setup_td->next_td = data_td ? data_td_phys : status_td_phys;
+
+    setup_td->control =
+        OHCI_TD_CC(0xF) |
+        OHCI_TD_EC(0) |
+        OHCI_TD_T_DATA0 |
+        OHCI_TD_DP_SETUP |
+        OHCI_TD_DI(7);
+
+    setup_td->cbp = setup_phys;
+    setup_td->be = setup_phys + 7;
+
+    bool data_in = setup->bmRequestType & 0x80;
+
+    u32 offset = 0;
+
+    for (u32 i = 0; i < data_td_count; i++) {
+        u32 remaining = length - offset;
+
+        u32 chunk_length =
+            remaining < OHCI_TD_CHUNK_SIZE
+                ? remaining
+                : OHCI_TD_CHUNK_SIZE;
+
+        bool last = (i == data_td_count - 1);
+
+        // Clear descriptor
+        data_td[i] = {};
+
+        // The first control DATA TD starts with DATA1.
+        // Subsequent TDs inherit the toggle from the ED.
+        u32 toggle = (i == 0)
+            ? OHCI_TD_T_DATA1
+            : OHCI_TD_T_CARRY;
+
+        data_td[i].control =
+            OHCI_TD_CC(OHCI_TD_CC_NOT_ACCESSED) |
+            OHCI_TD_EC(0) |
+            OHCI_TD_T(toggle) |
+            OHCI_TD_DP(data_in
+                ? OHCI_TD_DP_IN
+                : OHCI_TD_DP_OUT) |
+            OHCI_TD_DI(7) |
+            ((data_in && last) ? OHCI_TD_R : 0);
+
+        // Data buffer
+        data_td[i].cbp = data_phys + offset;
+        data_td[i].be = data_phys + offset + chunk_length - 1;
+
+        // Next TD
+        data_td[i].next_td =
+            last
+                ? status_td_phys
+                : data_td_phys + (i + 1) * sizeof(ohci_td);
+
+        offset += chunk_length;
+    }
+
+    *status_td = {};
+
+    bool status_in = setup->wLength == 0 || !data_in;
+
+    status_td->control =
+        OHCI_TD_CC(0xF) |
+        OHCI_TD_EC(0) |
+        OHCI_TD_T_DATA1 |
+        (status_in ? OHCI_TD_DP_IN : OHCI_TD_DP_OUT) |
+        OHCI_TD_DI(7);
+
+    status_td->cbp = 0;
+    status_td->be = 0;
+    status_td->next_td = status_td_phys;
+
+
+    *dummy_td = {};
+
+    dummy_td->control = OHCI_TD_CC(0xF);
+    dummy_td->cbp = 0;
+    dummy_td->be = 0;
+    dummy_td->next_td = 0;
+
+
+    *ed = {};
+
+    ed->control =
+        OHCI_ED_FA(address) |
+        OHCI_ED_EN(0) |
+        OHCI_ED_D(OHCI_ED_DIR_FROM_TD) |
+        (low_speed ? OHCI_ED_LS : 0) |
+        OHCI_ED_MPS(maxpacketsize);
+
+    ed->next_ed = 0;
+    ed->tailp = dummy_td_phys;
+    ed->head_p = setup_td_phys;
+    
+    old_control = ohci_regs->control;
+
+    if (!stop_control_schedule(
+            ohci_regs, hcca->frame_number, timer)) {
+
+        printf("OHCI: timeout disabling control list\n");
+
+        ohci_regs->control = old_control;
+        volatile u32 readback = ohci_regs->control;
+        (void)readback;
+
+        controller.needs_reinit = true;
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+    old_head = ohci_regs->control_head_ed;
+    old_current = ohci_regs->control_current_ed;
+
+    old_clf =
+        (ohci_regs->command_status & OHCI_CLF) != 0;
+
+    // Install our ED.
+    ohci_regs->control_head_ed = ed_phys;
+    ohci_regs->control_current_ed = 0;
+
+    // Tell OHCI that the control list has new work.
+    ohci_regs->command_status = OHCI_CLF;
+
+    asm volatile("mfence" ::: "memory");
+
+    // Enable the control list.
+    ohci_regs->control = old_control | OHCI_CLE;
+
+    ohci_transfer_watch watch = {
+        setup_td_phys,
+        data_td_phys,
+        status_phys,
+        0
+    };
+
+    received = 0;
+    result = wait_for_descriptor(
+        ed,
+        setup_td,
+        data_td,
+        status_td,
+        dummy_phys,
+        descriptor_phys,
+        18,                // Request length
+        hcca,
+        ohci_regs,
+        watch,
+        timer,
+        received
+    );
+
+    if (!restore_control_schedule(
+        ohci_regs,
+        hcca,
+        timer,
+        ed,
+        setup_td,
+        data_td,
+        status_td,
+        &watch,
+        old_control,
+        old_head,
+        old_current,
+        old_clf)) {
+
+        printf("OHCI: controller recovery failed\n");
+
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+
+        *new_cache.dma = alloc;
+        *new_cache.error_code = (OHCI << 8) | RESTORATION_FAILURE;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        
+        return nullptr;
+    }
+
+
+    if (result != ohci_transfer_result::success) {
+        printf("OHCI: SEND PACKET failed\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    } 
+
+    wait_ms(timer, 2);
+
+    if (length) {
+        void *ptr0 = (void *)((u8 *)setup + 8);
+        void *ptr1 = kmalloc(length);
+        if (ptr1 == nullptr) {
+            free_dma(alloc.virtual_address);
+            return nullptr;
+        }
+        memcpy(ptr1, ptr0, length);
+        free_dma(alloc.virtual_address);
+        return ptr1;
+    } else {
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+}

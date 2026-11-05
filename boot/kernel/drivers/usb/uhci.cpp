@@ -1063,3 +1063,220 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     device.descriptor = desc;
     return device;
 }
+
+
+void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    u16 io_base = (u16)controller.io_base;
+    u32 data_td_count = (length + maxpacketsize-1) / maxpacketsize;
+
+    u64 size = ((data_td_count + 2) * sizeof(uhci_td)) + sizeof(uhci_qh) + length + 8;
+    
+    dma_ret alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("UHCI: packet allocation failed\n");
+        return nullptr;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("UHCI: packet physical address too big!\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+    u32 qh_phys = (u32)alloc.physical_address;
+    u32 setup_td_phys = qh_phys + sizeof(uhci_qh);
+    u32 data_td_phys = setup_qtd_phys + sizeof(uhci_td);
+
+    u32 status_td_phys = data_td_phys + (sizeof(uhci_td) * data_td_count);
+    u32 setup_phys = status_td_phys + sizeof(uhci_td);
+
+    uhci_qh *qh = (uhci_qh *)alloc.virtual_address;
+    uhci_td *setup_td = (uhci_td *)((u8 *)qh + sizeof(uhci_qh));
+    uhci_td *data_td = nullptr;
+    if (data_td_count) 
+        data_td = (uhci_td *)((u8 *)setup_td + sizeof(uhci_td));
+
+    uhci_td *status_td = (uhci_td *)((u8 *)setup_td + sizeof(uhci_td) + (sizeof(uhci_td) * data_td_count));
+        
+    usb_setup_packet *setup = (usb_setup_packet *)((u8 *)status_td + sizeof(uhci_td));
+
+    *setup = packet;
+
+    *setup_td = {};
+
+    setup_td->link = data_td ? data_td_phys : status_td_phys;
+    setup_td->token =
+        USB_PID_SETUP |
+        UHCI_TOKEN_ADDR(address) |
+        UHCI_TOKEN_EP(0) |
+        UHCI_TOKEN_TOGGLE(USB_DATA0) |
+        UHCI_TOKEN_MAXLEN(8);
+
+    setup_td->status =
+        UHCI_TD_ACTIVE |
+        UHCI_TD_CERR(3);
+
+    setup_td->buffer = setup_phys;
+
+    if (data_td) {
+        // DATA TDs
+        u32 offset = 0;
+        u8 toggle = USB_DATA1;
+
+        for (u32 i = 0; i < data_td_count; i++) {
+            u32 remaining = 18 - offset;
+            u32 length = remaining < maxpacketsize
+                     ? remaining
+                    : max_packet_size;
+
+            bool last = (i == data_td_count - 1);
+
+            data_td[i].link =
+                last
+                    ? status_phys | UHCI_PTR_DEPTH
+                 : data_td_phys +
+                  (i + 1) * sizeof(uhci_td) |
+                 UHCI_PTR_DEPTH;
+
+            data_td[i].status =
+                common_status | (last ? 0 : UHCI_TD_SPD);
+
+            data_td[i].token =
+                USB_PID_IN |
+                UHCI_TOKEN_ADDR(address) |
+                UHCI_TOKEN_EP(0) |
+                UHCI_TOKEN_TOGGLE(toggle) |
+                UHCI_TOKEN_MAXLEN(length);
+
+            data_td[i].buffer = desc_phys + offset;
+
+            offset += length;
+            toggle ^= 1;
+        }
+    }
+
+    *status_td = {};
+
+    status_td->status =
+        UHCI_TD_ACTIVE |
+        UHCI_TD_CERR(3);
+
+    bool data_in = setup->BmRequestType & 0x80;
+    bool has_data = setup->wLength != 0;
+
+    bool status_in = !has_data || !data_in;
+    u8 status_pid = status_in ? USB_PID_IN : USB_PID_OUT;
+
+    status_td->token =
+        status_pid |
+        UHCI_TOKEN_ADDR(address) |
+        UHCI_TOKEN_EP(0) |
+        UHCI_TOKEN_TOGGLE(USB_DATA1) |
+        UHCI_TOKEN_MAXLEN(0);
+
+    status_td->buffer = 0;
+
+    status_td->link = UHCI_LINK_TERMINATE;
+
+    *qh = {};
+
+    qh->head_link = UHCI_LINK_TERMINATE;
+    qh->element_link = setup_td_phys;
+
+
+    old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u)); // halt the controller temporarily
+
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: controller failed to halt\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+    for (int i = 0; i < 1024; i++) 
+        frame_list[i] = qh_phys | 0x2u;
+
+    asm volatile("mfence" ::: "memory");
+    outw(io_base+UHCI_USBCMD, old_command | 1u); // start the controller
+
+    if (!wait_for_start(io_base, timer)) {
+        printf("UHCI: controller failed to start\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+    result = wait_for_control_transfer(qh, setup_td, data_td, data_td_count, status_td, status_phys, timer, recieved);
+    if (result != uhci_transfer_result::success) {
+        printf("UHCI: send packet error\n");
+        old_command = inw(io_base+UHCI_USBCMD);
+        outw(io_base+UHCI_USBCMD, (old_command & ~1u)); // halt the controller
+
+        if (!wait_for_halted(io_base, timer)) {
+            printf("UHCI: controller failed to halt\n");
+            free_dma(alloc.virtual_address);
+            delete[] backup;
+            return nullptr;
+        }
+
+        for (int i = 0; i < 1024; i++) 
+            frame_list[i] = backup[i];
+        
+        asm volatile("mfence" ::: "memory");
+
+        outw(io_base+UHCI_USBCMD, old_command | 1u); // start the controller
+
+        if (!wait_for_start(io_base, timer)) {
+            printf("UHCI: controller failed to start\n");
+        }
+
+
+        free_dma(alloc.virtual_address);
+        delete[] backup;
+        return nullptr;
+    }
+
+    wait_ms(timer, 2);
+
+    old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: failed to halt controller\n");
+        free_dma(alloc.virtual_address);
+        delete[] backup;
+        return nullptr;
+    }
+
+    for (u32 i = 0; i < 1024; i++) {
+        frame_list[i] = backup[i];
+    }
+
+    asm volatile("mfence" ::: "memory");
+    outw(io_base+UHCI_USBCMD, (old_command | 1u)); // start the controller
+
+    if (!wait_for_start(io_base, timer)) {
+        printf("UHCI: failed to start controller\n");
+        free_dma(alloc.virtual_address);
+        delete[] backup;
+        return nullptr;
+    }
+
+    delete[] backup;
+    
+
+    if (length) {
+        void *ptr0 = (void *)((u8 *)setup + 8);
+        void *ptr1 = kmalloc(length);
+        if (ptr1 == nullptr) {
+            free_dma(alloc.virtual_address);
+            return nullptr;
+        }
+        memcpy(ptr1, ptr0, length);
+        free_dma(alloc.virtual_address);
+        return ptr1;
+    } else { 
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+}

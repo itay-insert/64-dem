@@ -48,6 +48,8 @@ class ehci_controller : public usb_controller {
         int disable_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
+        void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
+        configuration_descriptor get_config(u8 address, TimerSource &timer);
         ehci_controller();
 
 };

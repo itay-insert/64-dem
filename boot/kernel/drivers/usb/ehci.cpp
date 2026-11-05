@@ -1143,3 +1143,199 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
     free_dma(alloc.virtual_address);
     return device;
 }
+
+
+#define EHCI_QH_TYPE_QH       (1u << 1)
+
+#define EHCI_QH_RL(v)         ((u32)(v) << 28)
+#define EHCI_QH_CONTROL_EP    (1u << 27)
+#define EHCI_QH_MPS(v)        (((u32)(v) & 0x7FF) << 16)
+#define EHCI_QH_HEAD          (1u << 15)
+#define EHCI_QH_DTC           (1u << 14)
+#define EHCI_QH_SPEED(v)      (((u32)(v) & 3) << 12)
+#define EHCI_QH_EP(v)         (((u32)(v) & 0xF) << 8)
+#define EHCI_QH_ADDR(v)       ((u32)(v) & 0x7F)
+
+#define EHCI_SPEED_FULL       0
+#define EHCI_SPEED_LOW        1
+#define EHCI_SPEED_HIGH       2
+
+#define EHCI_QH_MULT(v)       (((u32)(v) & 3) << 30)
+#define EHCI_QH_HUB_PORT(v)   (((u32)(v) & 0x7F) << 23)
+#define EHCI_QH_HUB_ADDR(v)   (((u32)(v) & 0x7F) << 16)
+#define EHCI_QH_C_MASK(v)     (((u32)(v) & 0xFF) << 8)
+#define EHCI_QH_S_MASK(v)     ((u32)(v) & 0xFF)
+
+void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer) {
+    volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
+    volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
+
+
+    
+    u64 size = sizeof(ehci_qh) + (sizeof(ehci_qtd) * length > 0 ? 3 : 2) + length + 8;
+
+    dma_ret alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("EHCI: packet allocation failed\n");
+        return nullptr;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("EHCI: packet physical address too big!\n");
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }    
+
+    u32 qh_phys = (u32)alloc.physical_address;
+    u32 setup_td_phys = qh_phys + sizeof(ehci_qh);
+    u32 data_td_phys = 0;
+    u32 status_td_phys = 0;
+    if (length > 0) {
+        data_td_phys = setup_td_phys + sizeof(ehci_td);
+        status_td_phys = data_td_phys + sizeof(ehci_td);
+    } else {
+        status_td_phys = setup_td_phys + sizeof(ehci_td);
+    }
+
+    u32 setup_phys = status_td_phys + sizeof(ehci_td);
+
+    ehci_qh *qh = (ehci_qh *)alloc.virtual_address
+    ehci_qtd *setup_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
+    ehci_qtd *data_qtd = nullptr;
+    ehci_qtd *status_qtd = nullptr;
+    if (length > 0) {
+        data_qtd = (ehci_qtd *)((u8 *)setup_qtd + sizeof(ehci_qtd));
+        status_qtd = (ehci_qtd *)((u8 *)data_qtd + sizeof(ehci_qtd));
+    } else {
+        status_qtd = (ehci_qtd *)((u8 *)setup_qtd + sizeof(ehci_qtd));
+    }
+
+    usb_send_packet *setup = (usb_send_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
+
+    *setup = packet;
+
+    *setup_qtd = {};
+
+    setup_qtd->next_qtd = length ? data_td_phys : status_td_phys;
+
+    setup_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
+
+    setup_qtd->token =
+        EHCI_QTD_DT(0) |
+        EHCI_QTD_BYTES(8) |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID(EHCI_QTD_PID_SETUP) |
+        EHCI_QTD_ACTIVE;
+
+    setup_qtd->buffer[0] = setup_phys;
+
+    bool data_in = setup->bmRequestType & 0x80;
+
+    if (data_qtd) {
+
+        *data_qtd = {};
+
+        data_qtd->next_qtd = status_qtd_phys;
+
+        data_qtd->alt_next_qtd =
+            data_in
+                ? status_qtd_phys
+                : EHCI_QTD_TERMINATE;
+
+        data_qtd->token =
+            EHCI_QTD_DT(1) |
+            EHCI_QTD_BYTES(length) |
+            EHCI_QTD_CERR(3) |
+            EHCI_QTD_PID(data_in
+                ? EHCI_QTD_PID_IN
+                : EHCI_QTD_PID_OUT) |
+            EHCI_QTD_ACTIVE;
+
+        data_qtd->buffer[0] = data_phys;
+    
+    }
+
+    bool status_in =
+        setup.wLength == 0 || !data_in;
+
+    u32 status_pid = status_in
+        ? EHCI_QTD_PID_IN
+        : EHCI_QTD_PID_OUT;
+
+    *status_qtd = {};
+
+    status_qtd->next_qtd = EHCI_QTD_TERMINATE;
+    status_qtd->alternate_next_qtd = EHCI_QTD_TERMINATE;
+
+    status_qtd->token =
+        EHCI_QTD_DT(1) |
+        EHCI_QTD_BYTES(0) |
+        EHCI_QTD_CERR(3) |
+        EHCI_QTD_PID(status_pid) |
+        EHCI_QTD_ACTIVE;
+
+    *qh = {};
+
+    qh->current_qtd = 0;
+    qh->next_qtd = setup_td_phys;
+    qh->alternate_next_qtd = EHCI_LINK_TERMINATE;
+    qh->token = 0;
+
+    ehci_async_link_state link_state = {};
+
+    insert_async_qh(async_head, async_head_phys, qh, qh_phys, link_state); // insert the qh to async_head
+
+    u32 recieved = 0;
+
+    auto result = wait_for_descriptor(setup_qtd, data_qtd, status_qtd, timer, recieved);
+
+    if (!unlink_async_qh(op_regs, link_state, qh, setup_qtd, data_qtd, status_qtd, timer)) {
+        printf("EHCI: unlink async_qh error in send packet\n");
+        controller.needs_reinit = true;
+        
+        dma_cache new_cache = {0};
+        new_cache.dma = new dma_ret[1];
+        new_cache.error_code = new u16[1];
+        new_cache.max = 1;
+        *new_cache.error_code = (EHCI << 8) | LINK_ISSUE;
+        *new_cache.dma = alloc;
+
+        dma_cache *cache = controller.cached.cache;
+        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
+        u64 new_size = old_size + sizeof(dma_cache);
+
+        cache = (dma_cache *)krealloc(cache, old_size, new_size);
+        cache[controller.cached.max] = new_cache;
+        
+        controller.cached.cache = cache;
+        controller.cached.max++;
+
+        return nullptr;
+    }
+
+    if (result != ehci_transfer_result::success) {
+        printf("EHCI: Send packet for port 0x%b failed\n", port);
+        
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+    wait_ms(timer, 2);
+
+    if (length) {
+        void *ptr0 = (void *)((u8 *)setup + 8);
+        void *ptr1 = kmalloc(length);
+        if (ptr1 == nullptr) {
+            free_dma(alloc.virtual_address);
+            return nullptr;
+        }
+        memcpy(ptr1, ptr0, length);
+        free_dma(alloc.virtual_address);
+        return ptr1;
+    } else {
+        free_dma(alloc.virtual_address);
+        return nullptr;
+    }
+
+}

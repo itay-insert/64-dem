@@ -89,6 +89,20 @@ typedef struct {
     u8  bNumConfigurations;
 } __attribute__((packed)) usb_device_descriptor;
 
+
+typedef struct {
+    u8  bLength;             // 0: 9
+    u8  bDescriptorType;     // 1: 0x02
+    u16 wTotalLength;        // 2: Total configuration tree length
+    u8  bNumInterfaces;      // 4: Number of interfaces
+    u8  bConfigurationValue; // 5: Value for SET_CONFIGURATION
+    u8  iConfiguration;      // 6: String descriptor index
+    u8  bmAttributes;        // 7: Configuration attributes
+    u8  bMaxPower;           // 8: Maximum power consumption
+} __attribute__((packed)) configuration_descriptor;
+
+
+
 typedef struct {
     u8  bLength;
     u8  bDescriptorType;
@@ -122,7 +136,7 @@ typedef struct {
 
     usb_controller_t *controller;
     usb_device_descriptor descriptor;
-
+    configuration_descriptor config;
     usb_endpoint endpoint;
 } usb_device;
 
@@ -156,6 +170,8 @@ class usb_controller {
         virtual int disable_port(u8 port, TimerSource &timer) = 0;
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
+        virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
+        virtual configuration_descriptor get_config(u8 address, TimerSource &timer) = 0;
 
 };
 
