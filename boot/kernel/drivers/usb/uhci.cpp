@@ -385,12 +385,12 @@ uhci_transfer_result wait_for_control_transfer(
                     received_bytes = total_received;
 
                     // Status TD was already initialized.
-                    dma_wmb();
+                    asm volatile("mfence" ::: "memory");
 
                     // Restart the QH at the status stage.
                     qh->element_link = status_td_phys;
 
-                    dma_wmb();
+                    asm volatile("mfence" ::: "memory");
 
                     short_packet = true;
                     break;
@@ -553,7 +553,8 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
 
     u32 recieved = 0;
 
-    auto result = wait_for_control_transfer(setup_td, data_td, 1, status_td, timer, recieved);
+    auto result = wait_for_control_transfer(setup_qh, setup_td, data_td, 1, status_td,
+                                            (u32)(alloc.physical_address + ((u64)status_td - alloc.virtual_address)), timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: device descriptor transfer error\n");
         old_command = inw(io_base+UHCI_USBCMD);
@@ -656,7 +657,7 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
 
 #define UHCI_TD_SPD (1u << 29)
 
-u8 next_usb_address = 1;
+static u8 next_usb_address = 1;
 
 static inline u8 allocate_usb_address(void) {
     if (next_usb_address > 127) 
@@ -669,7 +670,7 @@ static inline u8 allocate_usb_address(void) {
 usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
 
-    u64 size = (sizeof(uhci_td) << 1) + sizeof(qh) + sizeof(usb_setup_packet);
+    u64 size = (sizeof(uhci_td) << 1) + sizeof(uhci_qh) + sizeof(usb_setup_packet);
 
     u16 io_base = (u16)controller.io_base;
     dma_ret alloc = allocate_dma(size);
@@ -783,7 +784,8 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     }
 
     u32 recieved = 0;
-    auto result = wait_for_control_transfer(setup_td, nullptr, 0, status_td, timer, recieved);
+    auto result = wait_for_control_transfer(qh, setup_td, nullptr, 0, status_td,
+                                            (u32)status_phys, timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: set address error\n");
         old_command = inw(io_base+UHCI_USBCMD);
@@ -885,9 +887,9 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     u32 common_status =
         uhci::td::active |
-        uhci::td::cerr(3); 
+        uhci::td::error_count;
 
-    if (low_speed)
+    if (uhci_read_port(io_base, port - 1) & (1u << 8))
         common_status |= uhci::td::low_speed;
 
 
@@ -949,7 +951,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     status_td->status =
         common_status |
-        uhci::td::ioc;
+        uhci::td::interrupt;
 
     status_td->token =
         USB_PID_OUT |
@@ -1031,8 +1033,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
     if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
-        usb_device_descriptor *device_ptr = desc;
-        memcpy(device_ptr, desc_ptr, 18);
+        memcpy(&desc, desc_ptr, 18);
     }
 
     old_command = inw(io_base+UHCI_USBCMD);
@@ -1067,7 +1068,10 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
     u16 io_base = (u16)controller.io_base;
-    u32 data_td_count = (length + maxpacketsize-1) / maxpacketsize;
+    u32 data_td_count = 0;
+
+    if (maxpacketsize)
+        data_td_count = (length + maxpacketsize-1) / maxpacketsize;
 
     u64 size = ((data_td_count + 2) * sizeof(uhci_td)) + sizeof(uhci_qh) + length + 8;
     
@@ -1086,10 +1090,11 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     u32 qh_phys = (u32)alloc.physical_address;
     u32 setup_td_phys = qh_phys + sizeof(uhci_qh);
-    u32 data_td_phys = setup_qtd_phys + sizeof(uhci_td);
+    u32 data_td_phys = setup_td_phys + sizeof(uhci_td);
 
     u32 status_td_phys = data_td_phys + (sizeof(uhci_td) * data_td_count);
     u32 setup_phys = status_td_phys + sizeof(uhci_td);
+    u32 desc_phys = setup_phys + 8;
 
     uhci_qh *qh = (uhci_qh *)alloc.virtual_address;
     uhci_td *setup_td = (uhci_td *)((u8 *)qh + sizeof(uhci_qh));
@@ -1125,22 +1130,22 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         u8 toggle = USB_DATA1;
 
         for (u32 i = 0; i < data_td_count; i++) {
-            u32 remaining = 18 - offset;
+            u32 remaining = length - offset;
             u32 length = remaining < maxpacketsize
                      ? remaining
-                    : max_packet_size;
+                    : maxpacketsize;
 
             bool last = (i == data_td_count - 1);
 
             data_td[i].link =
                 last
-                    ? status_phys | UHCI_PTR_DEPTH
+                    ? status_td_phys | UHCI_PTR_DEPTH
                  : data_td_phys +
                   (i + 1) * sizeof(uhci_td) |
                  UHCI_PTR_DEPTH;
 
             data_td[i].status =
-                common_status | (last ? 0 : UHCI_TD_SPD);
+                UHCI_TD_ACTIVE | UHCI_TD_CERR(3) | (last ? 0 : UHCI_TD_SPD);
 
             data_td[i].token =
                 USB_PID_IN |
@@ -1185,7 +1190,7 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     qh->element_link = setup_td_phys;
 
 
-    old_command = inw(io_base+UHCI_USBCMD);
+    u16 old_command = inw(io_base+UHCI_USBCMD);
     outw(io_base+UHCI_USBCMD, (old_command & ~1u)); // halt the controller temporarily
 
     if (!wait_for_halted(io_base, timer)) {
@@ -1194,8 +1199,12 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         return nullptr;
     }
 
-    for (int i = 0; i < 1024; i++) 
+    u32 *backup = new u32[1024];
+
+    for (int i = 0; i < 1024; i++) {
+        backup[i] = frame_list[i];
         frame_list[i] = qh_phys | 0x2u;
+    }
 
     asm volatile("mfence" ::: "memory");
     outw(io_base+UHCI_USBCMD, old_command | 1u); // start the controller
@@ -1203,10 +1212,13 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     if (!wait_for_start(io_base, timer)) {
         printf("UHCI: controller failed to start\n");
         free_dma(alloc.virtual_address);
+        delete[] backup;
         return nullptr;
     }
 
-    result = wait_for_control_transfer(qh, setup_td, data_td, data_td_count, status_td, status_phys, timer, recieved);
+    u32 recieved = 0;
+    auto result = wait_for_control_transfer(qh, setup_td, data_td, data_td_count,
+                                            status_td, status_td_phys, timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: send packet error\n");
         old_command = inw(io_base+UHCI_USBCMD);

@@ -9,6 +9,7 @@
 #include "drivers/usb/ohci.hpp"
 #include "drivers/usb/ehci.hpp"
 #include "drivers/usb/xhci.hpp"
+#include "x86-64/memory/kmalloc.h"
 
 const char *codes[] = {
     "NO_DEVICE",
@@ -169,6 +170,28 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
 }
 
 
+configuration_descriptor usb_controller::get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port) {
+    configuration_descriptor desc = {0};
+    usb_setup_packet get_conf = {
+        0x80,
+        0x06,
+        0x0200,
+        0,
+        9
+    };
+
+    void *buffer = usb_send_packet(get_conf, maxpacketsize, 9, address, timer, port);
+    if (buffer == nullptr) {
+        printf("USB: get_config error\n");
+        return desc;
+    }
+    configuration_descriptor *config = (configuration_descriptor *)(u64)buffer;
+
+    desc = *config;
+    kfree(buffer);
+    return desc;
+}
+
 usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
     usb_device Device = {0};
     pci_address_t pci_address = controller.pci_address;
@@ -191,10 +214,13 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
     usb_device_descriptor desc = identify_device(port, timer);
     Device = set_address(desc, timer, port);
 
-    Device.controller = controller;
+    Device.controller = &controller;
     Device.product_id = Device.descriptor.idProduct;
     Device.vendor_id = Device.descriptor.idVendor;
     Device.port_number = port;
+
+    Device.config = get_config(Device.address, timer, (u32)Device.descriptor.bMaxPacketSize0, port);
+
 
 
     return Device;

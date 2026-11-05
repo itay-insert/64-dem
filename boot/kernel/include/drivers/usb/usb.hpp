@@ -1,5 +1,6 @@
 #pragma once
 #include "drivers/pci/pci.h"
+#include "drivers/devdef.h"
 #include "drivers/timers/timer.hpp"
 
 
@@ -18,11 +19,6 @@
 
 #define MMIO 0
 #define IO 1
-
-#define UHCI 0
-#define OHCI 1
-#define EHCI 2
-#define xHCI 3
 
 // if reset return code > 0 == failure
 #define RESET_SUCCESS 0
@@ -101,6 +97,18 @@ typedef struct {
     u8  bMaxPower;           // 8: Maximum power consumption
 } __attribute__((packed)) configuration_descriptor;
 
+typedef struct {
+    u8 bLength;
+    u8 bDescriptorType;
+    u8 bInterfaceNumber;
+    u8 bAlternateSetting;
+    u8 bNumEndpoints;
+    u8 bInterfaceClass;
+    u8 bInterfaceSubClass;
+    u8 bInterfaceProtocol;
+    u8 iInterface;
+} __attribute__((packed)) usb_interface_descriptor;
+
 
 
 typedef struct {
@@ -137,6 +145,7 @@ typedef struct {
     usb_controller_t *controller;
     usb_device_descriptor descriptor;
     configuration_descriptor config;
+    usb_interface_descriptor interface;
     usb_endpoint endpoint;
 } usb_device;
 
@@ -171,7 +180,7 @@ class usb_controller {
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
-        virtual configuration_descriptor get_config(u8 address, TimerSource &timer) = 0;
+        configuration_descriptor get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port);
 
 };
 

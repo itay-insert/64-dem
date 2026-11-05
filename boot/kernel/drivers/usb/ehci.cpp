@@ -451,6 +451,9 @@ enum class ehci_transfer_result {
     transfer_error
 };
 
+
+u32 REQUESTED_BYTES = 8;
+
 ehci_transfer_result wait_for_descriptor(
     volatile ehci_qtd* setup_td,
     volatile ehci_qtd* data_td,
@@ -474,7 +477,7 @@ ehci_transfer_result wait_for_descriptor(
         QTD_STATUS_XACTERR |
         QTD_STATUS_MISSED;
 
-    constexpr u32 REQUESTED_BYTES = 8;
+
     constexpr u32 TIMEOUT_MS = 500;
 
     for (u32 elapsed = 0; elapsed < TIMEOUT_MS; ++elapsed) {
@@ -613,6 +616,7 @@ bool unlink_async_qh(volatile ehci_op_regs_t* regs, ehci_async_link_state& state
 
 usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &timer) {
     usb_device_descriptor device_descriptor = {0};
+    REQUESTED_BYTES = 8;
 
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
@@ -818,7 +822,7 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
 #define EHCI_USBSTS_IAA      (1u << 5)
 
 
-u8 next_usb_address = 1;
+static u8 next_usb_address = 1;
 
 static inline u8 allocate_usb_address(void) {
     if (next_usb_address > 127) 
@@ -830,6 +834,7 @@ static inline u8 allocate_usb_address(void) {
 
 usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
+    REQUESTED_BYTES = 18;
 
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
@@ -1003,7 +1008,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
     // calculate sizes
     qh_phys = (u32)alloc.physical_address;
     setup_qtd_phys = qh_phys + sizeof(ehci_qh);
-    u32 data_qtd_phys = setup_qtd_phys + sizeof(ehci_qtd)
+    u32 data_qtd_phys = setup_qtd_phys + sizeof(ehci_qtd);
     status_qtd_phys = data_qtd_phys + sizeof(ehci_qtd);
     setup_phys = status_qtd_phys + sizeof(ehci_qtd);
     u32 desc_phys = setup_phys + 8;
@@ -1032,7 +1037,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
         EHCI_QH_ENDPOINT(0) |
         EHCI_QH_HIGH_SPEED |
         EHCI_QH_DTC |
-        EHCI_QH_MAX_PACKET(max_packet_size);
+        EHCI_QH_MAX_PACKET(desc.bMaxPacketSize0);
 
     qh->endpoint_capabilities = 0;
     qh->alternate_next_qtd = EHCI_LINK_TERMINATE;
@@ -1134,8 +1139,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
     if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
-        usb_device_descriptor *device_ptr = desc;
-        memcpy(device_ptr, desc_ptr, 18);
+        memcpy(&desc, desc_ptr, 18);
     }
 
     device.descriptor = desc;
@@ -1166,13 +1170,13 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 #define EHCI_QH_C_MASK(v)     (((u32)(v) & 0xFF) << 8)
 #define EHCI_QH_S_MASK(v)     ((u32)(v) & 0xFF)
 
-void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer) {
+void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
 
 
     
-    u64 size = sizeof(ehci_qh) + (sizeof(ehci_qtd) * length > 0 ? 3 : 2) + length + 8;
+    u64 size = sizeof(ehci_qh) + sizeof(ehci_qtd) * (length > 0 ? 3 : 2) + length + 8;
 
     dma_ret alloc = allocate_dma(size);
 
@@ -1192,15 +1196,16 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     u32 data_td_phys = 0;
     u32 status_td_phys = 0;
     if (length > 0) {
-        data_td_phys = setup_td_phys + sizeof(ehci_td);
-        status_td_phys = data_td_phys + sizeof(ehci_td);
+        data_td_phys = setup_td_phys + sizeof(ehci_qtd);
+        status_td_phys = data_td_phys + sizeof(ehci_qtd);
     } else {
-        status_td_phys = setup_td_phys + sizeof(ehci_td);
+        status_td_phys = setup_td_phys + sizeof(ehci_qtd);
     }
 
-    u32 setup_phys = status_td_phys + sizeof(ehci_td);
+    u32 setup_phys = status_td_phys + sizeof(ehci_qtd);
+    u32 data_phys = setup_phys + sizeof(usb_setup_packet);
 
-    ehci_qh *qh = (ehci_qh *)alloc.virtual_address
+    ehci_qh *qh = (ehci_qh *)alloc.virtual_address;
     ehci_qtd *setup_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
     ehci_qtd *data_qtd = nullptr;
     ehci_qtd *status_qtd = nullptr;
@@ -1211,7 +1216,7 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         status_qtd = (ehci_qtd *)((u8 *)setup_qtd + sizeof(ehci_qtd));
     }
 
-    usb_send_packet *setup = (usb_send_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
+    usb_setup_packet *setup = (usb_setup_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
 
     *setup = packet;
 
@@ -1222,34 +1227,31 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     setup_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
 
     setup_qtd->token =
-        EHCI_QTD_DT(0) |
         EHCI_QTD_BYTES(8) |
         EHCI_QTD_CERR(3) |
-        EHCI_QTD_PID(EHCI_QTD_PID_SETUP) |
+        EHCI_QTD_PID_SETUP |
         EHCI_QTD_ACTIVE;
 
     setup_qtd->buffer[0] = setup_phys;
 
-    bool data_in = setup->bmRequestType & 0x80;
+    bool data_in = setup->BmRequestType & 0x80;
 
     if (data_qtd) {
 
         *data_qtd = {};
 
-        data_qtd->next_qtd = status_qtd_phys;
+        data_qtd->next_qtd = status_td_phys;
 
-        data_qtd->alt_next_qtd =
+        data_qtd->alternate_next_qtd =
             data_in
-                ? status_qtd_phys
-                : EHCI_QTD_TERMINATE;
+                ? status_td_phys
+                : EHCI_LINK_TERMINATE;
 
         data_qtd->token =
-            EHCI_QTD_DT(1) |
+            EHCI_QTD_TOGGLE |
             EHCI_QTD_BYTES(length) |
             EHCI_QTD_CERR(3) |
-            EHCI_QTD_PID(data_in
-                ? EHCI_QTD_PID_IN
-                : EHCI_QTD_PID_OUT) |
+            (data_in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT) |
             EHCI_QTD_ACTIVE;
 
         data_qtd->buffer[0] = data_phys;
@@ -1257,7 +1259,7 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     }
 
     bool status_in =
-        setup.wLength == 0 || !data_in;
+        setup->wLength == 0 || !data_in;
 
     u32 status_pid = status_in
         ? EHCI_QTD_PID_IN
@@ -1265,14 +1267,14 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     *status_qtd = {};
 
-    status_qtd->next_qtd = EHCI_QTD_TERMINATE;
-    status_qtd->alternate_next_qtd = EHCI_QTD_TERMINATE;
+    status_qtd->next_qtd = EHCI_LINK_TERMINATE;
+    status_qtd->alternate_next_qtd = EHCI_LINK_TERMINATE;
 
     status_qtd->token =
-        EHCI_QTD_DT(1) |
+        EHCI_QTD_TOGGLE |
         EHCI_QTD_BYTES(0) |
         EHCI_QTD_CERR(3) |
-        EHCI_QTD_PID(status_pid) |
+        status_pid |
         EHCI_QTD_ACTIVE;
 
     *qh = {};

@@ -1012,7 +1012,7 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
 
 
-u8 next_usb_address = 1;
+static u8 next_usb_address = 1;
 
 static inline u8 allocate_usb_address(void) {
     if (next_usb_address > 127) 
@@ -1169,7 +1169,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     u32 received = 0;
 
-    auto result = wait_for_descriptor(ed, setup_td, nullptr, status_td, dummy_phys, 0, o, hcca, ohci_regs, watch, timer, received);
+    auto result = wait_for_descriptor(ed, setup_td, nullptr, status_td, dummy_phys, 0, 0, hcca, ohci_regs, watch, timer, received);
     if (!restore_control_schedule(
         ohci_regs,
         hcca,
@@ -1316,9 +1316,9 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
         ohci::td::in |
         ohci::td::toggle_data1;
 
-    data_td->cbp = descriptor_phys; 
+    data_td->cbp = desc_phys;
     data_td->next_td = status_phys;
-    data_td->be = descriptor_phys + 17;
+    data_td->be = desc_phys + 17;
 
     *status_td = {};
 
@@ -1367,9 +1367,9 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     // Enable the control list.
     ohci_regs->control = old_control | OHCI_CLE;
 
-    ohci_transfer_watch watch = {
+    watch = {
         setup_td_phys,
-        data_td_phys,
+        (u32)data_td_phys,
         status_phys,
         0
     };
@@ -1381,7 +1381,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
         data_td,
         status_td,
         dummy_phys,
-        descriptor_phys,
+        desc_phys,
         18,                // Request length
         hcca,
         ohci_regs,
@@ -1449,8 +1449,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
     if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
-        usb_device_descriptor *device_ptr = desc;
-        memcpy(device_ptr, desc_ptr, 18);
+        memcpy(&desc, desc_ptr, 18);
     }
 
     device.descriptor = desc;
@@ -1544,9 +1543,11 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
 
-void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer) {
+void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
+
     u32 data_td_count = (length + maxpacketsize-1) / maxpacketsize;
-    u64 size = sizeof(ohci_ed) + ((data_td_count + 2) * sizeof(ohci_td)) + 8 + length;
+    u64 size = sizeof(ohci_ed) + ((data_td_count + 3) * sizeof(ohci_td)) + 8 + length;
 
     dma_ret alloc = allocate_dma(size);
 
@@ -1572,6 +1573,7 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     u32 status_td_phys = data_td_phys + (data_td_count * sizeof(ohci_td));
     u32 dummy_phys = status_td_phys + sizeof(ohci_td);
     u32 setup_phys = dummy_phys + sizeof(ohci_td);
+    u32 data_phys = setup_phys + sizeof(usb_setup_packet);
 
     ohci_ed *ed = (ohci_ed *)alloc.virtual_address;
     ohci_td *setup_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
@@ -1598,7 +1600,7 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     setup_td->cbp = setup_phys;
     setup_td->be = setup_phys + 7;
 
-    bool data_in = setup->bmRequestType & 0x80;
+    bool data_in = setup->BmRequestType & 0x80;
 
     u32 offset = 0;
 
@@ -1606,9 +1608,9 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         u32 remaining = length - offset;
 
         u32 chunk_length =
-            remaining < OHCI_TD_CHUNK_SIZE
+            remaining < maxpacketsize
                 ? remaining
-                : OHCI_TD_CHUNK_SIZE;
+                : maxpacketsize;
 
         bool last = (i == data_td_count - 1);
 
@@ -1657,7 +1659,7 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     status_td->cbp = 0;
     status_td->be = 0;
-    status_td->next_td = status_td_phys;
+    status_td->next_td = dummy_phys;
 
 
     *dummy_td = {};
@@ -1678,10 +1680,10 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         OHCI_ED_MPS(maxpacketsize);
 
     ed->next_ed = 0;
-    ed->tailp = dummy_td_phys;
-    ed->head_p = setup_td_phys;
+    ed->tailp = dummy_phys;
+    ed->headp = setup_td_phys;
     
-    old_control = ohci_regs->control;
+    u32 old_control = ohci_regs->control;
 
     if (!stop_control_schedule(
             ohci_regs, hcca->frame_number, timer)) {
@@ -1697,10 +1699,10 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         return nullptr;
     }
 
-    old_head = ohci_regs->control_head_ed;
-    old_current = ohci_regs->control_current_ed;
+    u32 old_head = ohci_regs->control_head_ed;
+    u32 old_current = ohci_regs->control_current_ed;
 
-    old_clf =
+    bool old_clf =
         (ohci_regs->command_status & OHCI_CLF) != 0;
 
     // Install our ED.
@@ -1718,19 +1720,19 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     ohci_transfer_watch watch = {
         setup_td_phys,
         data_td_phys,
-        status_phys,
+        status_td_phys,
         0
     };
 
-    received = 0;
-    result = wait_for_descriptor(
+    u32 received = 0;
+    auto result = wait_for_descriptor(
         ed,
         setup_td,
         data_td,
         status_td,
         dummy_phys,
-        descriptor_phys,
-        18,                // Request length
+        data_phys,
+        (u32)length,
         hcca,
         ohci_regs,
         watch,

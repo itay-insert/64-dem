@@ -449,15 +449,18 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
 
             u64 trb_pointer =
                 ((u64)event.d1 << 32) | event.d0;
+            const u8 completion_code = event.d2 >> 24;
 
-            if (transfer_waiting &&
+            if (__atomic_load_n(&transfer_waiting, __ATOMIC_ACQUIRE) &&
+                !__atomic_load_n(&transfer_completed, __ATOMIC_ACQUIRE) &&
                 !event_data &&
                     slot_id == transfer_slot &&
                     endpoint_id == transfer_endpoint &&
-                    trb_pointer == transfer_trb_pointer) {
+                    (trb_pointer == transfer_trb_pointer ||
+                     (completion_code != 1 && completion_code != 13))) {
 
                 transfer_completion = event;
-                transfer_completed = true;
+                __atomic_store_n(&transfer_completed, true, __ATOMIC_RELEASE);
             } else {
             // Handle or queue unrelated Transfer Events.
             }
@@ -678,8 +681,10 @@ int xhci_controller::enumrate_ports() {
     ports = new usb_port_descriptor[xhci_port_count]; // allocate the port descriptors
     slots = new usb_slot[xhci_port_count];
 
-    if (ports == nullptr) // return -1 for allocation failure
+    if (ports == nullptr || slots == nullptr) // return -1 for allocation failure
         return -1;
+
+    memset(slots, 0, sizeof(usb_slot) * xhci_port_count);
 
 
     for (u8 port = 0; port < xhci_port_count; port++) {
@@ -991,20 +996,25 @@ bool xhci_controller::wait_transfer_event(
     XhciTrb *result,
     u32 timeout)
 {
-    transfer_slot = slot_id;
-    transfer_endpoint = endpoint_id;
-    transfer_trb_pointer = expected_trb;
-
-    transfer_completed = false;
-    transfer_waiting = true;
+    if (__atomic_load_n(&transfer_waiting, __ATOMIC_ACQUIRE)) {
+        if (transfer_slot != slot_id || transfer_endpoint != endpoint_id ||
+            transfer_trb_pointer != expected_trb)
+            return false;
+    } else {
+        transfer_slot = slot_id;
+        transfer_endpoint = endpoint_id;
+        transfer_trb_pointer = expected_trb;
+        __atomic_store_n(&transfer_completed, false, __ATOMIC_RELAXED);
+        __atomic_store_n(&transfer_waiting, true, __ATOMIC_RELEASE);
+    }
 
 
     u32 i = 0;
-    while (!transfer_completed) {
+    while (!__atomic_load_n(&transfer_completed, __ATOMIC_ACQUIRE)) {
         xhci_process_events();
 
         if (i >= timeout) {
-            transfer_waiting = false;
+            __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
             return false;
         }
         wait_ms(timer, 1);
@@ -1012,7 +1022,7 @@ bool xhci_controller::wait_transfer_event(
     }
 
     *result = transfer_completion;
-    transfer_waiting = false;
+    __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
 
     return true;
 }
@@ -1318,6 +1328,13 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     data_trb.d3 &= ~1u;
     status_trb.d3 &= ~1u;
 
+    // Arm before the first transfer can complete, including the interrupt path.
+    transfer_slot = slot_id;
+    transfer_endpoint = 1;
+    transfer_trb_pointer = ring_phys + 2 * sizeof(XhciTrb);
+    __atomic_store_n(&transfer_completed, false, __ATOMIC_RELAXED);
+    __atomic_store_n(&transfer_waiting, true, __ATOMIC_RELEASE);
+
     trbs[0] = setup_trb;
     trbs[1] = data_trb;
     trbs[2] = status_trb;
@@ -1423,34 +1440,14 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     memcpy(desc_ptr, desc, 8);
     free_dma(desc_dma->virtual_address);
     free_dma(input_context.virtual_address);
-    if (!disable_device_slot(slot_id, timer)) {
-        printf("xHCI: failed to disable slot_id 0x%b\n", slot_id);
-
-        dma_cache new_cache = {0};
-        new_cache.dma = new dma_ret[2];
-        new_cache.error_code = new u16[2];
-        new_cache.max = 2;
-
-        new_cache.dma[0] = output_device_context;
-        new_cache.dma[1] = *alloc_ptr;
-
-        new_cache.error_code[0] = (xHCI << 8) | DISABLE_SLOT_ERROR;
-        new_cache.error_code[1] = new_cache.error_code[0];
-
-        dma_cache *cache = controller.cached.cache;
-
-        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
-        u64 new_size = old_size + sizeof(dma_cache);
-
-        cache = (dma_cache *)krealloc(cache, old_size, new_size);
-        cache[controller.cached.max] = new_cache;
-
-        controller.cached.cache = cache;
-        controller.cached.max++;
-    }  
 
     slots[port-1].port = port;
     slots[port-1].slot_id = slot_id;
+    slots[port-1].address = usb_address;
+    slots[port-1].speed_id = speed_id;
+    slots[port-1].ep0_mps = initial_mps;
+    slots[port-1].ep0_index = 3;
+    slots[port-1].ep0_cycle = 1;
     slots[port-1].EP0_physical = alloc_ptr->physical_address;
     slots[port-1].EP0_virtual = alloc_ptr->virtual_address;
     slots[port-1].output_context_physical = output_device_context.physical_address;
@@ -1463,263 +1460,221 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
 
 
 usb_device xhci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
-    usb_device device = {0};
-
-    u64 output_context = slots[port-1].output_context_virtual;
-    u64 EP0_addr = slots[port-1].EP0_virtual;
-
-    u64 ring_phys = slots[port-1].EP0_physical;
-
-    device.address = usb_address;
-
-    dma_ret desc_dma = {};
-    if (!xhci_dma_alloc(&desc_dma, 18, addr64)) {
-        printf("xHCI: failed to allocate GET DESCRIPTOR buffer\n");
-        device.discovered = false;
+    usb_device device = {};
+    if (!slots || port == 0 || port > ports_count)
         return device;
-    }
 
-    u8 actual_mps = desc.bMaxPacketSize0;
+    usb_slot &slot = slots[port - 1];
+    if (slot.slot_id == 0 || slot.address == 0 || desc.bLength != 18 ||
+        desc.bDescriptorType != 1)
+        return device;
 
-    if (speed_id == 4) {
-        if (actual_mps != 9) {
-            device.discovered = false;
+    // Address Device (BSR=0) already assigned the USB address in identify_device.
+    device.address = slot.address;
+    u16 actual_mps = desc.bMaxPacketSize0;
+    if (slot.speed_id == 4) {
+        if (actual_mps != 9)
             return device;
-        }
-
         actual_mps = 512;
     }
+    if (actual_mps == 0)
+        return device;
 
-    if (actual_mps != initial_mps) {
-        dma_ret input_context = allocate_dma(context_size * 33);
-        if (input_context.status != 0) {
-            printf("xHCI: input_context allocation failed\n");
-            device.discovered = false;
+    if (actual_mps != slot.ep0_mps) {
+        auto *cap = (volatile xhci_cap_regs *)controller.io_base;
+        const u32 context_bytes = (cap->hccparams1 & CSZ) ? 64 : 32;
+        dma_ret input_context = {};
+        if (!xhci_dma_alloc(&input_context, context_bytes * 33, addr64)) {
+            printf("xHCI: EP0 Evaluate Context allocation failed\n");
             return device;
         }
-
-        if (input_context.physical_address > 0xFFFFFFFF) {
-            printf("xHCI: input_context physical address too big\n");
-            free_dma(input_context.virtual_address);
-            device.discovered = false;
-            return device;
-        }
-
-        memset(input_context.virtual_address, 0, context_size*33);
 
         u32 *icc = (u32 *)input_context.virtual_address;
+        icc[1] = 1u << 1; // Add only the EP0 context.
+        u8 *input_ep0 = (u8 *)(input_context.virtual_address + 2 * context_bytes);
+        const u8 *output_ep0 = (const u8 *)(slot.output_context_virtual + context_bytes);
+        memcpy(input_ep0, output_ep0, context_bytes);
+        u32 *ep0 = (u32 *)input_ep0;
+        ep0[0] &= ~7u; // Input EP State must be zero.
+        ep0[1] = (ep0[1] & 0x0000ffffu) | ((u32)actual_mps << 16);
 
-        icc[0] = 0; // All Drop Context flags = 0
-        icc[1] = (1u << 1); // evaluate EP0
-
-        u8 *output_ep0 = (u8 *)(output_context + context_size);
-        u8 *input_ep0 = (u8 *)(input_context.virtual_address + (context_size << 1));
-
-        memcpy(input_ep0, output_ep0, context_size);
-
-        u32 *ep0 = (u32 *)(u64)input_ep0;
-
-        ep0[0] &= ~0x7u;
-        ep[1] = (ep[1] & 0x0000FFFF) | ((u32)actual_mps << 16);
-
-        XhciTrb evaluate_cmd = {};
-
-        u64 input_phys = input_context.physical_address;
-
-        evaluate_cmd.d0 = (u32)input_phys;
-        evaluate_cmd.d1 = (u32)(input_phys >> 32);
-
-        evaluate_cmd.d2 = 0;
-
-        evaluate_cmd.d3 = (13u << 10) | ((u32)slot_id << 24);
-
-        asm volatile("mfence" ::: "memory");
-
-        u64 command_phys = submit_command(evaluate_cmd);
-
+        XhciTrb evaluate = {};
+        evaluate.d0 = (u32)input_context.physical_address;
+        evaluate.d1 = (u32)(input_context.physical_address >> 32);
+        evaluate.d3 = TRB_TYPE(13) | ((u32)slot.slot_id << 24);
+        const u64 command_phys = submit_command(evaluate);
         XhciTrb completion = {};
-
         if (!wait_command(timer, command_phys, &completion, 500)) {
-            printf("xHCI: evalaute context timed out\n");
-
-            dma_cache new_cache = {0};
-            new_cache.dma = new dma_ret[1];
-            new_cache.error_code = new u16[1];
-            new_cache.max = 1;
-
-            *new_cache.dma = input_context;
-            *new_cache.error_code = (xHCI << 8) | EVAL_CONTEXT_TIMEOUT;
-
-            dma_cache *cache = controller.cached.cache;
-
-            u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
-            u64 new_size = old_size + sizeof(dma_cache);
-
-            cache = (dma_cache *)krealloc(cache, old_size, new_size);
-            cache[controller.cached.max] = new_cache;
-
-            controller.cached.cache = cache;
-            controller.cached.max++;
-
-            device.discovered = false;
+            printf("xHCI: EP0 Evaluate Context timed out\n");
+            controller.needs_reinit = true;
+            // The controller might still read the input context after a timeout.
             return device;
         }
-
-        u8 completion_code = completion.d2 >> 24;
-        if (completion_code != 1) {
-            printf("xHCI: evaluate context failed, port: 0x%b, initial_mps: 0x%w, actual_mps: 0x%b, code: 0x%b", 
-            port, initial_mps, actual_mps, completion_code);
-            free_dma(input_context.virtual_address);
-            device.discovered = false;
+        free_dma(input_context.virtual_address);
+        if ((completion.d2 >> 24) != 1) {
+            printf("xHCI: EP0 Evaluate Context failed: %u\n", completion.d2 >> 24);
             return device;
         }
-
-        free_dma(input_context.virtual_address);
+        slot.ep0_mps = actual_mps;
     }
 
-    XhciTrb *trbs = (XhciTrb *)EP0_addr;
-    u64 desc_phys = desc_dma.physical_address;
-
-    XhciTrb setup_trb = {};
-
-    setup_trb.d0 = 0x01000680;
-    setup_trb.d1 = 0x00120000;
-    setup_trb.d2 = 8;
-
-    setup_trb.d3 =
-        (2 << 19) |
-        (1u << 6) |
-        (3u << 16);
-
-    XhciTrb data_trb = {};
-
-    data_trb.d0 = (u32)desc_phys;
-    data_trb.d1 = (u32)(desc_phys >> 32);
-    data_trb.d2 = 18;
-
-    data_trb.d3 =
-        (3u << 10) |
-        (1u << 16);
-
-    XhciTrb status_trb = {};
-
-    status_trb.d3 = 
-        (4u << 10) |
-        (1u << 5);
-
-    setup_trb.d3 &= ~1u;
-    data_trb.d3 &= ~1u;
-    status_trb.d3 &= ~1u;
-
-    trbs[3] = setup_trb;
-    trbs[4] = data_trb;
-    trbs[5] = status_trb;
-
-    asm volatile("mfence" ::: "memory");
-
-    trbs[5].d3 |= 1;
-    trbs[4].d3 |= 1;
-
-    asm volatile("mfence" ::: "memory");
-
-    trbs[3].d3 |= 1;
-
-    asm volatile("mfence" ::: "memory");
-
-    slots[port-1].ep0_index = 6;
-    
-    // link trb
-    trbs[255].d3 = (6u << 10) | (1u << 1) | 1;
-
-    u64 status_trb_phys = ring_phys + 5 * sizeof(XhciTrb);
-
-    doorbells[slots[port-1].slot_id] = 1;
-
-    asm volatile("mfence" ::: "memory");
-
-    XhciTrb transfer_event = {};
-
-    if (!wait_transfer_event(timer, slot_id, 1, status_trb_phys, &transfer_event, 500)) {
-        printf("xHCI: GET DESCRIPTOR for port 0x%b timed out\n", port);
-        
-        free_dma(input_context.virtual_address);
-        dma_cache new_cache = {0};
-        new_cache.dma = new dma_ret[3];
-        new_cache.error_code = new u16[3];
-        new_cache.max = 3;
-
-        new_cache.dma[0] = output_device_context;
-        new_cache.dma[1] = *alloc_ptr;
-        new_cache.dma[2] = desc_dma;
-
-        new_cache.error_code[0] = (xHCI << 8) | GET_DESC_TIMEOUT;
-        new_cache.error_code[1] = new_cache.error_code[0];
-        new_cache.error_code[2] = new_cache.error_code[1];
-
-        dma_cache *cache = controller.cached.cache;
-
-        u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
-        u64 new_size = old_size + sizeof(dma_cache);
-
-        cache = (dma_cache *)krealloc(cache, old_size, new_size);
-        cache[controller.cached.max] = new_cache;
-
-        controller.cached.cache = cache;
-        controller.cached.max++;
-            
-        
-        return device_descriptor;
-    }
-
-    u8 completion_code = transfer_event.d2 >> 24;
-
-    if (completion_code != 1) {
-        printf("xHCI: GET_DESCRIPTOR on port 0x%b failed: 0x%b\n", port,
-            completion_code);
-        free_dma(desc_dma.virtual_address);
-        if (!disable_device_slot(slot_id, timer)) {
-            printf("xHCI: failed to disable slot_id 0x%b\n", slot_id);
-
-            dma_cache new_cache = {0};
-            new_cache.dma = new dma_ret[2];
-            new_cache.error_code = new u16[2];
-            new_cache.max = 2;
-
-            new_cache.dma[0] = slots[port-1].output_context;
-            new_cache.dma[1] = slots[port-1].EP0;
-
-            new_cache.error_code[0] = (xHCI << 8) | DISABLE_SLOT_ERROR;
-            new_cache.error_code[1] = new_cache.error_code[0];
-
-            dma_cache *cache = controller.cached.cache;
-
-            u64 old_size = (u64)(controller.cached.max * sizeof(dma_cache));
-            u64 new_size = old_size + sizeof(dma_cache);
-
-            cache = (dma_cache *)krealloc(cache, old_size, new_size);
-            cache[controller.cached.max] = new_cache;
-
-            controller.cached.cache = cache;
-            controller.cached.max++;
-        } else {
-            dcbaa[slot_id] = 0;
-            asm volatile("sfence" ::: "memory");
-            free_dma(slots[port-1].output_context_physical);
-            free_dma(slots[port-1].EP0_virtual);
-        }
-
-        device.discovered = false;
+    usb_setup_packet request = {0x80, GET_DESCRIPTOR, 0x0100, 0, 18};
+    void *buffer = usb_send_packet(request, slot.ep0_mps, 18,
+                                   slot.address, timer, port);
+    if (!buffer)
         return device;
-    }
 
-    usb_device_descriptor *desc_ptr = (usb_device_descriptor *)desc_dma.virtual_address;
-    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
-        usb_device_descriptor *device_ptr = desc;
-        memcpy(device_ptr, desc_ptr, 18);
+    auto *full = (usb_device_descriptor *)buffer;
+    if (full->bLength == 18 && full->bDescriptorType == 1) {
+        memcpy(&desc, full, sizeof(desc));
+        device.descriptor = desc;
+        device.discovered = true;
+    } else {
+        printf("xHCI: invalid full device descriptor on port 0x%b\n", port);
     }
-
-    free_dma(desc_dma.virtual_address);
-    device.discovered = true;
-    device.descriptor = desc;
+    kfree(buffer);
     return device;
+}
+
+void *xhci_controller::usb_send_packet(usb_setup_packet packet,
+                                       u32 maxpacketsize, u64 length,
+                                       u8 address, TimerSource &timer, u8 port) {
+    if (controller.needs_reinit || !slots || !doorbells || !dcbaa ||
+        port == 0 || port > ports_count || length != packet.wLength ||
+        length > 4096)
+        return nullptr;
+
+    usb_slot &slot = slots[port - 1];
+    if (slot.slot_id == 0 || slot.address != address ||
+        !slot.EP0_virtual || !slot.output_context_virtual ||
+        dcbaa[slot.slot_id] != slot.output_context_physical ||
+        maxpacketsize != slot.ep0_mps)
+        return nullptr;
+
+    const bool has_data = length != 0;
+    const bool data_in = (packet.BmRequestType & IN) != 0;
+    // This API has no source buffer for an OUT data stage.
+    if (has_data && !data_in)
+        return nullptr;
+
+    dma_ret data_dma = {};
+    if (has_data && !xhci_dma_alloc(&data_dma, length, addr64))
+        return nullptr;
+
+    XhciTrb setup = {};
+    setup.d0 = (u32)packet.BmRequestType |
+               ((u32)packet.bRequest << 8) |
+               ((u32)packet.wValue << 16);
+    setup.d1 = (u32)packet.wIndex | ((u32)packet.wLength << 16);
+    setup.d2 = 8;
+    setup.d3 = TRB_TYPE(TRB_SETUP) | TRB_IDT |
+               ((has_data ? TRT_IN : TRT_NO_DATA) << 16);
+
+    XhciTrb data = {};
+    if (has_data) {
+        data.d0 = (u32)data_dma.physical_address;
+        data.d1 = (u32)(data_dma.physical_address >> 32);
+        data.d2 = (u32)length;
+        data.d3 = TRB_TYPE(TRB_DATA) | TRB_DIR_IN | TRB_ISP;
+    }
+
+    XhciTrb status = {};
+    status.d3 = TRB_TYPE(TRB_STATUS) | TRB_IOC |
+                (has_data ? 0 : TRB_DIR_IN);
+
+    const u32 count = has_data ? 3 : 2;
+    const u32 old_index = slot.ep0_index;
+    const u32 old_cycle = slot.ep0_cycle;
+    if (old_index > EP0_LINK) {
+        if (has_data) free_dma(data_dma.virtual_address);
+        return nullptr;
+    }
+
+    // Keep each control transfer contiguous. If it will not fit before the
+    // Link TRB, fill the remaining entries with No-op Transfer TRBs and wrap.
+    const bool wrap = old_index + count > EP0_LINK;
+    const u32 first = wrap ? 0 : old_index;
+    const u32 cycle = wrap ? (old_cycle ^ 1u) : old_cycle;
+    auto *ring = (XhciTrb *)slot.EP0_virtual;
+    const u64 status_phys = slot.EP0_physical +
+                            (first + count - 1) * sizeof(XhciTrb);
+
+    // Arm before publishing the setup TRB, so a fast completion is not lost.
+    if (__atomic_load_n(&transfer_waiting, __ATOMIC_ACQUIRE)) {
+        if (has_data) free_dma(data_dma.virtual_address);
+        return nullptr;
+    }
+    transfer_slot = slot.slot_id;
+    transfer_endpoint = 1;
+    transfer_trb_pointer = status_phys;
+    __atomic_store_n(&transfer_completed, false, __ATOMIC_RELAXED);
+    __atomic_store_n(&transfer_waiting, true, __ATOMIC_RELEASE);
+
+    status.d3 |= cycle;
+    ring[first + count - 1] = status;
+    if (has_data) {
+        data.d3 |= cycle;
+        ring[first + 1] = data;
+    }
+    asm volatile("mfence" ::: "memory");
+    setup.d3 |= cycle;
+    ring[first] = setup;
+
+    if (wrap) {
+        for (u32 i = EP0_LINK; i > old_index;) {
+            --i;
+            ring[i] = {0, 0, 0, TRB_TYPE(8) | old_cycle};
+        }
+        ring[EP0_LINK].d3 = TRB_TYPE(6) | (1u << 1) | old_cycle;
+    }
+    asm volatile("mfence" ::: "memory");
+    doorbells[slot.slot_id] = 1; // DB Target 1: default control endpoint.
+
+    bool completed = false;
+    for (u32 elapsed = 0; elapsed < 500; ++elapsed) {
+        xhci_process_events();
+        if (__atomic_load_n(&transfer_completed, __ATOMIC_ACQUIRE)) {
+            completed = true;
+            break;
+        }
+        wait_ms(timer, 1);
+    }
+    const XhciTrb completion = transfer_completion;
+    __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
+
+    if (!completed) {
+        printf("xHCI: EP0 control transfer timed out on port 0x%b\n", port);
+        controller.needs_reinit = true;
+        // Keep data_dma alive: the controller may still DMA into it.
+        return nullptr;
+    }
+
+    u32 next_index = first + count;
+    u32 next_cycle = cycle;
+    if (next_index == EP0_LINK) {
+        next_index = 0;
+        next_cycle ^= 1u;
+    }
+    slot.ep0_index = next_index;
+    slot.ep0_cycle = next_cycle;
+
+    const u8 completion_code = completion.d2 >> 24;
+    if (completion_code != 1 && completion_code != 13) {
+        printf("xHCI: EP0 control transfer failed, code=%u\n", completion_code);
+        controller.needs_reinit = true;
+        // An error can stop an earlier TRB before the status stage; keep the
+        // DMA buffer until the controller is reset or the slot is disabled.
+        return nullptr;
+    }
+
+    // Match the other controllers: return a caller-owned buffer for IN data,
+    // and nullptr for a completed request with no data stage.
+    if (!has_data)
+        return nullptr;
+
+    void *response = kmalloc(length);
+    if (response)
+        memcpy(response, (const void *)data_dma.virtual_address, length);
+    free_dma(data_dma.virtual_address);
+    return response;
 }
