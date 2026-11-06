@@ -42,10 +42,24 @@ typedef struct {
     u32 buffer_phys;
 } uhci_endpoint_state;
 
+typedef struct {
+    u8 interface_number;
+    uhci_endpoint_state *endpoints;
+    u16 endpoint_count;
+} uhci_interface_state;
+
+
+typedef struct {
+    u8 device_address;
+    uhci_interface_state *interfaces;
+    u16 interfaces_count;
+} uhci_address_state;
+
 class uhci_controller : public usb_controller {
     private:
         u32 *frame_list;
-        uhci_endpoint_state *states;
+        uhci_address_state *states;
+        u8 state_count;
 
     public:
         int controller_init(TimerSource &timer) override;
@@ -55,7 +69,7 @@ class uhci_controller : public usb_controller {
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
-        int configure_endpoint(usb_endpoint_descriptor endpoint, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer, u8 port);
+        int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer);
         uhci_controller();
 
 };

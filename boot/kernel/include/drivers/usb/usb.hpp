@@ -182,6 +182,7 @@ class usb_controller {
         void MapController(usb_controller_t *controller, u8 type);
         void construct_controller(void);
         usb_device get_device(u8 port, TimerSource &timer);
+        u8 count_addresses(usb_port_descriptor *ports, int ports_count);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
@@ -189,7 +190,7 @@ class usb_controller {
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
-        virtual int configure_endpoint(usb_endpoint_descriptor endpoint, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer, u8 port) = 0;
+        virtual int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) = 0;
         configuration_descriptor get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port);
 
 };

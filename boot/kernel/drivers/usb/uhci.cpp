@@ -211,7 +211,6 @@ int uhci_controller::enumrate_ports() {
         ports[port].controller_type = UHCI;
     }
 
-    states = new uhci_endpoint_state[UHCI_PORT_COUNT];
 
     return UHCI_PORT_COUNT; // return the number of ports
 }
@@ -1272,21 +1271,7 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 }
 
 
-int uhci_controller::configure_endpoint(usb_endpoint_descriptor endpoint, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer, u8 port) {
-    usb_setup_packet packet = {
-        0x00,
-        0x09,
-        bConfigurationValue,
-        0,
-        0
-    };
 
-    u64 code = (u64)usb_send_packet(packet, maxpacketsize, 0, address, timer, port);
-
-    if (code != 1) {
-        printf("UHCI: SET_CONFIGURATION for the device on port 0x%b failed\n", port);
-        return 1; // return 1 for failure
-    }
-
+int uhci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) {
 
 }
