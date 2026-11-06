@@ -66,26 +66,6 @@ ohci_controller::ohci_controller() {
 #define RESET_TIMEOUT 20
 #define RESET_PULSES 5
 
-typedef struct ohci_ed ohci_ed;
-typedef struct ohci_td ohci_td;
-
-struct alignas(16) ohci_ed {
-    u32 control;
-    u32 tailp;
-    u32 headp;
-    u32 next_ed;
-};
-
-struct alignas(16) ohci_td {
-    u32 control;
-    u32 cbp;       // Current Buffer Pointer
-    u32 next_td;
-    u32 be;        // Buffer End
-};
-
-static_assert(sizeof(ohci_ed) == 16);
-static_assert(sizeof(ohci_td) == 16);
-
 
 namespace ohci {
     namespace td {
@@ -125,6 +105,9 @@ constexpr u32 OHCI_ED_HEAD_MASK   = 0xFFFFFFF0;
 constexpr u32 OHCI_RHPS_LSDA = 1u << 9;
 
 int ohci_controller::controller_init(TimerSource &timer) {
+    states = nullptr;
+    state_count = 0;
+
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
 
     ohci_base = controller.io_base;
@@ -1803,4 +1786,97 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         free_dma(alloc.virtual_address);
         return (void *)1;
     }
+}
+
+#define OHCI_PORT_LSDA (1u << 9)
+
+static inline ohci_address_state *allocate_state(ohci_address_state *states, u8 state_count, usb_device device) {
+    if (state_count == 0) {
+        states = new ohci_address_state[1];
+        *states->interfaces = nullptr;
+        *states->device_address = device.address;
+        *states->interfaces_count = device.usb_interface_count;
+        return states;
+    } // if state_count is 0, allocate states
+
+    u64 old_size = state_count * sizeof(ohci_address_state);
+    u64 new_size = old_size + sizeof(ohci_address_state);
+    states = (ohci_address_state *)krealloc(states, old_size, new_size); // else increase the former allocation
+    states[state_count].interfaces = nullptr;
+    states[state_count].interfaces_count = device.usb_interface_count;
+    states[state_count].device_address = device.address;
+    return states;
+}
+
+ohci_endpoint_state ohci_controller::configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer) {
+    ohci_endpoint_state endpoint = {0};
+
+    u64 size = sizeof(ohci_ed) + sizeof(ohci_td);
+    dma_ret alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("OHCI: configure_endpoint allocation error\n");
+        endpoint.dma = alloc;
+        return endpoint;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("OHCI: configure_endpoint allocation physical address too big\n");
+        free_dma(alloc.virtual_address);
+        alloc.status = 1;
+        endpoint.dma = alloc;
+        return endpoint;
+    }
+
+    endpoint.dma = alloc;
+    endpoint.max_packet_size = max_packet_size;
+    endpoint.interval = interval;
+    endpoint.device_address = device.address;
+    endpoint.endpoint_address = device.interfaces[interface_index].endpoints[endpoint_index].address;
+
+
+    volatile u32 *port_reg = (volatile u32 *)port_to_address(device.port_number, controller.io_base);
+    u32 status = *port_reg;
+
+    endpoint.low_speed = status & OHCI_PORT_LSDA;
+    endpoint.scheduled = false;
+
+    endpoint.transfer_type = device.interfaces[interface_index].endpoints[endpoint_index].transfer_type;
+
+    u32 ed_phys = (u32)alloc.physical_address;
+    u32 dummy_td_phys = ed_phys + sizeof(ohci_ed);
+
+    ohci_ed *ed = (ohci_ed *)alloc.virtual_address;
+    ohci_td *dummy_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
+   
+    endpoint.ed_phys = ed_phys;
+    endpoint.dummy_td_phys = dummy_td_phys;
+    
+    endpoint.ed = ed;
+    endpoint.dummy_td = dummy_td;
+
+    return endpoint;
+}
+
+int ohci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) {
+    states = allocate_state(states, state_count, device);
+    state_count++;
+
+
+    u16 interfaces_count = states[state_count-1].interfaces_count;
+    // we wanna use state_count-1 because state_count represents the highest object
+    states[state_count-1].interfaces = new ohci_interface_state[interfaces_count];
+
+    for (u16 i = 0; i < interfaces_count; i++) {
+        states[state_count-1].interfaces[i].interface_number = device.interfaces[i].descriptor.bInterfaceNumber;
+        states[state_count-1].interfaces[i].endpoint_count = device.interfaces[i].endpoint_count;
+        states[state_count-1].interfaces[i].endpoints = new ohci_endpoint_state[device.interfaces[i].endpoint_count];
+        for (u16 j = 0; j < states[state_count-1].interfaces[i].endpoint_count; j++) {
+            states[state_count-1].interfaces[i].endpoints[j] = configure_endpoint(device, j, i, timer);
+            if (states[state_count-1].interfaces[i].endpoints[j].dma.status != 0)
+                return 1;
+        }
+    }
+
+    return 0;
 }

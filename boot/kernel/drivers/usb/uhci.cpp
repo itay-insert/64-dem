@@ -93,6 +93,8 @@ uhci_controller::uhci_controller() {
 
 
 int uhci_controller::controller_init(TimerSource &timer) {
+    states = nullptr; // initialize states pointer to null and count to 0
+    state_count = 0;
     
     printf("UHCI I/O base: 0x%w\n", (u16)controller.io_base);
 
@@ -1270,8 +1272,100 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
 }
 
+static inline uhci_address_state *allocate_state(uhci_address_state *states, u8 state_count, usb_device device) {
+    if (state_count == 0) {
+        states = new uhci_address_state[1];
+        *states->interfaces = nullptr;
+        *states->device_address = device.address;
+        *states->interfaces_count = device.usb_interface_count;
+        return states;
+    } // if state_count is 0, allocate states
 
+    u64 old_size = state_count * sizeof(uhci_address_state);
+    u64 new_size = old_size + sizeof(uhci_address_state);
+    states = (uhci_address_state *)krealloc(states, old_size, new_size); // else increase the former allocation
+    states[state_count].interfaces = nullptr;
+    states[state_count].interfaces_count = device.usb_interface_count;
+    states[state_count].device_address = device.address;
+    return states;
+}
+
+#define ALIGN_UP(value, alignment) \
+    (((value) + ((alignment) - 1)) & ~((alignment) - 1))
+
+uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer) {
+    uhci_endpoint_state endpoint = {0};
+    u32 max_packet_size = device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
+    u8 interval = device.interfaces[interface_index].endpoints[endpoint_index].interval;
+
+    u64 size = sizeof(uhci_td) + sizeof(uhci_qh) + 16 + ALIGN_UP(max_packet_size, 16);
+    dma_ret alloc = allocate_dma(size);
+
+    if (alloc.status != 0) {
+        printf("UHCI: configure_endpoint allocation error\n");
+        endpoint.dma = alloc;
+        return endpoint;
+    }
+
+    if (alloc.physical_address > 0xFFFFFFFF) {
+        printf("UHCI: configure_endpoint allocation physical address too big\n");
+        free_dma(alloc.virtual_address);
+        alloc.status = 1;
+        endpoint.dma = alloc;
+        return endpoint;
+    }
+
+    endpoint.dma = alloc;
+    endpoint.max_packet_size = max_packet_size;
+    endpoint.interval = interval;
+    endpoint.data_toggle = 0;
+    endpoint.device_address = device.address;
+    endpoint.endpoint_address = device.interfaces[interface_index].endpoints[endpoint_index].address;
+    
+    u32 qh_phys = (u32)alloc.physical_address;
+    u32 td_phys = qh_phys + sizeof(uhci_qh);
+    u32 buffer_phys = td_phys + 32;
+
+    endpoint.buffer_phys = buffer_phys;
+    endpoint.qh_phys = qh_phys;
+    endpoint.td_phys = td_phys;
+
+    uhci_qh *qh = (uhci_qh *)alloc.virtual_address;
+    uhci_td *td = (uhci_td *)(alloc.virtual_address + sizeof(uhci_qh));
+
+    endpoint.qh = qh;
+    endpoint.td = td;
+
+    *qh = {};
+
+    *td = {};
+
+    qh->head = 0x01;
+    qh->element = 0x01;
+
+    endpoint.scheduled = false;
+    return endpoint;
+}
 
 int uhci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) {
+    states = allocate_state(states, state_count, device);
+    state_count++;
 
+
+    u16 interfaces_count = states[state_count-1].interfaces_count;
+    // we wanna use state_count-1 because state_count represents the highest object
+    states[state_count-1].interfaces = new uhci_interface_state[interfaces_count];
+
+    for (u16 i = 0; i < interfaces_count; i++) {
+        states[state_count-1].interfaces[i].interface_number = device.interfaces[i].descriptor.bInterfaceNumber;
+        states[state_count-1].interfaces[i].endpoint_count = device.interfaces[i].endpoint_count;
+        states[state_count-1].interfaces[i].endpoints = new uhci_endpoint_state[device.interfaces[i].endpoint_count];
+        for (u16 j = 0; j < states[state_count-1].interfaces[i].endpoint_count; j++) {
+            states[state_count-1].interfaces[i].endpoints[j] = configure_endpoint(device, j, i, timer);
+            if (states[state_count-1].interfaces[i].endpoints[j].dma.status != 0)
+                return 1;
+        }
+    }
+
+    return 0;
 }

@@ -400,11 +400,6 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
 }
 
 
-u8 usb_controller::count_addresses(usb_port_descriptor *ports, int port_count) {
-    for (int i = 0; )
-}
-
-
 
 void usb_controller::construct_controller() {
 

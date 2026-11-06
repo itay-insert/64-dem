@@ -19,6 +19,60 @@ struct alignas(256) ohci_hcca { // ohci hcca
 static_assert(sizeof(ohci_hcca) == 256);
 static_assert(alignof(ohci_hcca) == 256);
 
+
+typedef struct ohci_ed ohci_ed;
+typedef struct ohci_td ohci_td;
+
+struct alignas(16) ohci_ed {
+    u32 control;
+    u32 tailp;
+    u32 headp;
+    u32 next_ed;
+};
+
+struct alignas(16) ohci_td {
+    u32 control;
+    u32 cbp;       // Current Buffer Pointer
+    u32 next_td;
+    u32 be;        // Buffer End
+};
+
+static_assert(sizeof(ohci_ed) == 16);
+static_assert(sizeof(ohci_td) == 16);
+
+typedef struct {
+    u8 device_address;
+    u8 endpoint_address;
+    u8 transfer_type;
+    u8 interval;
+    bool low_speed;
+
+    u16 max_packet_size;
+
+    bool scheduled;
+    dma_ret dma;
+
+    ohci_ed *ed;
+    u32 ed_phys;
+
+    ohci_td *dummy_td;
+    u32 dummy_td_phys;
+} ohci_endpoint_state;
+
+typedef struct {
+    u8 interface_number;
+    ohci_endpoint_state *endpoints;
+    u16 endpoint_count;
+} ohci_interface_state;
+
+
+typedef struct {
+    u8 device_address;
+    ohci_interface_state *interfaces;
+    u16 interfaces_count;
+} ohci_address_state;
+
+
 class ohci_controller : public usb_controller {
     private:
         u64 ohci_base;
@@ -35,7 +89,9 @@ class ohci_controller : public usb_controller {
             return ohci_read_register(offset);
         }
 
-        
+        ohci_address_state *states;
+        u8 state_count;
+        ohci_endpoint_state configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer);
 
     public:
         int controller_init(TimerSource &timer) override;
@@ -45,6 +101,7 @@ class ohci_controller : public usb_controller {
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
+        int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer);
         ohci_controller();
 
 };

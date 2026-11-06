@@ -182,7 +182,6 @@ class usb_controller {
         void MapController(usb_controller_t *controller, u8 type);
         void construct_controller(void);
         usb_device get_device(u8 port, TimerSource &timer);
-        u8 count_addresses(usb_port_descriptor *ports, int ports_count);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;

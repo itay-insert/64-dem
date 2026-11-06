@@ -34,6 +34,7 @@ typedef struct {
     u8 data_toggle;
     u16 max_packet_size;
     
+    bool scheduled;
     dma_ret dma;
     uhci_qh *qh;
     uhci_td *td;
@@ -60,6 +61,7 @@ class uhci_controller : public usb_controller {
         u32 *frame_list;
         uhci_address_state *states;
         u8 state_count;
+        uhci_endpoint_state configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer);
 
     public:
         int controller_init(TimerSource &timer) override;
