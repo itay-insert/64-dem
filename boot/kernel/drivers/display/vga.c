@@ -4,6 +4,7 @@
 #include "x86-64/memory/memory.h"
 #include "drivers/display/font.h"
 #include "x86-64/ports.h"
+#include "x86-64/memory/kmalloc.h"
 
 
 #ifndef VGA_MIRROR_TO_QEMU_DEBUGCON
@@ -68,7 +69,7 @@ u32 vga16_color[16] = {
     0xff5555, 0xff55ff, 0xffff55, 0xffffff
 };
 
-
+u64 fb_phys = 0;
 u64 fb_addr = 0;
 int hor_res = 0;
 int ver_res = 0;
@@ -425,3 +426,4 @@ void cursor_Setpos(int coulmn, int row) {
 	cursor.coulmn = pos % cols;
 	cursor.row = pos / cols;
 }
+
