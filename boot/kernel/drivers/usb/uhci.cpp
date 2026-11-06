@@ -429,6 +429,9 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     usb_device_descriptor device_descriptor = {0};
 
     u16 io_base = (u16)controller.io_base;
+    const u32 low_speed_status =
+        (uhci_read_port(io_base, port - 1) & (1u << 8))
+            ? uhci::td::low_speed : 0;
     dma_ret alloc = allocate_dma(128);
     if (alloc.status != 0) {
         printf("UHCI: setup packet allocation failed\n");
@@ -460,7 +463,7 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     setup_qh->reserved[1] = 0;
 
     setup_td->link = (u32)(alloc.physical_address + ((u64)data_td - alloc.virtual_address)) | UHCI_LINK_DEPTH;
-    setup_td->status = uhci::td::active | TD_ERROR_COUNT;
+    setup_td->status = uhci::td::active | TD_ERROR_COUNT | low_speed_status;
     setup_td->token =
         0x2D |             // SETUP PID
         (0u << 8) |        // Address 0
@@ -473,7 +476,7 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     data_td->link = (u32)(alloc.physical_address + ((u64)status_td - alloc.virtual_address)) | UHCI_LINK_DEPTH;
     data_td->status = TD_ACTIVE |
     TD_ERROR_COUNT |
-    TD_ACTLEN_INIT;            // Request interrupt on completion
+    TD_ACTLEN_INIT | low_speed_status;
 
     data_td->token = 
          0x69 |             // IN PID
@@ -489,7 +492,7 @@ usb_device_descriptor uhci_controller::identify_device(u8 port, TimerSource &tim
     TD_ACTIVE |
     TD_ERROR_COUNT |
     TD_ACTLEN_INIT |
-    TD_IOC;            // Request interrupt on completion
+    TD_IOC | low_speed_status;
 
     status_td->token =
         0xE1 |             // OUT PID
@@ -648,10 +651,17 @@ static inline u8 allocate_usb_address(void) {
 
 usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
+    if (desc.bLength != 18 || desc.bDescriptorType != 1 ||
+        (desc.bMaxPacketSize0 != 8 && desc.bMaxPacketSize0 != 16 &&
+         desc.bMaxPacketSize0 != 32 && desc.bMaxPacketSize0 != 64))
+        return device;
 
     u64 size = (sizeof(uhci_td) << 1) + sizeof(uhci_qh) + sizeof(usb_setup_packet);
 
     u16 io_base = (u16)controller.io_base;
+    const u32 low_speed_status =
+        (uhci_read_port(io_base, port - 1) & (1u << 8))
+            ? uhci::td::low_speed : 0;
     dma_ret alloc = allocate_dma(size);
     if (alloc.status != 0) {
         printf("UHCI: Set address allocation failed\n");
@@ -679,6 +689,10 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     usb_setup_packet *setup = (usb_setup_packet *)((u8 *)status_td + sizeof(uhci_td));
 
     u8 address = allocate_usb_address();  // allocate the usb address
+    if (!address) {
+        free_dma(alloc.virtual_address);
+        return device;
+    }
 
     *setup = {
         .BmRequestType = 0x00, // Host-to-device
@@ -702,7 +716,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     setup_td->status =
         UHCI_TD_ACTIVE |
-        UHCI_TD_CERR(3);
+        UHCI_TD_CERR(3) | low_speed_status;
 
     setup_td->token =
         USB_PID_SETUP |
@@ -722,7 +736,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     status_td->status =
         UHCI_TD_ACTIVE |
-        UHCI_TD_CERR(3);
+        UHCI_TD_CERR(3) | low_speed_status;
 
     status_td->token = 
         USB_PID_IN |
@@ -887,7 +901,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     setup_td->buffer = (u32)setup_phys;
 
     u8 max_packet_size = desc.bMaxPacketSize0;
-    u32 data_td_count = 3;
+    u32 data_td_count = (18u + max_packet_size - 1u) / max_packet_size;
 
     // DATA TDs
     u32 offset = 0;
@@ -970,7 +984,8 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
         return device;
     }
 
-    result = wait_for_control_transfer(qh, setup_td, data_tds, 3, status_td, status_phys, timer, recieved);
+    result = wait_for_control_transfer(qh, setup_td, data_tds, data_td_count,
+                                       status_td, status_phys, timer, recieved);
     if (result != uhci_transfer_result::success) {
         printf("UHCI: GET DESCRIPTOR error\n");
         old_command = inw(io_base+UHCI_USBCMD);
@@ -1011,7 +1026,9 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
-    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+    bool valid_descriptor = recieved == 18 &&
+        desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18;
+    if (valid_descriptor) {
         memcpy(&desc, desc_ptr, 18);
     }
 
@@ -1039,14 +1056,20 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     delete[] backup;
     free_dma(alloc.virtual_address);
     
-    device.discovered = true;
+    device.discovered = valid_descriptor;
     device.descriptor = desc;
     return device;
 }
 
 
 void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    if (!maxpacketsize || length != packet.wLength || length > 4096 ||
+        (length && !(packet.BmRequestType & IN)))
+        return nullptr;
     u16 io_base = (u16)controller.io_base;
+    const u32 low_speed_status =
+        (uhci_read_port(io_base, port - 1) & (1u << 8))
+            ? uhci::td::low_speed : 0;
     u32 data_td_count = 0;
 
     if (maxpacketsize)
@@ -1099,7 +1122,7 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     setup_td->status =
         UHCI_TD_ACTIVE |
-        UHCI_TD_CERR(3);
+        UHCI_TD_CERR(3) | low_speed_status;
 
     setup_td->buffer = setup_phys;
 
@@ -1124,7 +1147,8 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
                  UHCI_PTR_DEPTH;
 
             data_td[i].status =
-                UHCI_TD_ACTIVE | UHCI_TD_CERR(3) | (last ? 0 : UHCI_TD_SPD);
+                UHCI_TD_ACTIVE | UHCI_TD_CERR(3) | low_speed_status |
+                (last ? 0 : UHCI_TD_SPD);
 
             data_td[i].token =
                 USB_PID_IN |
@@ -1144,7 +1168,7 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     status_td->status =
         UHCI_TD_ACTIVE |
-        UHCI_TD_CERR(3);
+        UHCI_TD_CERR(3) | low_speed_status;
 
     bool data_in = setup->BmRequestType & 0x80;
     bool has_data = setup->wLength != 0;
@@ -1275,9 +1299,9 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 static inline uhci_address_state *allocate_state(uhci_address_state *states, u8 state_count, usb_device device) {
     if (state_count == 0) {
         states = new uhci_address_state[1];
-        *states->interfaces = nullptr;
-        *states->device_address = device.address;
-        *states->interfaces_count = device.usb_interface_count;
+        states->interfaces = nullptr;
+        states->device_address = device.address;
+        states->interfaces_count = device.usb_interface_count;
         return states;
     } // if state_count is 0, allocate states
 
@@ -1340,8 +1364,8 @@ uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 e
 
     *td = {};
 
-    qh->head = 0x01;
-    qh->element = 0x01;
+    qh->head_link = 0x01;
+    qh->element_link = 0x01;
 
     endpoint.scheduled = false;
     return endpoint;

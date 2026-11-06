@@ -76,8 +76,8 @@ namespace ohci {
         constexpr u32 out   = 1u << 19;
         constexpr u32 in    = 2u << 19;
 
-        constexpr u32 toggle_data0 = 1u << 24;
-        constexpr u32 toggle_data1 = 2u << 24;
+        constexpr u32 toggle_data0 = 2u << 24;
+        constexpr u32 toggle_data1 = 3u << 24;
 
         constexpr u32 no_interrupt = 7u << 21;
         constexpr u32 interrupt    = 0u << 21;
@@ -442,7 +442,7 @@ void process_completed_td(u32 td_phys, const ohci_td* td)
         return;
 
     printf(
-        "OHCI: TD 0x%x completed with CC=0x%x (%s), EC=%u\n",
+        "OHCI: TD 0x%ux completed with CC=%u (%s), EC=%u\n",
         td_phys,
         condition_code,
         ohci_condition_code_name(condition_code),
@@ -591,7 +591,7 @@ ohci_transfer_result wait_for_descriptor(
                 data_cc = data_td->control >> 28;
             u32 status_cc = status_td->control >> 28;
 
-            if (setup_cc != 0 || (!data_td || data_cc != 0) ||
+            if (setup_cc != 0 || (data_td && data_cc != 0) ||
                 status_cc != 0) {
                 return ohci_transfer_result::transfer_error;
             }
@@ -682,7 +682,8 @@ bool wait_for_transfer_reap(
             return false;
 
         u32 setup_cc = (setup_td->control >> 28) & 0xF;
-        u32 data_cc = (data_td->control >> 28) & 0xF;
+        u32 data_cc = data_td ? (data_td->control >> 28) & 0xF
+                              : OHCI_TD_CC_NOT_ACCESSED;
         u32 status_cc = (status_td->control >> 28) & 0xF;
 
         // A TD with CC=NotAccessed was never retired.
@@ -692,7 +693,7 @@ bool wait_for_transfer_reap(
             (watch->retired_mask & OHCI_TD_SETUP_DONE);
 
         bool data_reaped =
-            data_cc == OHCI_TD_CC_NOT_ACCESSED ||
+            !data_td || data_cc == OHCI_TD_CC_NOT_ACCESSED ||
             (watch->retired_mask & OHCI_TD_DATA_DONE);
 
         bool status_reaped =
@@ -1008,6 +1009,10 @@ static inline u8 allocate_usb_address(void) {
 
 usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
+    if (desc.bLength != 18 || desc.bDescriptorType != 1 ||
+        (desc.bMaxPacketSize0 != 8 && desc.bMaxPacketSize0 != 16 &&
+         desc.bMaxPacketSize0 != 32 && desc.bMaxPacketSize0 != 64))
+        return device;
 
     u64 size = sizeof(ohci_ed) + (sizeof(ohci_td) * 3) + 8;
 
@@ -1037,6 +1042,10 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     (usb_setup_packet *)((u8 *)dummy_td + sizeof(ohci_td));
 
     u8 address = allocate_usb_address();
+    if (!address) {
+        free_dma(alloc.virtual_address);
+        return device;
+    }
 
     *setup = {
         .BmRequestType = 0x00,
@@ -1379,7 +1388,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
         timer,
         ed,
         setup_td,
-        nullptr,
+        data_td,
         status_td,
         &watch,
         old_control,
@@ -1431,12 +1440,14 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     } 
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
-    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+    bool valid_descriptor = received == 18 &&
+        desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18;
+    if (valid_descriptor) {
         memcpy(&desc, desc_ptr, 18);
     }
 
     device.descriptor = desc;
-    device.discovered = true;
+    device.discovered = valid_descriptor;
     free_dma(alloc.virtual_address);
     return device;
 }
@@ -1529,7 +1540,13 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
 
-    u32 data_td_count = (length + maxpacketsize-1) / maxpacketsize;
+    if (!maxpacketsize || length != packet.wLength || length > 4096 ||
+        (length && !(packet.BmRequestType & IN)))
+        return nullptr;
+
+    // Keep each IN TD within one USB packet. A rounded TD can retire on a
+    // short response; chaining packet-sized TDs preserves the control stage.
+    u32 data_td_count = (length + maxpacketsize - 1u) / maxpacketsize;
     u64 size = sizeof(ohci_ed) + ((data_td_count + 3) * sizeof(ohci_td)) + 8 + length;
 
     dma_ret alloc = allocate_dma(size);
@@ -1576,9 +1593,8 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     setup_td->control =
         OHCI_TD_CC(0xF) |
         OHCI_TD_EC(0) |
-        OHCI_TD_T_DATA0 |
-        OHCI_TD_DP_SETUP |
-        OHCI_TD_DI(7);
+        OHCI_TD_T(OHCI_TD_T_DATA0) |
+        OHCI_TD_DP(OHCI_TD_DP_SETUP);
 
     setup_td->cbp = setup_phys;
     setup_td->be = setup_phys + 7;
@@ -1613,7 +1629,6 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
             OHCI_TD_DP(data_in
                 ? OHCI_TD_DP_IN
                 : OHCI_TD_DP_OUT) |
-            OHCI_TD_DI(7) |
             ((data_in && last) ? OHCI_TD_R : 0);
 
         // Data buffer
@@ -1636,9 +1651,8 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
     status_td->control =
         OHCI_TD_CC(0xF) |
         OHCI_TD_EC(0) |
-        OHCI_TD_T_DATA1 |
-        (status_in ? OHCI_TD_DP_IN : OHCI_TD_DP_OUT) |
-        OHCI_TD_DI(7);
+        OHCI_TD_T(OHCI_TD_T_DATA1) |
+        OHCI_TD_DP(status_in ? OHCI_TD_DP_IN : OHCI_TD_DP_OUT);
 
     status_td->cbp = 0;
     status_td->be = 0;
@@ -1702,7 +1716,7 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     ohci_transfer_watch watch = {
         setup_td_phys,
-        data_td_phys,
+        data_td ? data_td_phys : 0u,
         status_td_phys,
         0
     };
@@ -1765,7 +1779,13 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
 
     if (result != ohci_transfer_result::success) {
-        printf("OHCI: SEND PACKET failed\n");
+        printf("OHCI: control request %u on port %u failed, "
+               "CC=%u/%u/%u, MPS=%u\n",
+               setup->bRequest, port,
+               (setup_td->control >> 28) & 15u,
+               data_td ? ((data_td->control >> 28) & 15u) : 0u,
+               (status_td->control >> 28) & 15u,
+               maxpacketsize);
         free_dma(alloc.virtual_address);
         return nullptr;
     } 
@@ -1793,9 +1813,9 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 static inline ohci_address_state *allocate_state(ohci_address_state *states, u8 state_count, usb_device device) {
     if (state_count == 0) {
         states = new ohci_address_state[1];
-        *states->interfaces = nullptr;
-        *states->device_address = device.address;
-        *states->interfaces_count = device.usb_interface_count;
+        states->interfaces = nullptr;
+        states->device_address = device.address;
+        states->interfaces_count = device.usb_interface_count;
         return states;
     } // if state_count is 0, allocate states
 
@@ -1829,8 +1849,8 @@ ohci_endpoint_state ohci_controller::configure_endpoint(usb_device device, u16 e
     }
 
     endpoint.dma = alloc;
-    endpoint.max_packet_size = max_packet_size;
-    endpoint.interval = interval;
+    endpoint.max_packet_size = device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
+    endpoint.interval = device.interfaces[interface_index].endpoints[endpoint_index].interval;
     endpoint.device_address = device.address;
     endpoint.endpoint_address = device.interfaces[interface_index].endpoints[endpoint_index].address;
 

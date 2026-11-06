@@ -297,6 +297,7 @@ static bool xhci_dma_alloc(dma_ret *out, u64 bytes, bool ac64) {
         (out->physical_address >= 0x100000000ULL ||
         bytes > 0x100000000ULL - out->physical_address)) {
         free_dma(out->virtual_address);
+        *out = {};
         return false;
     }
 
@@ -508,8 +509,8 @@ bool xhci_controller::wait_command(TimerSource& timer, u64 command_physical,
     u64 elapsed = 0;
 
     while (elapsed < limit) {
-        if (!__atomic_load_n(&interrupt_driven, __ATOMIC_ACQUIRE))
-            xhci_process_events();
+        // Keep polling as a fallback if this machine has not routed xHCI IRQs.
+        xhci_process_events();
 
         if (__atomic_load_n(&pending_command_done, __ATOMIC_ACQUIRE) &&
             pending_command_physical == command_physical) {
@@ -595,7 +596,11 @@ int xhci_controller::controller_init(TimerSource &timer) {
 
     }
 
-    u8 enabled_slots = max_slots < 8 ? max_slots : 8;
+    if (max_slots == 0 || max_ports == 0) {
+        printf("xHCI: controller advertises no slots or ports\n");
+        return 1;
+    }
+    u8 enabled_slots = max_slots;
     u64 dcbaa_size = ((u64)enabled_slots + 1) * sizeof(u64);
 
     dma_ret dcbaa_array = allocate_dma(dcbaa_size);
@@ -698,6 +703,55 @@ int xhci_controller::enumrate_ports() {
     return (int)xhci_port_count;
 }
 
+void xhci_controller::scan_ports(TimerSource &timer) {
+    // HCRST puts root ports into Disconnected. A device present at boot may
+    // still be training its link when the first PORTSC snapshot is taken.
+    wait_ms(timer, 100);
+    auto *cap = (volatile xhci_cap_regs *)controller.io_base;
+    const u64 op_base = controller.io_base + cap->caplength;
+    u8 *attempted = new u8[ports_count]{};
+    if (!attempted)
+        return;
+
+    for (u32 elapsed = 0; elapsed <= 500; elapsed += 10) {
+        for (int i = 0; i < ports_count; ++i) {
+            if (attempted[i])
+                continue;
+            const u32 status = read_port(op_base, (u8)i);
+            ports[i].port_status = status;
+            ports[i].connected = (status & CCS) != 0;
+            if (status == 0xffffffffu) {
+                printf("xHCI: port %u has unreadable PORTSC\n", (u32)(i + 1));
+                ports[i].connected = false;
+                attempted[i] = 1;
+                continue;
+            }
+            if (!ports[i].connected)
+                continue;
+
+            attempted[i] = 1;
+            printf("xHCI: port %u connected, PORTSC=0x%ux, speed ID=%u\n",
+                   (u32)(i + 1), status, (status >> 10) & 0x0fu);
+            usb_device enumerated = get_device(ports[i].port_number, timer);
+            if (enumerated.discovered)
+                ports[i].device = new usb_device(enumerated);
+            else
+                printf("xHCI: device enumeration failed on port %u, PORTSC=0x%ux\n",
+                       (u32)(i + 1), read_port(op_base, (u8)i));
+        }
+        if (elapsed != 500)
+            wait_ms(timer, 10);
+    }
+    u32 connected_count = 0;
+    for (int i = 0; i < ports_count; ++i)
+        if (ports[i].connected)
+            ++connected_count;
+    if (!connected_count)
+        printf("xHCI: no root-port devices detected after boot scan (%d ports)\n",
+               ports_count);
+    delete[] attempted;
+}
+
 
 static inline u32 xhci_portsc_neutral(u32 value) {
     return (value & RO_MASK) | (value & RWS_MASK);
@@ -725,6 +779,14 @@ int xhci_controller::reset_port(u8 port, TimerSource &timer) {
 
     if (status & PR)
         return RESET_STILL_ASSERTED;
+
+    // SuperSpeed attach enables the port automatically. Resetting an already
+    // enabled port can disturb the link and is unnecessary for enumeration.
+    u8 protocol_major = 0;
+    read_protocol_slot_type(port, &protocol_major);
+    if (protocol_major >= 3 && (status & PED) &&
+        (status & PLS_MASK) == U0)
+        return RESET_SUCCESS;
 
     
     // Clear previous reset-complete flag so that we
@@ -821,7 +883,7 @@ int xhci_controller::disable_port(u8 port, TimerSource &timer) {
 }
 
 
-u8 xhci_controller::read_protocol_slot_type(u8 port) {
+u8 xhci_controller::read_protocol_slot_type(u8 port, u8 *major) {
     // define pointers
     volatile xhci_cap_regs *cap_regs = (volatile xhci_cap_regs *)controller.io_base;
     volatile u32 *cap = (volatile u32 *)controller.io_base;
@@ -834,7 +896,7 @@ u8 xhci_controller::read_protocol_slot_type(u8 port) {
     u32 offset = xecap * 4; // calculate the offset from xecap
 
     
-    while (offset != 0) {
+    for (u32 remaining = 256; offset != 0 && remaining != 0; --remaining) {
         u32 header = cap[offset / 4];
 
         u8 cap_id = header & 0xFF;
@@ -849,8 +911,11 @@ u8 xhci_controller::read_protocol_slot_type(u8 port) {
 
             u8 slot_type = slot_info & 0x1F;
 
-            if (port >= port_offset && port < (u32)(port_offset+port_count))
+            if (port >= port_offset && port < (u32)(port_offset+port_count)) {
+                if (major)
+                    *major = (header >> 24) & 0xff;
                 return slot_type;
+            }
         }
 
         if (next == 0)
@@ -945,7 +1010,8 @@ bool xhci_controller::disable_device_slot(u8 slot_id, TimerSource &timer) {
 #define EP0_LINK 255
 
 
-static bool get_initial_mps(u64 op, u8 port, u16 &initial_mps) {
+static bool get_initial_mps(u64 op, u8 port, u8 protocol_major,
+                            u16 &initial_mps) {
     u64 portsc_offset = 0x400 + ((port - 1) * XHCI_PORTSC_STRIDE);
 
     volatile u32 *port_reg = (volatile u32 *)((u8 *)op + portsc_offset);
@@ -955,6 +1021,13 @@ static bool get_initial_mps(u64 op, u8 port, u16 &initial_mps) {
     u8 speed_id = (status >> 10) & 0xF;
 
     initial_mps = 0;
+
+    // The port's speed ID is a protocol-defined PSI value. USB3 controllers
+    // can assign IDs other than 4 to SuperSpeed or SuperSpeedPlus links.
+    if (protocol_major >= 3 && speed_id != 0) {
+        initial_mps = 512;
+        return true;
+    }
 
     switch (speed_id) {
         case 1: // full speed
@@ -966,9 +1039,12 @@ static bool get_initial_mps(u64 op, u8 port, u16 &initial_mps) {
             initial_mps = 64;
             break;
 
-        case 4: // SuperSpeed
-            initial_mps = 512;
-            break;
+        case 4: // Default SuperSpeed mapping if no protocol cap is present.
+            if (protocol_major == 0) {
+                initial_mps = 512;
+                break;
+            }
+            return false;
 
         default:
             printf("xHCI: unsupported speed_id on port 0x%b, speed_id=0x%b\n", port, speed_id);
@@ -1052,7 +1128,9 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
 
     initial_mps = 0;
 
-    if (!get_initial_mps(op_base, port, initial_mps)) {
+    u8 protocol_major = 0;
+    read_protocol_slot_type(port, &protocol_major);
+    if (!get_initial_mps(op_base, port, protocol_major, initial_mps)) {
         printf("xHCI: failed to get initial_mps from port 0x%b\n", port);
         if (!disable_device_slot(slot_id, timer)) {
             printf("xHCI: failed to disable slot_id 0x%b\n", slot_id);
@@ -1445,6 +1523,8 @@ usb_device_descriptor xhci_controller::identify_device(u8 port, TimerSource &tim
     slots[port-1].slot_id = slot_id;
     slots[port-1].address = usb_address;
     slots[port-1].speed_id = speed_id;
+    slots[port-1].superspeed = protocol_major >= 3 ||
+                                (protocol_major == 0 && speed_id == 4);
     slots[port-1].ep0_mps = initial_mps;
     slots[port-1].ep0_index = 3;
     slots[port-1].ep0_cycle = 1;
@@ -1472,7 +1552,7 @@ usb_device xhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     // Address Device (BSR=0) already assigned the USB address in identify_device.
     device.address = slot.address;
     u16 actual_mps = desc.bMaxPacketSize0;
-    if (slot.speed_id == 4) {
+    if (slot.superspeed) {
         if (actual_mps != 9)
             return device;
         actual_mps = 512;
@@ -1668,16 +1748,198 @@ void *xhci_controller::usb_send_packet(usb_setup_packet packet,
     }
 
     // Match the other controllers: return a caller-owned buffer for IN data,
-    // and nullptr for a completed request with no data stage.
+    // and a success sentinel for a completed request with no data stage.
     if (!has_data)
-        return nullptr;
+        return (void *)1;
 
     void *response = kmalloc(length);
     if (response)
         memcpy(response, (const void *)data_dma.virtual_address, length);
     free_dma(data_dma.virtual_address);
-    if (response)
-        return response;
-    else
-        return (void *)1;
+    return response;
+}
+
+int xhci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue,
+                                         u32 maxpacketsize, u8 address,
+                                         TimerSource &timer) {
+    if (controller.needs_reinit || !slots || !dcbaa ||
+        device.port_number == 0 || device.port_number > ports_count ||
+        !device.interfaces || bConfigurationValue == 0 ||
+        bConfigurationValue != device.config.bConfigurationValue ||
+        address != device.address)
+        return 1;
+
+    usb_slot &slot = slots[device.port_number - 1];
+    if (!slot.slot_id || slot.address != address ||
+        slot.ep0_mps != maxpacketsize || !slot.output_context_virtual ||
+        dcbaa[slot.slot_id] != slot.output_context_physical)
+        return 1;
+
+    auto *cap = (volatile xhci_cap_regs *)controller.io_base;
+    const u32 context_bytes = (cap->hccparams1 & CSZ) ? 64 : 32;
+    dma_ret input_context = {};
+    if (!xhci_dma_alloc(&input_context, context_bytes * 33, addr64))
+        return 1;
+
+    dma_ret pending_rings[32] = {};
+    auto discard_pending = [&]() {
+        for (u32 dci = 2; dci < 32; ++dci)
+            if (pending_rings[dci].virtual_address)
+                free_dma(pending_rings[dci].virtual_address);
+        free_dma(input_context.virtual_address);
+    };
+
+    u32 *control = (u32 *)input_context.virtual_address;
+    control[0] = 0;  // Drop Context flags.
+    control[1] = 1u; // Add the Slot Context; EP0 is already enabled.
+
+    u32 *input_slot = (u32 *)(input_context.virtual_address + context_bytes);
+    memcpy(input_slot, (void *)slot.output_context_virtual, context_bytes);
+    input_slot[3] &= ~(0x1fu << 27); // Slot State is output-only.
+
+    u32 highest_dci = 1;
+    for (u16 i = 0; i < device.usb_interface_count; ++i) {
+        const usb_interface &interface = device.interfaces[i];
+        if (interface.descriptor.bAlternateSetting != 0)
+            continue; // SET_INTERFACE is needed before another alternate setting.
+        if (interface.endpoint_count && !interface.endpoints) {
+            discard_pending();
+            return 1;
+        }
+
+        for (u16 j = 0; j < interface.endpoint_count; ++j) {
+            const usb_endpoint &endpoint = interface.endpoints[j];
+            const u8 endpoint_number = endpoint.address & 0x0fu;
+            const bool in = (endpoint.address & 0x80u) != 0;
+            const u8 transfer_type = endpoint.transfer_type;
+            const u16 packet_size = endpoint.max_packet_size;
+
+            // Isochronous transfers need their own TD and bandwidth path.
+            if (endpoint_number == 0 || (endpoint.address & 0x70u) ||
+                transfer_type == 1 || packet_size == 0 || packet_size > 1024) {
+                printf("xHCI: unsupported endpoint 0x%b, type=%u\n",
+                       endpoint.address, transfer_type);
+                discard_pending();
+                return 1;
+            }
+
+            // Extra control endpoints are bidirectional and use the IN context.
+            const u32 dci = 2u * endpoint_number + (in || transfer_type == 0);
+            if ((control[1] & (1u << dci)) || slot.endpoint_rings[dci].configured) {
+                discard_pending();
+                return 1;
+            }
+
+            u32 ep_type = 4; // Control.
+            if (transfer_type == 2) ep_type = in ? 6 : 2; // Bulk.
+            if (transfer_type == 3) ep_type = in ? 7 : 3; // Interrupt.
+
+            u32 interval = 0;
+            if (transfer_type == 3) {
+                if (!endpoint.interval) {
+                    discard_pending();
+                    return 1;
+                }
+                if (slot.superspeed || slot.speed_id == 3) {
+                    if (endpoint.interval > 16) {
+                        discard_pending();
+                        return 1;
+                    }
+                    interval = endpoint.interval - 1;
+                } else {
+                    // Full/low speed bInterval is in frames; xHCI uses log2 microframes.
+                    u32 microframes = (u32)endpoint.interval * 8u;
+                    while (microframes >>= 1)
+                        ++interval;
+                }
+            }
+
+            u32 max_burst = 0;
+            u32 max_esit_payload = 0;
+            if (slot.superspeed) {
+                if (!endpoint.has_ss_companion ||
+                    (transfer_type == 2 && (endpoint.ss_companion.bmAttributes & 0x1fu))) {
+                    printf("xHCI: endpoint 0x%b needs unsupported SuperSpeed streams or companion\n",
+                           endpoint.address);
+                    discard_pending();
+                    return 1;
+                }
+                max_burst = endpoint.ss_companion.bMaxBurst;
+                if (transfer_type == 3)
+                    max_esit_payload = endpoint.ss_companion.wBytesPerInterval;
+            } else if (transfer_type == 3) {
+                if (slot.speed_id == 3)
+                    max_burst = (endpoint.descriptor.wMaxPacketSize >> 11) & 3u;
+                max_esit_payload = packet_size * (max_burst + 1u);
+            }
+
+            if (!xhci_dma_alloc(&pending_rings[dci], EP0_SIZE, addr64)) {
+                discard_pending();
+                return 1;
+            }
+            XhciTrb *ring = (XhciTrb *)pending_rings[dci].virtual_address;
+            const u64 ring_phys = pending_rings[dci].physical_address;
+            ring[EP0_LINK].d0 = (u32)ring_phys;
+            ring[EP0_LINK].d1 = (u32)(ring_phys >> 32);
+            ring[EP0_LINK].d3 = TRB_TYPE(6) | (1u << 1) | 1u;
+
+            u32 *ep = (u32 *)(input_context.virtual_address +
+                              (dci + 1u) * context_bytes);
+            ep[0] = interval << 16; // EP State remains Disabled in the Input Context.
+            ep[1] = (3u << 1) | (ep_type << 3) |
+                    (max_burst << 8) | ((u32)packet_size << 16);
+            ep[2] = (u32)ring_phys | 1u; // Dequeue Cycle State = 1.
+            ep[3] = (u32)(ring_phys >> 32);
+            ep[4] = (u32)packet_size | (max_esit_payload << 16);
+
+            control[1] |= 1u << dci;
+            if (dci > highest_dci)
+                highest_dci = dci;
+        }
+    }
+
+    if (highest_dci == 1) {
+        discard_pending(); // No non-default endpoints need controller resources.
+        return 0;
+    }
+
+    input_slot[0] = (input_slot[0] & ~(0x1fu << 27)) |
+                    (highest_dci << 27);
+
+    XhciTrb command = {};
+    command.d0 = (u32)input_context.physical_address;
+    command.d1 = (u32)(input_context.physical_address >> 32);
+    command.d3 = TRB_TYPE(12) | ((u32)slot.slot_id << 24);
+    const u64 command_phys = submit_command(command);
+    XhciTrb completion = {};
+    if (!wait_command(timer, command_phys, &completion, 500)) {
+        printf("xHCI: Configure Endpoint timed out for slot %u\n", slot.slot_id);
+        controller.needs_reinit = true;
+        // The controller may still read the input context or transfer rings.
+        return 1;
+    }
+
+    const u8 completion_code = completion.d2 >> 24;
+    if (completion_code != 1) {
+        printf("xHCI: Configure Endpoint failed for slot %u, code=%u\n",
+               slot.slot_id, completion_code);
+        discard_pending();
+        return 1;
+    }
+
+    for (u32 dci = 2; dci < 32; ++dci) {
+        if (!pending_rings[dci].virtual_address)
+            continue;
+        slot.endpoint_rings[dci].dma = pending_rings[dci];
+        slot.endpoint_rings[dci].endpoint_address =
+            (u8)((dci >> 1) | ((dci & 1u) ? 0x80u : 0));
+        slot.endpoint_rings[dci].endpoint_type =
+            (u8)((((u32 *)((u8 *)input_context.virtual_address +
+                          (dci + 1u) * context_bytes))[1] >> 3) & 7u);
+        slot.endpoint_rings[dci].enqueue_index = 0;
+        slot.endpoint_rings[dci].cycle = 1;
+        slot.endpoint_rings[dci].configured = true;
+    }
+    free_dma(input_context.virtual_address);
+    return 0;
 }

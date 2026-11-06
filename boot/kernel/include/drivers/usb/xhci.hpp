@@ -99,6 +99,15 @@ struct XhciRings {
 };
 
 typedef struct {
+    dma_ret dma;
+    u8 endpoint_address;
+    u8 endpoint_type;
+    bool configured;
+    u32 enqueue_index;
+    u32 cycle;
+} xhci_endpoint_ring;
+
+typedef struct {
     u8 port;
     u8 slot_id;
     u64 output_context_virtual;
@@ -110,8 +119,10 @@ typedef struct {
     u16 ep0_mps;
     u8 address;
     u8 speed_id;
+    bool superspeed;
     dma_ret output_context;
     dma_ret EP0;
+    xhci_endpoint_ring endpoint_rings[32];
 } usb_slot;
 
 class xhci_controller : public usb_controller {
@@ -162,7 +173,7 @@ u8 wanted_id);
         
         int allocate_scracthpad(u32 scratchpad_count, bool addr_64);
         u64 port_to_address(u8 port);
-        u8 read_protocol_slot_type(u8 port);
+        u8 read_protocol_slot_type(u8 port, u8 *major = nullptr);
         u8 enable_device_slot(u8 port, TimerSource &timer);
         bool disable_device_slot(u8 slot_id, TimerSource &timer);
         bool wait_transfer_event(TimerSource &timer, u8 slot_id, u8 endpoint_id, u64 expected_trb, XhciTrb *result, u32 timeout);
@@ -170,11 +181,13 @@ u8 wanted_id);
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
+        void scan_ports(TimerSource &timer) override;
         int reset_port(u8 port, TimerSource &timer);
         int disable_port(u8 port, TimerSource &timer);
         usb_device_descriptor identify_device(u8 port, TimerSource &timer);
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
+        int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) override;
         xhci_controller();
 
 };

@@ -192,6 +192,12 @@ QEMU_ARGS=(
     -drive "if=pflash,format=raw,readonly=on,file=$FIRMWARE"
 )
 
+if [[ "$HEADLESS" == true ]]; then
+    AUDIO_BACKEND=none
+else
+    AUDIO_BACKEND=pa
+fi
+
 if [[ -n "$CPU_MODEL" ]]; then
     QEMU_ARGS+=(-cpu "$CPU_MODEL")
 fi
@@ -221,7 +227,7 @@ cp -- "$ROOT_DIR/boot/kernel.elf" "$TEMP_DIR/disk/boot/kernel.elf"
 
 QEMU_ARGS+=(
     -machine q35,pcspk-audiodev=spk
-    -audiodev pa,id=spk
+    -audiodev "$AUDIO_BACKEND,id=spk"
     -drive "format=raw,media=disk,file=fat:rw:$TEMP_DIR/disk"
     -monitor none
     -serial none

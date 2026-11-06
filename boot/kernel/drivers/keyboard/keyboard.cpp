@@ -6,6 +6,5 @@ GlobalKeyboard::GlobalKeyboard() {
     index = 0;
     keyboards[0] = new PS2K;
     keyboards[0]->init();
-
-
+    
 }

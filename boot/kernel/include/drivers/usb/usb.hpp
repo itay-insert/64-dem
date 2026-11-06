@@ -2,6 +2,7 @@
 #include "drivers/pci/pci.h"
 #include "drivers/devdef.h"
 #include "drivers/timers/timer.hpp"
+#include "x86-64/memory/dma.h"
 
 
 #define NEEDS_REINIT 0
@@ -121,6 +122,14 @@ typedef struct {
 } __attribute__((packed)) usb_endpoint_descriptor;
 
 typedef struct {
+    u8 bLength;
+    u8 bDescriptorType;
+    u8 bMaxBurst;
+    u8 bmAttributes;
+    u16 wBytesPerInterval;
+} __attribute__((packed)) usb_ss_endpoint_companion_descriptor;
+
+typedef struct {
     u8 address;
     u8 transfer_type;
     u16 max_packet_size;
@@ -131,6 +140,8 @@ typedef struct {
     u8 interface_number;
     u8 alternate_setting;
     usb_endpoint_descriptor descriptor;
+    bool has_ss_companion;
+    usb_ss_endpoint_companion_descriptor ss_companion;
 } usb_endpoint;
 
 typedef struct {
@@ -164,7 +175,7 @@ typedef struct {
     bool connected;
     int controller_type;
     u32 port_status;
-    usb_device *device;
+    usb_device *device = nullptr;
 } usb_port_descriptor;
 
 class usb_controller {
@@ -181,6 +192,7 @@ class usb_controller {
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
         void MapController(usb_controller_t *controller, u8 type);
         void construct_controller(void);
+        virtual void scan_ports(TimerSource &timer);
         usb_device get_device(u8 port, TimerSource &timer);
         virtual int controller_init(TimerSource &timer) = 0;
         virtual int enumrate_ports() = 0;
@@ -195,15 +207,24 @@ class usb_controller {
 };
 
 
+class xhci_controller;
+class ehci_controller;
+class ohci_controller;
+class uhci_controller;
+
 class GlobalUSB {
     public: 
         u8 class_code;
         u8 subclass;
         u8 prog_if;
-        usb_controller *xhci_controllers;
-        usb_controller *ehci_controllers;
-        usb_controller *ohci_controllers;
-        usb_controller *uhci_controllers;
+        xhci_controller *xhci_controllers = nullptr;
+        u8 xhci_count = 0;
+        ehci_controller *ehci_controllers = nullptr;
+        u8 ehci_count = 0;
+        ohci_controller *ohci_controllers = nullptr;
+        u8 ohci_count = 0;
+        uhci_controller *uhci_controllers = nullptr;
+        u8 uhci_count = 0;
         GlobalUSB();
         
 };

@@ -42,6 +42,8 @@ u64 Kernel_end = 0;
 u64 timeradd = 0;
 u64 acpiadd = 0;
 
+u64 usb_addr = 0;
+
 extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
@@ -255,6 +257,15 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     ioapic_route_keyboard((u8)(ioapic_read(0x20) >> 24));
 
+    pci_init();
+    pci_detect_devices();
+
+    Timer timer;
+    timeradd = reinterpret_cast<u64>(&timer);
+
+    GlobalUSB USB;
+    usb_addr = (u64)&USB;
+
     printf("ps/2 controller init status: 0x%b\n", ps2_controller_init());
 
     u32 low = ioapic_read_register(0x12);
@@ -272,10 +283,6 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     enable_interrupts();
     printf("interrupts enabled!\n");
-
-    pci_init();
-
-    pci_detect_devices();
 
     if (info64->device_path != 1) {
         PCI_PATH_RET boot_path =
@@ -303,20 +310,17 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                    boot_path.PCI_status,
                 (unsigned int)boot_path.DeviceCount);
         }
-    }   
+    }
 
-    Timer timer;
-    timeradd = reinterpret_cast<u64>(&timer);
     printf("Timer signature: %s\n", timer.Src->hw.signature);
     printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);
-   
+
 
     for (int i = 0; i < 3; i++) {
         printf(".");
         wait_ms(*timer.Src, 1000);
     }
 
-    GlobalUSB USB;
 
     printf("\n");
     printf("Current timer tick is: %lx\n", timer.Src->read());

@@ -682,7 +682,7 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
     (0u << 8)  |  // Endpoint number 0
     (2u << 12) | // High-speed
     (1u << 14) |  // Head of reclamation list (not required for this transfer)
-    (1u << 16);   // Maximum packet size: 64 bytes
+    (64u << 16);  // Maximum packet size: 64 bytes
 
     qh->endpoint_capabilities = 0;
 
@@ -837,6 +837,9 @@ static inline u8 allocate_usb_address(void) {
 
 usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) {
     usb_device device = {0};
+    if (desc.bLength != 18 || desc.bDescriptorType != 1 ||
+        desc.bMaxPacketSize0 != 64)
+        return device;
     REQUESTED_BYTES = 18;
 
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
@@ -871,6 +874,10 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
     u8 address = allocate_usb_address();
+    if (!address) {
+        free_dma(alloc.virtual_address);
+        return device;
+    }
 
     // setup packet init
     *setup = {
@@ -1141,12 +1148,14 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
     }
 
     usb_device_descriptor *desc_ptr = (usb_device_descriptor *)((u8 *)setup + 8);
-    if (desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18) {
+    bool valid_descriptor = recieved == 18 &&
+        desc_ptr->bDescriptorType == 0x01 && desc_ptr->bLength == 18;
+    if (valid_descriptor) {
         memcpy(&desc, desc_ptr, 18);
     }
 
     device.descriptor = desc;
-    device.discovered = true;
+    device.discovered = valid_descriptor;
     free_dma(alloc.virtual_address);
     return device;
 }
@@ -1174,6 +1183,10 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 #define EHCI_QH_S_MASK(v)     ((u32)(v) & 0xFF)
 
 void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    if (!maxpacketsize || length != packet.wLength || length > 4096 ||
+        (length && !(packet.BmRequestType & IN)))
+        return nullptr;
+    REQUESTED_BYTES = length;
     volatile ehci_cap_regs_t *cap_regs = (volatile ehci_cap_regs_t *)controller.io_base;
     volatile ehci_op_regs_t *op_regs = (volatile ehci_op_regs_t *)(controller.io_base + (u64)cap_regs->cap_length);
 
@@ -1258,6 +1271,9 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
             EHCI_QTD_ACTIVE;
 
         data_qtd->buffer[0] = data_phys;
+        const u32 bytes_to_page_end = 4096u - (data_phys & 4095u);
+        if (length > bytes_to_page_end)
+            data_qtd->buffer[1] = (data_phys + 4095u) & ~4095u;
     
     }
 
@@ -1358,9 +1374,9 @@ void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 static inline ehci_address_state *allocate_state(ehci_address_state *states, u8 state_count, usb_device device) {
     if (state_count == 0) {
         states = new ehci_address_state[1];
-        *states->interfaces = nullptr;
-        *states->device_address = device.address;
-        *states->interfaces_count = device.usb_interface_count;
+        states->interfaces = nullptr;
+        states->device_address = device.address;
+        states->interfaces_count = device.usb_interface_count;
         return states;
     } // if state_count is 0, allocate states
 
@@ -1395,8 +1411,8 @@ ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 e
 
     u16 raw = device.interfaces[interface_index].endpoints[endpoint_index].descriptor.wMaxPacketSize;
     endpoint.dma = alloc;
-    endpoint.max_packet_size = max_packet_size;
-    endpoint.interval = interval;
+    endpoint.max_packet_size = device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
+    endpoint.interval = device.interfaces[interface_index].endpoints[endpoint_index].interval;
     endpoint.device_address = device.address;
     endpoint.endpoint_address = device.interfaces[interface_index].endpoints[endpoint_index].address;
     endpoint.transfer_type = device.interfaces[interface_index].endpoints[endpoint_index].transfer_type;
