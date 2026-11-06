@@ -57,7 +57,6 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     if (paging_enabled == 0) {
         qemu_debug_print("[kernel] starting paging setup\n");
-        vga_init(info64->framebuffer_base, info32->horizontal_resolution, info32->vertical_resolution, info32->pixels_per_scanline, info32->pixel_mode);
         paging_enabled = 1;
         u8 *bitmap = (u8 *)stack;
         PAGING_SETUP_DESCRIPTOR ps = {info64, info32, bitmap, memory_map};
