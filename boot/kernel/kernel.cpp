@@ -130,50 +130,6 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf("]\n");
     }
 
-    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1, 0x03);
-    addr = alloc.PhysicalStart;
-    int *ptr = (int *)alloc.VirtualStart;
-    *ptr = 1;
-
-    EFI_MEMORY_DESCRIPTOR alloc1 = vmalloc((info64->kernel_end & ~0xfff)+0x2000, 1, 0x03);
-    if (*ptr == 1 && addr != alloc1.PhysicalStart) {
-        printf("vmalloc: [");
-        Set_GlobalTextColor(Green);
-        printf("OK");
-        Set_GlobalTextColor(LightGray);
-        printf("]\n");
-    } else {
-        printf("vmalloc: [");
-        Set_GlobalTextColor(Red);
-        printf("ERR");
-        Set_GlobalTextColor(LightGray);
-        printf("]\n");
-        PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(alloc.VirtualStart, KernelPML4);
-        printf("error_status: %lu  physical_start: 0x%lx  virtual_start: 0x%lx pages: 0x%lu  lookup: %d\n",
-             alloc1.Attribute, alloc1.PhysicalStart, alloc1.VirtualStart, alloc1.NumberOfPages, lookup.status);
-    }
-
-    addr = alloc1.PhysicalStart;
-
-    vfree(alloc1);
-    vfree(alloc);
-
-    alloc = vmalloc((info64->kernel_end & ~0xfff)+0x1000, 1, 0x03);
-    if (alloc.PhysicalStart < addr) {
-        printf("vfree: [");
-        Set_GlobalTextColor(Green);
-        printf("OK");
-        Set_GlobalTextColor(LightGray);
-        printf("]\n");
-    } else {
-        printf("vfree: [");
-        Set_GlobalTextColor(Red);
-        printf("ERR");
-        Set_GlobalTextColor(LightGray);
-        printf("]\n");
-    }
-    
-    vfree(alloc);
 
     if (info32->pixel_mode == RGB) {
         printf("Pixel format: RGB\n");

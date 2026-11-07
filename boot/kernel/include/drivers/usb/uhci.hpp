@@ -30,11 +30,14 @@ static_assert(sizeof(uhci_qh) == 16);
 typedef struct {
     u8 device_address;
     u8 endpoint_address;
+    u8 transfer_type;
     u8 interval;
     u8 data_toggle;
     u16 max_packet_size;
     
+    u8 speed;
     bool scheduled;
+
     dma_ret dma;
     uhci_qh *qh;
     uhci_td *td;
@@ -61,7 +64,12 @@ class uhci_controller : public usb_controller {
         u32 *frame_list;
         uhci_address_state *states;
         u8 state_count;
+        uhci_qh *anchor;
+        u32 anchor_phys;
         uhci_endpoint_state configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer);
+        bool link_qh(uhci_endpoint_state &ep, TimerSource &timer);
+        bool unlink_qh(uhci_endpoint_state &ep, TimerSource &timer);
+    
 
     public:
         int controller_init(TimerSource &timer) override;
@@ -72,6 +80,7 @@ class uhci_controller : public usb_controller {
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
         int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer);
+        usb_transfer_result usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout);
         uhci_controller();
 
 };

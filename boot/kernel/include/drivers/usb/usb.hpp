@@ -34,7 +34,34 @@
 #define OLD_FLAG_DID_NOT_CLEAR 9
 #define INVALID_STATUS 10
 
+#define TRANSFER_SUCCESS 0
+#define NOT_CONNECTED 1
+#define NOT_DISCOVERED 2
+#define NO_ADDRESS 3
+#define LINK_ERROR 4
+#define UNLINK_ERROR 5
+#define TIMEOUT 6
+#define FAILED 7
+#define INVALID_LENGTH 8
+
+typedef struct {
+    u32 hardware_status;
+    u32 actual_length;
+    u8 controller_index;
+    u8 controller_type;
+    int status_code;
+    u32 endpoint_handle;
+} usb_transfer_result;
+
 extern const char *codes[];
+
+enum usb_speed : u8 {
+    USB_SPEED_UNKNOWN,
+    USB_SPEED_LOW,
+    USB_SPEED_FULL,
+    USB_SPEED_HIGH,
+    USB_SPEED_SUPER
+};
 
 typedef struct {
     int max;
@@ -202,6 +229,7 @@ class usb_controller {
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
         virtual int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) = 0;
+        virtual usb_transfer_result usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout) = 0;
         configuration_descriptor get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port);
 
 };

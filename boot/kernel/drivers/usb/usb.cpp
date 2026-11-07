@@ -90,6 +90,7 @@ void usb_find_callback(const PCI_ret *device, void *context) {
 
 }
 
+u8 current_index = 0;
 
 bool usb_controller::discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str) {
     *controller = {};
@@ -99,7 +100,9 @@ bool usb_controller::discover_controller(usb_controller_t *controller, u8 class_
     controller->prog_if = prog_if;
     controller->cached.cache = NULL;
     controller->cached.max = 0;
-    
+    controller->index = current_index;
+
+    current_index++;
 
     pci_enumerate(usb_find_callback, controller);
 
@@ -562,6 +565,7 @@ GlobalUSB::GlobalUSB() {
         function = new u8[Match.count];
 
         Addr_count = 0;
+        current_index = 0;
 
         switch (prog_if) {
             case 0x00:

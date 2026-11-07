@@ -1392,7 +1392,7 @@ static inline ehci_address_state *allocate_state(ehci_address_state *states, u8 
 ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer) {
     ehci_endpoint_state endpoint = {0};
 
-    u64 size = sizeof(ehci_qh) + sizeof(ehci_qtd);
+    u64 size = sizeof(ehci_qh) + (sizeof(ehci_qtd) << 1) + device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
     dma_ret alloc = allocate_dma(size);
 
     if (alloc.status != 0) {
@@ -1420,9 +1420,13 @@ ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 e
 
     u32 qh_phys = (u32)alloc.physical_address;
     u32 dummy_qtd_phys = qh_phys + sizeof(ehci_qh);
+    endpoint.data_qtd_phys = dummy_qtd_phys + sizeof(ehci_qtd);
+    endpoint.buffer_phys = dummy_qtd_phys + (sizeof(ehci_qtd) << 1); 
 
     ehci_qh *qh = (ehci_qh *)alloc.virtual_address;
     ehci_qtd *dummy_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
+    endpoint.data_qtd = (ehci_qtd *)((u8 *)dummy_qtd + sizeof(ehci_qtd));
+    endpoint.buffer = (void *)((u8 *)dummy_qtd + (sizeof(ehci_qtd) << 1));
 
     endpoint.qh_phys = qh_phys;
     endpoint.dummy_qtd_phys = dummy_qtd_phys;
@@ -1457,4 +1461,57 @@ int ehci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
     }
 
     return 0;
+}
+
+#define ASS (1u << 15)
+
+bool ehci_controller::link_qh(ehci_endpoint_state &ep, TimerSource &timer) {
+    if (!ep.qh || ep.scheduled || ep.transfer_type != 2)
+        return false;
+
+    volatile ehci_cap_regs_t *cap = (volatile ehci_cap_regs_t *)controller.io_base;
+    volatile ehci_op_regs_t *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
+
+    u32 ase = op->command & 0x20; // save bit 5
+
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) { // 100 ms timeout
+        if (op->status & ASS)
+            break;
+
+        wait_ms(timer, 1);
+    }
+
+    if (!(op->status & ASS))
+        return false;
+
+    op->command &= ~ase;
+
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+        if (!(op->status & ASS))
+            break;
+
+        wait_ms(timer, 1);
+    }
+
+    if (op->status & ASS)
+        return false;
+
+    ep.qh->horizontal_link = async_head->horizontal_link;
+    asm volatile("mfence" ::: "memory");
+    async_head->horizontal_link = ep.qh_phys | 0x02u;
+    ep.scheduled = true;
+
+    op->command |= ase;
+
+    for (u32 elapsed = 0; elapsed < 100; elapsed++) { // 100 ms timeout
+        if (op->status & ASS)
+            break;
+
+        wait_ms(timer, 1);
+    }
+
+    if (!(op->status & ASS))
+        return false;
+
+    return true;
 }

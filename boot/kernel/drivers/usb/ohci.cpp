@@ -1831,7 +1831,7 @@ static inline ohci_address_state *allocate_state(ohci_address_state *states, u8 
 ohci_endpoint_state ohci_controller::configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer) {
     ohci_endpoint_state endpoint = {0};
 
-    u64 size = sizeof(ohci_ed) + sizeof(ohci_td);
+    u64 size = sizeof(ohci_ed) + (sizeof(ohci_td) << 1) + device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
     dma_ret alloc = allocate_dma(size);
 
     if (alloc.status != 0) {
@@ -1865,15 +1865,37 @@ ohci_endpoint_state ohci_controller::configure_endpoint(usb_device device, u16 e
 
     u32 ed_phys = (u32)alloc.physical_address;
     u32 dummy_td_phys = ed_phys + sizeof(ohci_ed);
+    endpoint.data_td_phys = dummy_td_phys + sizeof(ohci_td);
+    endpoint.buffer_phys = dummy_td_phys + (sizeof(ohci_td) << 1);
 
     ohci_ed *ed = (ohci_ed *)alloc.virtual_address;
     ohci_td *dummy_td = (ohci_td *)(alloc.virtual_address + sizeof(ohci_ed));
+    endpoint.data_td = (ohci_td *)((u8 *)dummy_td + sizeof(ohci_td));
+    endpoint.buffer = (void *)((u8 *)dummy_td + (sizeof(ohci_td) << 1));
    
     endpoint.ed_phys = ed_phys;
     endpoint.dummy_td_phys = dummy_td_phys;
     
     endpoint.ed = ed;
     endpoint.dummy_td = dummy_td;
+
+    *ed = {};
+    *dummy_td = {};
+
+    const bool in = (endpoint.endpoint_address & 0x80u) != 0;
+
+    ed->control =
+        ((u32)endpoint.device_address & 0x7fu) |
+        ((u32)(endpoint.endpoint_address & 0x0fu) << 7) |
+        ((in ? 2u : 1u) << 11) |
+        (endpoint.low_speed ? ohci::ed::low_speed : 0) |
+        ohci::ed::skip |
+        ((u32)endpoint.max_packet_size << 16);
+
+    ed->headp = dummy_td_phys;
+    ed->tailp = dummy_td_phys;
+    ed->next_ed = 0;
+
 
     return endpoint;
 }
@@ -1899,4 +1921,270 @@ int ohci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
     }
 
     return 0;
+}
+
+static constexpr u32 OHCI_BLE = 1u << 5;
+static constexpr u32 OHCI_BLF = 1u << 2;
+
+static bool stop_bulk_schedule(volatile ohci_registers_t *regs, volatile ohci_hcca *hcca, TimerSource &timer) {
+    regs->control &= ~OHCI_BLE;
+
+    (void)regs->control; // flush the register before waiting
+    asm volatile("mfence" ::: "memory");
+
+    u16 frame = hcca->frame_number;
+    return wait_for_next_frame(hcca->frame_number, frame, timer);
+}
+
+
+bool ohci_controller::link_ed(ohci_endpoint_state &ep, TimerSource &timer) {
+    if (controller->needs_reinit || !ep.ed || 
+        ep.transfer_type != 2 || ep.scheduled)
+        return false;
+
+    volatile ohci_registers_t *regs = (volatile ohci_registers_t *)controller.io_base;
+    
+    if (!stop_bulk_schedule(regs, hcca, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+
+    ep.ed->next_ed = regs->bulk_head_ed;
+    regs->bulk_head_ed = ep.ed_phys;
+    regs->bulk_current_ed = 0;
+    
+    ep.ed->control &= ~ohci::ed::skip;
+    asm volatile("mfence" ::: "memory");
+
+    ep.scheduled = true;
+    regs->control |= OHCI_BLE;
+    regs->command_status = OHCI_BLF;
+    (void)regs->control;
+
+    return true;
+}
+
+
+bool ohci_controller::unlink_ed(ohci_endpoint_state &ep, TimerSource &timer) {
+    if (controller.needs_reinit || !ep.ed || ep.transfer_type != 2)
+        return false;
+
+    if (!ep.scheduled)
+        return true;
+
+    auto *regs =
+        reinterpret_cast<volatile ohci_registers_t *>(controller.io_base);
+    auto *hc = reinterpret_cast<volatile ohci_hcca *>(hcca);
+
+    u32 saved_ble = regs->control & OHCI_BLE;
+
+    ep.ed->control |= ohci::ed::skip;
+    asm volatile("mfence" ::: "memory");
+
+    if (!stop_bulk_schedule(regs, hc, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+
+    volatile ohci_ed *previous = nullptr;
+    u32 current = regs->bulk_head_ed & 0xfffffff0u;
+    bool removed = false;
+
+    // Bound traversal so a corrupt/cyclic chain cannot hang the kernel.
+    for (u32 visited = 0; current && visited < 4096; ++visited) {
+        if (current == ep.ed_phys) {
+            u32 next = ep.ed->next_ed;
+
+            if (previous)
+                previous->next_ed = next;
+            else
+                regs->bulk_head_ed = next;
+
+            ep.ed->next_ed = 0;
+            ep.scheduled = false;
+            removed = true;
+            break;
+        }
+
+        u64 address = dma_phys_to_virt(current);
+        if (address == 0 || address == 1)
+            break;
+
+        previous = reinterpret_cast<volatile ohci_ed *>(address);
+        current = previous->next_ed & 0xfffffff0u;
+    }
+
+    // Discard the cached traversal position while BLE is disabled.
+    regs->bulk_current_ed = 0;
+    asm volatile("mfence" ::: "memory");
+
+    if (!removed) {
+        controller.needs_reinit = true;
+        return false; // Leave bulk processing disabled for recovery.
+    }
+
+    regs->control =
+        (regs->control & ~OHCI_BLE) | saved_ble;
+
+    if (saved_ble && regs->bulk_head_ed)
+        regs->command_status = OHCI_BLF;
+
+    (void)regs->control;
+    return true;
+}
+
+usb_transfer_result ohci_controller::usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout) {
+    usb_transfer_result transfer = {0};
+
+    transfer.controller_type = OHCI;
+    transfer.controller_index = controller.index;
+
+    transfer.endpoint_handle = endpoint_address;
+
+    u8 port_index = (u8)((endpoint_address & 0xFF0000) >> 16);
+    u8 interface_index = (u8)((endpoint_address & 0x00FF00) >> 8);
+    u8 endpoint_index = (u8)(endpoint_address & 0x0000FF);
+
+    if (!ports[port_index].connected) {
+        printf("OHCI: error: invalid device port 0x%b not connected\n", ports[port_index].port_number);
+        transfer.status_code = NOT_CONNECTED;
+        return transfer; // return 1 for failure
+    }
+
+    if (!ports[port_index].device->discovered) {
+        printf("OHCI: error: the device on port 0x%b was not discovered\n", ports[port_index].port_number);
+        transfer.status_code = NOT_DISCOVERED;
+        return transfer; 
+    }
+
+    u8 device_address = ports[port_index].device->address;
+    ohci_address_state *state = nullptr;
+    for (u8 i = 0; i < state_count; i++) {
+        if (states[i].device_address == device_address) 
+            state = &states[i];
+    }
+
+    if (!state) {
+        printf("OHCI: error: no matching address_state found for device_address 0x%b\n", device_address);
+        transfer.status_code = NO_ADDRESS;
+        return transfer;
+    }
+
+    ohci_endpoint_state &ep = state->interfaces[interface_index].endpoints[endpoint_index];
+
+    if (length > ep.max_packet_size) {
+        transfer.status_code = INVALID_LENGTH;
+        return transfer;
+    }
+
+    if (length > 0 && buffer == nullptr) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    if (ep.transfer_type != 2 && ep.transfer_type != 3) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    const bool in = (ep.endpoint_address & 0x80u) != 0;
+
+    ohci_td *data_td = ep.dummy_td;
+    u32 data_td_phys = ep.dummy_td_phys;
+
+    ohci_td *new_dummy = ep.data_td;
+    u32 new_dummy_phys = ep.data_td_phys;
+
+
+    if (!in && length) 
+        memcpy(ep.buffer, buffer, length);
+
+    *new_dummy = {};
+    *data_td = {};
+
+    data_td->control =
+        ohci::td::condition_not_accessed |
+        (in ? ohci::td::in : ohci::td::out) |
+        (in ? ohci::td::rounding : 0);
+
+    data_td->cbp = length ? ep.buffer_phys : 0;
+    data_td->be = length ? ep.buffer_phys + length - 1 : 0;
+    data_td->next_td = new_dummy_phys;
+
+    asm volatile("mfence" ::: "memory");
+    ep.ed->tailp = new_dummy_phys;
+
+    ep.dummy_td = new_dummy;
+    ep.dummy_td_phys = new_dummy_phys;
+    ep.data_td = data_td;
+    ep.data_td_phys = data_td_phys;
+
+    if (!link_ed(ep, timer)) {
+        transfer.status_code = LINK_ERROR;
+        return transfer;
+    }
+
+    auto *regs =
+    reinterpret_cast<volatile ohci_registers_t *>(controller.io_base);
+
+    auto *hw_ed = reinterpret_cast<volatile ohci_ed *>(ep.ed);
+
+    bool queue_ok = true;
+
+    for (u32 elapsed = 0; elapsed < timeout; ++elapsed) {
+        if (!process_done_queue(hcca, regs, &watch)) {
+            queue_ok = false;
+            break;
+        }
+
+        if ((watch.retired_mask & OHCI_TD_DATA_DONE) ||
+            (hw_ed->headp & OHCI_ED_HEAD_HALTED))
+            break;
+
+        wait_ms(timer, 1);
+    }
+
+
+    if (!unlink_ed(ep, timer)) {
+        transfer.status_code = UNLINK_ERROR;
+        return transfer;
+    }
+
+    transfer.hardware_status = data_td->control;
+    u32 cc = (data_td->control >> 28) & 0xFu;
+
+    if (cc != OHCI_CC_NO_ERROR) {
+        printf("OHCI: transfer failed\n");
+        transfer.status_code = cc;
+        return transfer;
+    }
+
+    u32 cbp = ((volatile ohci_td *)data_td)->cbp;
+    u32 actual = 0;
+
+    if (length == 0) {
+        if (cbp != 0) {
+            transfer.status_code = INVALID_LENGTH;
+            return transfer;
+        }
+    } else if (cbp == 0) {
+        actual = length; // Entire requested buffer transferred.
+    } else {
+        u64 start = ep.buffer_phys;
+        u64 end = start + length; // Exclusive end; use u64 to avoid overflow.
+
+        if ((u64)cbp < start || (u64)cbp >= end) {
+            transfer.status_code = INVALID_LENGTH;
+            return transfer;
+        }   
+
+        actual = (u32)((u64)cbp - start);
+    }
+
+    if (in && length) 
+        memcpy(buffer, ep.buffer, actual);
+
+    transfer.actual_length = actual;
+    transfer.status_code = TRANSFER_SUCCESS;
+    return transfer;
 }

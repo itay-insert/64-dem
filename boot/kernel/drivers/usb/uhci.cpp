@@ -95,6 +95,8 @@ uhci_controller::uhci_controller() {
 int uhci_controller::controller_init(TimerSource &timer) {
     states = nullptr; // initialize states pointer to null and count to 0
     state_count = 0;
+
+    anchor = nullptr;
     
     printf("UHCI I/O base: 0x%w\n", (u16)controller.io_base);
 
@@ -662,6 +664,8 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
     const u32 low_speed_status =
         (uhci_read_port(io_base, port - 1) & (1u << 8))
             ? uhci::td::low_speed : 0;
+    const bool low = (uhci_read_port(io_base, port - 1) &  (1u << 8)) != 0;
+    device.speed = low ? USB_SPEED_LOW : USB_SPEED_FULL;
     dma_ret alloc = allocate_dma(size);
     if (alloc.status != 0) {
         printf("UHCI: Set address allocation failed\n");
@@ -1319,6 +1323,8 @@ static inline uhci_address_state *allocate_state(uhci_address_state *states, u8 
 
 uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 endpoint_index, u16 interface_index, TimerSource &timer) {
     uhci_endpoint_state endpoint = {0};
+    u16 io_base = (u16)controller.io_base;
+
     u32 max_packet_size = device.interfaces[interface_index].endpoints[endpoint_index].max_packet_size;
     u8 interval = device.interfaces[interface_index].endpoints[endpoint_index].interval;
 
@@ -1339,6 +1345,7 @@ uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 e
         return endpoint;
     }
 
+
     endpoint.dma = alloc;
     endpoint.max_packet_size = max_packet_size;
     endpoint.interval = interval;
@@ -1346,6 +1353,9 @@ uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 e
     endpoint.device_address = device.address;
     endpoint.endpoint_address = device.interfaces[interface_index].endpoints[endpoint_index].address;
     
+    endpoint.speed = device.speed;
+    endpoint.transfer_type = device.interfaces[interface_index].endpoints[endpoint_index].transfer_type;
+
     u32 qh_phys = (u32)alloc.physical_address;
     u32 td_phys = qh_phys + sizeof(uhci_qh);
     u32 buffer_phys = td_phys + 32;
@@ -1368,6 +1378,48 @@ uhci_endpoint_state uhci_controller::configure_endpoint(usb_device device, u16 e
     qh->element_link = 0x01;
 
     endpoint.scheduled = false;
+
+    if (!anchor) {
+
+        alloc = allocate_dma(sizeof(uhci_qh));
+        if (alloc.status != 0) {
+            printf("UHCI: configure_endpoint allocation error\n");
+            return endpoint;
+        }
+
+        if (alloc.physical_address > 0xFFFFFFFF) {
+            printf("UHCI: configure_endpoint allocation physical address too big\n");
+            free_dma(alloc.virtual_address);
+            return endpoint;
+        }
+
+
+        anchor_phys = (u32)alloc.physical_address;
+        anchor = (uhci_qh *)alloc.virtual_address;
+
+        anchor->element_link = 1;
+        anchor->head_link = 1;
+
+        u16 old_command = inw(io_base+UHCI_USBCMD);
+        outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+        if (!wait_for_halted(io_base, timer)) {
+            printf("UHCI: controller failed to halt\n");
+            anchor = nullptr;
+            free_dma(alloc.virtual_address);
+            return endpoint;
+        }
+
+        for (int i = 0; i < 1024; i++) 
+            frame_list[i] = anchor_phys | 0x2u;
+
+        asm volatile("mfence" ::: "memory");
+
+        outw(io_base+UHCI_USBCMD, (old_command | 1u));
+        if (!wait_for_start(io_base, timer)) {
+            printf("UHCI: controller failed to start\n");
+
+        }
+    }
     return endpoint;
 }
 
@@ -1392,4 +1444,227 @@ int uhci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
     }
 
     return 0;
+}
+
+bool uhci_controller::link_qh(uhci_endpoint_state &ep, TimerSource &timer) {
+    if (!anchor || !ep.qh)
+        return false;
+
+    u16 io_base = (u16)controller.io_base;
+
+    u16 old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: controller failed to halt\n");
+        return false;
+    }
+
+    ep.qh->head_link = anchor->head_link;
+    anchor->head_link = ep.qh_phys | 0x02u;
+    ep.scheduled = true;
+
+    asm volatile("mfence" ::: "memory");
+
+    outw(io_base+UHCI_USBCMD, (old_command | 1u));
+    if (!wait_for_start(io_base, timer)) {
+        printf("UHCI: controller failed to start\n");
+        ep.scheduled = false;
+        return false;
+    }
+
+    return true;
+}
+
+
+bool uhci_controller::unlink_qh(uhci_endpoint_state &ep, TimerSource &timer) {
+    if (!anchor || !ep.qh)
+        return false;
+
+    if (!ep.scheduled)
+        return true;
+
+    u16 io_base = (u16)controller.io_base;
+
+    u16 old_command = inw(io_base+UHCI_USBCMD);
+    outw(io_base+UHCI_USBCMD, (old_command & ~1u));
+    if (!wait_for_halted(io_base, timer)) {
+        printf("UHCI: controller failed to halt\n");
+        return false;
+    }
+
+    uhci_qh *previous = anchor;
+    for (;;) {
+        u32 link = previous->head_link;
+
+        if (link & 1u)
+            return false;
+
+        if (!(link & 2u))
+            return false;
+
+        u32 next_phys = link & ~0x0f;
+        if (next_phys == ep.qh_phys) {
+            previous->head_link = ep.qh->head_link;
+
+            ep.qh->head_link = 1;
+            ep.scheduled = false;
+            
+            outw(io_base+UHCI_USBCMD, (old_command | 1u));
+            if (!wait_for_start(io_base, timer)) {
+                printf("UHCI: controller failed to start\n");
+                return false;
+            }
+
+            return true;
+        }
+
+        u64 next_virt = dma_phys_to_virt((u64)next_phys);
+        if (next_virt == 0 || next_virt == 1)
+            return false;
+
+        previous = (uhci_qh *)next_virt;
+    }
+}
+
+
+usb_transfer_result uhci_controller::usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout) {
+    usb_transfer_result transfer = {0};
+
+    transfer.controller_type = UHCI;
+    transfer.controller_index = controller.index;
+
+    transfer.endpoint_handle = endpoint_address;
+
+    u8 port_index = (u8)((endpoint_address & 0xFF0000) >> 16);
+    u8 interface_index = (u8)((endpoint_address & 0x00FF00) >> 8);
+    u8 endpoint_index = (u8)(endpoint_address & 0x0000FF);
+
+    if (!ports[port_index].connected) {
+        printf("UHCI: error: invalid device port 0x%b not connected\n", ports[port_index].port_number);
+        transfer.status_code = NOT_CONNECTED;
+        return transfer; // return 1 for failure
+    }
+
+    if (!ports[port_index].device->discovered) {
+        printf("UHCI: error: the device on port 0x%b was not discovered\n", ports[port_index].port_number);
+        transfer.status_code = NOT_DISCOVERED;
+        return transfer; 
+    }
+
+    u8 device_address = ports[port_index].device->address;
+    uhci_address_state *state = nullptr;
+    for (u8 i = 0; i < state_count; i++) {
+        if (states[i].device_address == device_address) 
+            state = &states[i];
+    }
+
+    if (!state) {
+        printf("UHCI: error: no matching address_state found for device_address 0x%b\n", device_address);
+        transfer.status_code = NO_ADDRESS;
+        return transfer;
+    }
+
+    uhci_endpoint_state &ep = state->interfaces[interface_index].endpoints[endpoint_index];
+
+    if (length > ep.max_packet_size) {
+        transfer.status_code = INVALID_LENGTH;
+        return transfer;
+    }
+
+    if (length > 0 && buffer == nullptr) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    if (ep.transfer_type != 2 && ep.transfer_type != 3) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    const bool in = (ep.endpoint_address & 0x80u) != 0;
+     
+    *ep.td = {};
+
+    ep.td->link = 1; // End of TD chain
+    ep.td->buffer = ep.buffer_phys;
+
+    ep.td->token =
+        (in ? uhci::pid::in : uhci::pid::out) |
+        ((u32)ep.device_address << 8) |
+        ((u32)(ep.endpoint_address & 0x0fu) << 15) |
+        ((u32)(ep.data_toggle & 1u) << 19) |
+        (uhci::td::encode_length(length) << 21);
+
+    ep.td->status =
+        TD_ACTLEN_INIT |
+        uhci::td::active |
+        uhci::td::error_count |
+        (ep.speed == USB_SPEED_LOW ? uhci::td::low_speed : 0);
+
+    void *dma_buffer = (void *)(ep.dma.virtual_address + (ep.buffer_phys - ep.dma.physical_address));
+    if (!in && length) 
+        memcpy(dma_buffer, buffer, length);
+
+    ep.qh->element_link = ep.td_phys;
+    asm volatile("mfence" ::: "memory");
+
+    if (!link_qh(ep, timer)) {
+        printf("UHCI: linking error at endpoint address 0x%ux\n", endpoint_address);
+        transfer.status_code = LINK_ERROR;
+        return transfer;
+    }
+
+    volatile uhci_td *td = ep.td;
+
+    for (u32 i = 0; i < timeout; i++) {
+        asm volatile("pause");
+        wait_ms(timer, 1);
+    }
+
+    if (!unlink_qh(ep, timer)) {
+        printf("UHCI: unlink error at endpoint address 0x%ux\n", endpoint_address);
+        transfer.status_code = UNLINK_ERROR;
+        return transfer;
+    }
+
+    constexpr u32 terminal_errors =
+        (1u << 17) | // Bit stuff
+        (1u << 18) | // CRC/timeout
+        (1u << 20) | // Babble
+        (1u << 21) | // Buffer error
+        (1u << 22);  // Stall
+
+
+    u32 status = td->status;
+
+    if (status & uhci::td::active) {
+        printf("UHCI: timeout occured while doing a transfer on endpoint address 0x%ux\n", endpoint_address);
+        transfer.status_code = TIMEOUT;
+        return transfer;
+    } else if (status & terminal_errors) {
+        printf("UHCI: USB transfer at endpoint address 0x%ux failed\n", endpoint_address);
+        transfer.status_code = FAILED;
+        return transfer;
+    } else {
+        u32 actual = ((status & 0x7ffu) + 1u) & 0x7ffu;
+
+        ep.data_toggle ^= 1u;
+
+        if (actual > length) {
+            transfer.status_code = FAILED;
+            transfer.actual_length = 0;
+            return transfer;
+        }
+
+        if (in && actual)
+            memcpy(buffer, dma_buffer, actual);
+
+        ep.qh->element_link = 1;
+
+        transfer.actual_length = actual;
+        transfer.hardware_status = status;
+        transfer.status_code = SUCCESS;
+        return transfer;
+    }
+
 }

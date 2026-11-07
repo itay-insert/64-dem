@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include "uint_definitions.h"
 #include "x86-64/memory/memory.h"
 #include "drivers/display/font.h"
@@ -71,25 +72,84 @@ u32 vga16_color[16] = {
 
 u64 fb_phys = 0;
 u64 fb_addr = 0;
+
+bool *diff = NULL;
+u64 diff_size = 0;
+
 int hor_res = 0;
 int ver_res = 0;
+int coulmns = 0;
+int rows = 0;
+
 int p_scanln = 0;
 int p_format = RGB;
 int size = 0;
 
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
-    fb_addr = fb_base;
-    size = hres * vres;
+    fb_phys = fb_base;
+    size = p_scan * vres;
+    fb_addr = (u64)kmalloc(size<<2);
+
+    coulmns = (hres + 7) >> 3;
+    rows = (vres + 15) >> 4;
+    diff = (bool *)kmalloc(coulmns*rows);
+    diff_size = (u64)coulmns*rows;
+
+    if (fb_addr == 0 || diff == NULL) {
+        qemu_debug_print("[VGA] buffer allocation failed\n");
+        for (;;) __asm__ volatile("hlt");
+    }
+
+    u32 *back = (u32 *)fb_addr;
+    for (int i = 0; i < size; i++)
+        back[i] = 0;
+
+    for (int i = 0; i < (coulmns*rows); i++) 
+        diff[i] = false;
+    
     hor_res = hres;
     p_scanln = p_scan;
     ver_res = vres;
 	p_format = p_mode;
 }
 
+
+static inline void update_diff(int x, int y) {
+    if (x < 0 || x >= hor_res || y < 0 || y >= ver_res)
+        return;
+    x = x >> 3; // : 8
+    y = y >> 4;
+    int place = y * coulmns + x;
+    diff[place] = true;
+} 
+
+static void present(void) {
+    u32 *real = (u32 *)fb_phys;
+    u32 *back = (u32 *)fb_addr;
+    for (u64 i = 0; i < diff_size; i++) {
+        if (diff[i]) {
+            diff[i] = false;
+            int y = (int)(i / coulmns);
+            int x = (int)(i % coulmns);
+            x = x << 3;
+            y = y << 4;
+            for (int i = y; i < (y+16) && i < ver_res; i++) {
+                for (int j = x; j < (x+8) && j < hor_res; j++) {
+                    int place = (i * p_scanln) + j;
+                    real[place] = back[place];
+                }
+            }
+        }
+    }
+}
+
 void draw_pixel(int x, int y, u32 color) {
+    if (x < 0 || x >= hor_res || y < 0 || y >= ver_res)
+        return;
     u32 *vga = (u32 *)fb_addr;
     int addr = (y * p_scanln) + x;
-    if (addr <= size) {
+    update_diff(x, y);
+    if (addr < size) {
 		if (p_format == BGR) {
 			u32 BgrColor = (color & MaskBlue) << 16;
 			BgrColor += color & MaskGreen;
@@ -102,10 +162,13 @@ void draw_pixel(int x, int y, u32 color) {
 }
 
 void draw_16color(int x, int y, int color_index) {
+    if (x < 0 || x >= hor_res || y < 0 || y >= ver_res)
+        return;
     u32 *vga = (u32 *)fb_addr;
     int addr = (y * p_scanln) + x;
     u32 color = vga16_color[color_index];
-    if (addr <= size) {
+    update_diff(x, y);
+    if (addr < size) {
 		if (p_format == BGR) {
 			u32 BgrColor = (color & MaskBlue) << 16;
 			BgrColor += color & MaskGreen;
@@ -181,6 +244,7 @@ void scroll(void)
 
         for (int x = 0; x < p_scanln; x++) {
             dst[x] = src[x];
+            update_diff(x, y);
         }
     }
 
@@ -188,8 +252,11 @@ void scroll(void)
     for (int y = ver_res - scroll_pixels; y < ver_res; y++) {
         for (int x = 0; x < p_scanln; x++) {
             draw_pixel(x, y, vga16_color[Black]);
+            update_diff(x, y);
         }
     }
+
+    present();
 }
 
 static inline void cursor_inc(void) {
@@ -397,6 +464,7 @@ text_data printf(const char *str, ...) {
 		p_str++;
     }
 
+    present();
 	va_end(args);
 	return td;
 }
