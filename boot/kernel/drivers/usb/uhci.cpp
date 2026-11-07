@@ -87,6 +87,7 @@ uhci_controller::uhci_controller() {
     prog_if = 0x00;
     type = IO;
     controller = {0};
+    controller_type = UHCI;
     construct_controller();
 }
 
@@ -1067,6 +1068,8 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
 void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+
     if (!maxpacketsize || length != packet.wLength || length > 4096 ||
         (length && !(packet.BmRequestType & IN)))
         return nullptr;
@@ -1527,7 +1530,9 @@ bool uhci_controller::unlink_qh(uhci_endpoint_state &ep, TimerSource &timer) {
 }
 
 
-usb_transfer_result uhci_controller::usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout) {
+usb_transfer_result uhci_controller::start_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
+    (void)timer;
+
     usb_transfer_result transfer = {0};
 
     transfer.controller_type = UHCI;
@@ -1539,13 +1544,19 @@ usb_transfer_result uhci_controller::usb_transfer(u32 endpoint_address, void *bu
     u8 interface_index = (u8)((endpoint_address & 0x00FF00) >> 8);
     u8 endpoint_index = (u8)(endpoint_address & 0x0000FF);
 
+    if (controller.needs_reinit || (endpoint_address >> 24) || !ports ||
+        port_index >= ports_count) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
     if (!ports[port_index].connected) {
         printf("UHCI: error: invalid device port 0x%b not connected\n", ports[port_index].port_number);
         transfer.status_code = NOT_CONNECTED;
         return transfer; // return 1 for failure
     }
 
-    if (!ports[port_index].device->discovered) {
+    if (!ports[port_index].device || !ports[port_index].device->discovered) {
         printf("UHCI: error: the device on port 0x%b was not discovered\n", ports[port_index].port_number);
         transfer.status_code = NOT_DISCOVERED;
         return transfer; 
@@ -1564,14 +1575,27 @@ usb_transfer_result uhci_controller::usb_transfer(u32 endpoint_address, void *bu
         return transfer;
     }
 
+    if (!state->interfaces || interface_index >= state->interfaces_count ||
+        !state->interfaces[interface_index].endpoints ||
+        endpoint_index >= state->interfaces[interface_index].endpoint_count) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
     uhci_endpoint_state &ep = state->interfaces[interface_index].endpoints[endpoint_index];
+    if (!anchor || ep.scheduled || !ep.qh || !ep.td || !ep.max_packet_size ||
+        ep.max_packet_size > (ep.speed == USB_SPEED_LOW ? 8 : 64) ||
+        !(ep.endpoint_address & 0x0fu)) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
 
     if (length > ep.max_packet_size) {
         transfer.status_code = INVALID_LENGTH;
         return transfer;
     }
 
-    if (length > 0 && buffer == nullptr) {
+    if (length > 0 && !(ep.endpoint_address & 0x80u) && buffer == nullptr) {
         transfer.status_code = FAILED;
         return transfer;
     }
@@ -1608,63 +1632,102 @@ usb_transfer_result uhci_controller::usb_transfer(u32 endpoint_address, void *bu
     ep.qh->element_link = ep.td_phys;
     asm volatile("mfence" ::: "memory");
 
-    if (!link_qh(ep, timer)) {
-        printf("UHCI: linking error at endpoint address 0x%ux\n", endpoint_address);
-        transfer.status_code = LINK_ERROR;
-        return transfer;
-    }
+    async.endpoint = &ep;
+    async.dma_buffer = dma_buffer;
+    async.in = in;
+    const u16 base = (u16)controller.io_base;
+    async.saved_command = inw(base + UHCI_USBCMD);
+    outw(base + UHCI_USBCMD, (u16)(async.saved_command & ~1u));
+    transfer_phase(1);
+    transfer.status_code = TRANSFER_PENDING;
+    return transfer;
+}
 
-    volatile uhci_td *td = ep.td;
-
-    for (u32 i = 0; i < timeout; i++) {
-        asm volatile("pause");
-        wait_ms(timer, 1);
-    }
-
-    if (!unlink_qh(ep, timer)) {
-        printf("UHCI: unlink error at endpoint address 0x%ux\n", endpoint_address);
-        transfer.status_code = UNLINK_ERROR;
-        return transfer;
-    }
-
-    constexpr u32 terminal_errors =
-        (1u << 17) | // Bit stuff
-        (1u << 18) | // CRC/timeout
-        (1u << 20) | // Babble
-        (1u << 21) | // Buffer error
-        (1u << 22);  // Stall
-
-
-    u32 status = td->status;
-
-    if (status & uhci::td::active) {
-        printf("UHCI: timeout occured while doing a transfer on endpoint address 0x%ux\n", endpoint_address);
-        transfer.status_code = TIMEOUT;
-        return transfer;
-    } else if (status & terminal_errors) {
-        printf("UHCI: USB transfer at endpoint address 0x%ux failed\n", endpoint_address);
-        transfer.status_code = FAILED;
-        return transfer;
-    } else {
-        u32 actual = ((status & 0x7ffu) + 1u) & 0x7ffu;
-
-        ep.data_toggle ^= 1u;
-
-        if (actual > length) {
-            transfer.status_code = FAILED;
-            transfer.actual_length = 0;
-            return transfer;
+void uhci_controller::advance_transfer(TimerSource &timer) {
+    auto &ep = *(uhci_endpoint_state *)async.endpoint;
+    const u16 base = (u16)controller.io_base;
+    auto fail = [&](int code) {
+        controller.needs_reinit = true;
+        transfer_complete(code);
+    };
+    if (controller.needs_reinit) { fail(FAILED); return; }
+    switch (async.phase) {
+    case 1:
+        if (!(inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
+            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            return;
         }
-
-        if (in && actual)
-            memcpy(buffer, dma_buffer, actual);
-
+        ep.qh->head_link = anchor->head_link;
+        asm volatile("mfence" ::: "memory");
+        anchor->head_link = ep.qh_phys | 2u;
+        ep.scheduled = true;
+        asm volatile("mfence" ::: "memory");
+        outw(base + UHCI_USBCMD, (u16)(async.saved_command | 1u));
+        transfer_phase(2);
+        return;
+    case 2:
+        if (inw(base + UHCI_USBSTS) & UHCI_STS_HCH) {
+            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            return;
+        }
+        transfer_phase(3);
+        return;
+    case 3:
+        if (((volatile uhci_td *)ep.td)->status & uhci::td::active) {
+            if (!async.cancel && !transfer_expired(timer)) return;
+        }
+        outw(base + UHCI_USBCMD, (u16)(inw(base + UHCI_USBCMD) & ~1u));
+        transfer_phase(4);
+        return;
+    case 4: {
+        if (!(inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
+            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            return;
+        }
+        volatile uhci_qh *previous = anchor;
+        bool found = false;
+        for (u32 i = 0; i < 4096; ++i) {
+            const u32 link = previous->head_link;
+            if ((link & 1u) || !(link & 2u)) break;
+            const u32 phys = link & ~15u;
+            if (phys == ep.qh_phys) {
+                previous->head_link = ep.qh->head_link;
+                found = true;
+                break;
+            }
+            u64 address = dma_phys_to_virt(phys);
+            if (!address || address == 1) break;
+            previous = (volatile uhci_qh *)address;
+        }
+        if (!found) { fail(UNLINK_ERROR); return; }
+        ep.scheduled = false;
+        ep.qh->head_link = 1;
         ep.qh->element_link = 1;
-
-        transfer.actual_length = actual;
-        transfer.hardware_status = status;
-        transfer.status_code = SUCCESS;
-        return transfer;
+        asm volatile("mfence" ::: "memory");
+        outw(base + UHCI_USBCMD, (u16)async.saved_command);
+        transfer_phase(6);
+        return;
     }
-
+    case 6: {
+        if ((async.saved_command & 1u) && (inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
+            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            return;
+        }
+        const u32 status = ((volatile uhci_td *)ep.td)->status;
+        async.result.hardware_status = status;
+        if (status & uhci::td::active) {
+            transfer_complete(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+        } else if (status & 0x00760000u) { // Terminal errors, excluding NAK.
+            fail(FAILED);
+        } else {
+            ep.data_toggle ^= 1u;
+            const u32 actual = ((status & 0x7ffu) + 1u) & 0x7ffu;
+            if (actual > async.length) { fail(INVALID_LENGTH); return; }
+            async.result.actual_length = actual;
+            transfer_complete(TRANSFER_SUCCESS);
+        }
+        return;
+    }
+    default: fail(FAILED); return;
+    }
 }

@@ -6,6 +6,7 @@
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
 #include "drivers/usb/ehci.hpp"
+#include "drivers/usb/periodic.hpp"
 #include "drivers/display/vga.h"
 #include "x86-64/memory/kmalloc.h"
 
@@ -46,6 +47,7 @@ ehci_controller::ehci_controller() { // initialize the ehci_controller fields
     subclass = 0x03;
     prog_if = 0x20;
     type = MMIO;
+    controller_type = EHCI;
     construct_controller();
 }
 
@@ -1156,6 +1158,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
     device.descriptor = desc;
     device.discovered = valid_descriptor;
+    device.speed = USB_SPEED_HIGH;
     free_dma(alloc.virtual_address);
     return device;
 }
@@ -1183,6 +1186,8 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 #define EHCI_QH_S_MASK(v)     ((u32)(v) & 0xFF)
 
 void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
+    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+
     if (!maxpacketsize || length != packet.wLength || length > 4096 ||
         (length && !(packet.BmRequestType & IN)))
         return nullptr;
@@ -1401,7 +1406,8 @@ ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 e
         return endpoint;
     }
 
-    if (alloc.physical_address > 0xFFFFFFFF) {
+    if (alloc.physical_address >= 0x100000000ULL ||
+        size > 0x100000000ULL - alloc.physical_address) {
         printf("EHCI: configure_endpoint allocation physical address too big\n");
         free_dma(alloc.virtual_address);
         alloc.status = 1;
@@ -1421,7 +1427,7 @@ ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 e
     u32 qh_phys = (u32)alloc.physical_address;
     u32 dummy_qtd_phys = qh_phys + sizeof(ehci_qh);
     endpoint.data_qtd_phys = dummy_qtd_phys + sizeof(ehci_qtd);
-    endpoint.buffer_phys = dummy_qtd_phys + (sizeof(ehci_qtd) << 1); 
+    endpoint.buffer_phys = dummy_qtd_phys + (sizeof(ehci_qtd) << 1);
 
     ehci_qh *qh = (ehci_qh *)alloc.virtual_address;
     ehci_qtd *dummy_qtd = (ehci_qtd *)(alloc.virtual_address + sizeof(ehci_qh));
@@ -1433,9 +1439,47 @@ ehci_endpoint_state ehci_controller::configure_endpoint(usb_device device, u16 e
     endpoint.qh = qh;
     endpoint.dummy_qtd = dummy_qtd;
 
+    *qh = {};
+    *dummy_qtd = {};
+    *endpoint.data_qtd = {};
+    qh->horizontal_link = 1;
+    qh->next_qtd = 1;
+    qh->alternate_next_qtd = 1;
+    dummy_qtd->next_qtd = 1;
+    dummy_qtd->alternate_next_qtd = 1;
+    endpoint.data_qtd->next_qtd = 1;
+    endpoint.data_qtd->alternate_next_qtd = 1;
+
     endpoint.scheduled = false;
     endpoint.mult = (raw >> 11) & 0x03;
-    
+
+    *qh = {};
+    *dummy_qtd = {};
+    *endpoint.data_qtd = {};
+
+    qh->horizontal_link = 1;
+    qh->next_qtd = 1;
+    qh->alternate_next_qtd = 1;
+
+    qh->endpoint_characteristics =
+        ((u32)endpoint.device_address & 0x7fu) |
+        ((u32)(endpoint.endpoint_address & 0x0fu) << 8) |
+        (2u << 12) | // EHCI encoding: high speed.
+        ((u32)endpoint.max_packet_size << 16);
+    // DTC=0: QH overlay maintains the data toggle.
+    // H=0: only async_head is the reclamation head.
+
+    qh->endpoint_capabilities = 1u << 30; // Mult=1.
+
+
+    dummy_qtd->next_qtd = 1;
+    dummy_qtd->alternate_next_qtd = 1;
+
+
+    endpoint.data_qtd->next_qtd = 1;
+    endpoint.data_qtd->alternate_next_qtd = 1;
+
+
     return endpoint;
 }
 
@@ -1464,27 +1508,95 @@ int ehci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
 }
 
 #define ASS (1u << 15)
+#define ASE (1u << 5)
+
+static constexpr u32 EHCI_PSE = 1u << 4;
+static constexpr u32 EHCI_PSS = 1u << 14;
+
+static bool wait_periodic_state(volatile ehci_op_regs_t *op, bool enabled,
+                                TimerSource &timer) {
+    for (u32 elapsed = 0; elapsed < 100; ++elapsed) {
+        if (((op->status & EHCI_PSS) != 0) == enabled) return true;
+        wait_ms(timer, 1);
+    }
+    return ((op->status & EHCI_PSS) != 0) == enabled;
+}
+
+bool ehci_controller::link_interrupt_qh(ehci_endpoint_state &ep, TimerSource &timer) {
+    const auto plan = usb_periodic::high_speed_plan(ep.interval);
+    if (!Frame_list || !plan.frames || ep.speed != USB_SPEED_HIGH || ep.mult)
+        return false;
+    auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
+    auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
+    const bool enabled = (op->command & EHCI_PSE) != 0;
+    if (!wait_periodic_state(op, enabled, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+    op->command &= ~EHCI_PSE;
+    (void)op->command;
+    if (!wait_periodic_state(op, false, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+    ep.qh->horizontal_link = 1;
+    if (!usb_periodic::install(Frame_list, 1024, plan.frames, 1, ep.qh_phys | 2u)) {
+        if (enabled) op->command |= EHCI_PSE;
+        return false;
+    }
+    asm volatile("mfence" ::: "memory");
+    ep.scheduled = true;
+    op->command |= EHCI_PSE;
+    (void)op->command;
+    if (!wait_periodic_state(op, true, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+    return true;
+}
+
+bool ehci_controller::unlink_interrupt_qh(ehci_endpoint_state &ep, TimerSource &timer) {
+    auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
+    auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
+    if (!wait_periodic_state(op, (op->command & EHCI_PSE) != 0, timer)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+    op->command &= ~EHCI_PSE;
+    (void)op->command;
+    if (!wait_periodic_state(op, false, timer) ||
+        !usb_periodic::remove(Frame_list, 1024, 1, ep.qh_phys | 2u)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+    asm volatile("mfence" ::: "memory");
+    ep.scheduled = false;
+    return true; // Sole periodic request removed; leave PSE disabled.
+}
 
 bool ehci_controller::link_qh(ehci_endpoint_state &ep, TimerSource &timer) {
-    if (!ep.qh || ep.scheduled || ep.transfer_type != 2)
+    if (!ep.qh || ep.scheduled || controller.needs_reinit ||
+        (ep.transfer_type != 2 && ep.transfer_type != 3))
         return false;
+
+    if (ep.transfer_type == 3) return link_interrupt_qh(ep, timer);
 
     volatile ehci_cap_regs_t *cap = (volatile ehci_cap_regs_t *)controller.io_base;
     volatile ehci_op_regs_t *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
 
-    u32 ase = op->command & 0x20; // save bit 5
 
+    bool enabled = (op->command & ASE) != 0;
     for (u32 elapsed = 0; elapsed < 100; elapsed++) { // 100 ms timeout
-        if (op->status & ASS)
+        if (((op->status & ASS) != 0) == enabled)
             break;
 
         wait_ms(timer, 1);
     }
 
-    if (!(op->status & ASS))
+    if (((op->status & ASS) != 0) != enabled)
         return false;
 
-    op->command &= ~ase;
+    op->command &= ~ASE;
 
     for (u32 elapsed = 0; elapsed < 100; elapsed++) {
         if (!(op->status & ASS))
@@ -1501,7 +1613,9 @@ bool ehci_controller::link_qh(ehci_endpoint_state &ep, TimerSource &timer) {
     async_head->horizontal_link = ep.qh_phys | 0x02u;
     ep.scheduled = true;
 
-    op->command |= ase;
+    asm volatile("mfence" ::: "memory");
+
+    op->command |= ASE;
 
     for (u32 elapsed = 0; elapsed < 100; elapsed++) { // 100 ms timeout
         if (op->status & ASS)
@@ -1514,4 +1628,349 @@ bool ehci_controller::link_qh(ehci_endpoint_state &ep, TimerSource &timer) {
         return false;
 
     return true;
+}
+
+
+bool ehci_controller::unlink_qh(ehci_endpoint_state &ep, TimerSource &timer) {
+    if (!ep.scheduled)
+        return true;
+
+    if (!async_head || !ep.qh ||
+        (ep.transfer_type != 2 && ep.transfer_type != 3) || controller.needs_reinit)
+        return false;
+
+    if (ep.transfer_type == 3) return unlink_interrupt_qh(ep, timer);
+
+    auto *cap = reinterpret_cast<volatile ehci_cap_regs_t *>(controller.io_base);
+    auto *op = reinterpret_cast<volatile ehci_op_regs_t *>(controller.io_base + cap->cap_length);
+
+    auto wait_state = [&](bool enabled) {
+        for (u32 elapsed = 0; elapsed < 100; elapsed++) {
+            if (((op->status & ASS) != 0) == enabled)
+                return true;
+            wait_ms(timer, 1);
+        }
+        return ((op->status & ASS) != 0) == enabled;
+    };
+
+    bool was_enabled = (op->command & ASE) != 0;
+    if (!wait_state(was_enabled)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+
+    op->command &= ~ASE;
+    (void)op->command;
+
+    if (!wait_state(false)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+
+    volatile ehci_qh *previous = async_head;
+    bool removed = false;
+
+    for (u32 visited = 0; visited < 4096; ++visited) {
+        u32 link = previous->horizontal_link;
+
+        // Must be a valid QH pointer: T=0, Type=01.
+        if ((link & 1u) || (link & 6u) != 2u)
+            break;
+
+        u32 next_phys = link & ~0x1fu;
+
+        if (next_phys == ep.qh_phys) {
+            previous->horizontal_link = ep.qh->horizontal_link;
+            ep.scheduled = false;
+            removed = true;
+            break;
+        }
+
+        if (next_phys == async_head_phys)
+            break; // Completed the circular list without finding it.
+
+        u64 next_virtual = dma_phys_to_virt(next_phys);
+        if (next_virtual == 0 || next_virtual == 1)
+            break;
+
+        previous =
+            reinterpret_cast<volatile ehci_qh *>(next_virtual);
+    }
+
+    asm volatile("mfence" ::: "memory");
+
+    if (!removed) {
+        controller.needs_reinit = true;
+        return false; // Leave the schedule disabled for recovery.
+    }
+
+    if (was_enabled)
+        op->command |= ASE;
+
+    (void)op->command;
+
+    if (!wait_state(was_enabled)) {
+        controller.needs_reinit = true;
+        return false;
+    }
+
+    return true;
+}
+
+
+usb_transfer_result ehci_controller::start_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
+    (void)timer;
+
+    usb_transfer_result transfer = {0};
+
+    transfer.controller_type = EHCI;
+    transfer.controller_index = controller.index;
+
+    transfer.endpoint_handle = endpoint_address;
+
+    u8 port_index = (u8)((endpoint_address & 0xFF0000) >> 16);
+    u8 interface_index = (u8)((endpoint_address & 0x00FF00) >> 8);
+    u8 endpoint_index = (u8)(endpoint_address & 0x0000FF);
+
+    if ((endpoint_address >> 24) || !ports || port_index >= ports_count) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    if (!ports[port_index].connected) {
+        printf("EHCI: error: invalid device port 0x%b not connected\n", ports[port_index].port_number);
+        transfer.status_code = NOT_CONNECTED;
+        return transfer; // return 1 for failure
+    }
+
+    if (!ports[port_index].device || !ports[port_index].device->discovered) {
+        printf("EHCI: error: the device on port 0x%b was not discovered\n", ports[port_index].port_number);
+        transfer.status_code = NOT_DISCOVERED;
+        return transfer;
+    }
+
+    u8 device_address = ports[port_index].device->address;
+    ehci_address_state *state = nullptr;
+    for (u8 i = 0; i < state_count; i++) {
+        if (states[i].device_address == device_address)
+            state = &states[i];
+    }
+
+    if (!state) {
+        printf("EHCI: error: no matching address_state found for device_address 0x%b\n", device_address);
+        transfer.status_code = NO_ADDRESS;
+        return transfer;
+    }
+
+    if (!state->interfaces || interface_index >= state->interfaces_count ||
+        !state->interfaces[interface_index].endpoints ||
+        endpoint_index >= state->interfaces[interface_index].endpoint_count) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    ehci_endpoint_state &ep = state->interfaces[interface_index].endpoints[endpoint_index];
+
+    if (controller.needs_reinit || ep.scheduled || ep.speed != USB_SPEED_HIGH || !ep.qh ||
+        !ep.data_qtd || !ep.dummy_qtd || !ep.buffer ||
+        ep.max_packet_size == 0 ||
+        ep.max_packet_size > (ep.transfer_type == 3 ? 1024 : 512) ||
+        !(ep.endpoint_address & 0x0fu)) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    if (length > ep.max_packet_size) {
+        transfer.status_code = INVALID_LENGTH;
+        return transfer;
+    }
+
+    if (length > 0 && !(ep.endpoint_address & 0x80u) && buffer == nullptr) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    // Split transactions and high-bandwidth endpoints are not supported.
+    if ((ep.transfer_type != 2 && ep.transfer_type != 3) ||
+        (ep.transfer_type == 3 && (ep.mult ||
+         !usb_periodic::high_speed_plan(ep.interval).frames))) {
+        transfer.status_code = FAILED;
+        return transfer;
+    }
+
+    const bool in = (ep.endpoint_address & 0x80u) != 0;
+
+    if (!in && length)
+        memcpy(ep.buffer, buffer, length);
+
+    // QH-managed toggle (DTC=0): preserve it across detached submissions.
+    const u32 toggle = ep.qh->token & (1u << 31);
+    *ep.qh = {};
+    ep.qh->horizontal_link = 1;
+    ep.qh->endpoint_characteristics =
+        ((u32)ep.device_address & 0x7fu) |
+        ((u32)(ep.endpoint_address & 0x0fu) << 8) |
+        (2u << 12) | // EHCI high-speed encoding; not usb_speed's value.
+        ((u32)ep.max_packet_size << 16);
+    ep.qh->endpoint_capabilities = (1u << 30) |
+        (ep.transfer_type == 3 ? usb_periodic::high_speed_plan(ep.interval).smask : 0);
+    ep.qh->alternate_next_qtd = 1;
+    ep.qh->token = toggle;
+
+    *ep.dummy_qtd = {};
+    ep.dummy_qtd->next_qtd = 1;
+    ep.dummy_qtd->alternate_next_qtd = 1;
+
+    *ep.data_qtd = {};
+    ep.data_qtd->next_qtd = 1;
+    ep.data_qtd->alternate_next_qtd = 1;
+    ep.data_qtd->token =
+        (1u << 7) | // Active.
+        ((in ? 1u : 0u) << 8) |
+        (3u << 10) | // CERR.
+        (length << 16);
+
+    if (length) {
+        ep.data_qtd->buffer[0] = ep.buffer_phys;
+        const u64 last = (u64)ep.buffer_phys + length - 1;
+        for (u32 page = 1; page < 5; ++page) {
+            const u64 address = ((u64)ep.buffer_phys & ~0xfffULL) +
+                                ((u64)page << 12);
+            if (address <= last)
+                ep.data_qtd->buffer[page] = (u32)address;
+        }
+    }
+
+    asm volatile("mfence" ::: "memory");
+    ep.qh->next_qtd = ep.data_qtd_phys;
+    asm volatile("mfence" ::: "memory");
+
+    auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
+    auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
+    async.endpoint = &ep;
+    async.dma_buffer = ep.buffer;
+    async.in = in;
+    async.saved_command = op->command;
+    transfer_phase(10); // Wait for a prior schedule transition, without sleeping.
+    transfer.status_code = TRANSFER_PENDING;
+    return transfer;
+}
+
+void ehci_controller::advance_transfer(TimerSource &timer) {
+    auto &ep = *(ehci_endpoint_state *)async.endpoint;
+    auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
+    auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
+    const bool periodic = ep.transfer_type == 3;
+    const u32 enable = periodic ? EHCI_PSE : ASE;
+    const u32 running = periodic ? EHCI_PSS : ASS;
+    auto fail = [&](int code) {
+        controller.needs_reinit = true;
+        transfer_complete(code);
+    };
+    if (controller.needs_reinit) { fail(FAILED); return; }
+    switch (async.phase) {
+    case 10:
+        if (((op->status & running) != 0) != ((op->command & enable) != 0)) {
+            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            return;
+        }
+        op->command &= ~enable;
+        (void)op->command;
+        transfer_phase(1);
+        return;
+    case 1:
+        if (op->status & running) {
+            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            return;
+        }
+        if (periodic) {
+            const auto plan = usb_periodic::high_speed_plan(ep.interval);
+            ep.qh->horizontal_link = 1;
+            if (!usb_periodic::install(Frame_list, 1024, plan.frames, 1, ep.qh_phys | 2u)) {
+                fail(LINK_ERROR);
+                return;
+            }
+        } else {
+            ep.qh->horizontal_link = async_head->horizontal_link;
+            asm volatile("mfence" ::: "memory");
+            async_head->horizontal_link = ep.qh_phys | 2u;
+        }
+        ep.scheduled = true;
+        asm volatile("mfence" ::: "memory");
+        op->command |= enable;
+        (void)op->command;
+        transfer_phase(2);
+        return;
+    case 2:
+        if (!(op->status & running)) {
+            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            return;
+        }
+        transfer_phase(3);
+        return;
+    case 3:
+        if (((volatile ehci_qtd *)ep.data_qtd)->token & (1u << 7)) {
+            if (!async.cancel && !transfer_expired(timer)) return;
+        }
+        op->command &= ~enable;
+        (void)op->command;
+        transfer_phase(4);
+        return;
+    case 4:
+        if (op->status & running) {
+            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            return;
+        }
+        if (periodic) {
+            if (!usb_periodic::remove(Frame_list, 1024, 1, ep.qh_phys | 2u)) {
+                fail(UNLINK_ERROR);
+                return;
+            }
+        } else {
+            volatile ehci_qh *previous = async_head;
+            bool found = false;
+            for (u32 i = 0; i < 4096; ++i) {
+                u32 link = previous->horizontal_link;
+                if ((link & 1u) || (link & 6u) != 2u) break;
+                u32 phys = link & ~0x1fu;
+                if (phys == ep.qh_phys) {
+                    previous->horizontal_link = ep.qh->horizontal_link;
+                    found = true;
+                    break;
+                }
+                if (phys == async_head_phys) break;
+                u64 address = dma_phys_to_virt(phys);
+                if (!address || address == 1) break;
+                previous = (volatile ehci_qh *)address;
+            }
+            if (!found) { fail(UNLINK_ERROR); return; }
+        }
+        ep.scheduled = false;
+        asm volatile("mfence" ::: "memory");
+        op->command = (op->command & ~enable) | (async.saved_command & enable);
+        (void)op->command;
+        transfer_phase(6);
+        return;
+    case 6: {
+        if (((op->status & running) != 0) != ((async.saved_command & enable) != 0)) {
+            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            return;
+        }
+        const u32 token = ((volatile ehci_qtd *)ep.data_qtd)->token;
+        async.result.hardware_status = token;
+        if (token & (1u << 7)) {
+            // Retain controller-owned DMA/toggle state for recovery.
+            fail(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+        } else if (token & 0x7cu) {
+            fail(FAILED);
+        } else {
+            const u32 remaining = (token >> 16) & 0x7fffu;
+            if (remaining > async.length) { fail(INVALID_LENGTH); return; }
+            async.result.actual_length = async.length - remaining;
+            transfer_complete(TRANSFER_SUCCESS);
+        }
+        return;
+    }
+    default: fail(FAILED); return;
+    }
 }

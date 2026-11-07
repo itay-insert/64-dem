@@ -32,6 +32,8 @@ const char *codes[] = {
 
 extern u64 timeradd;
 
+u64 keyboard_usb_address = 0;
+
 typedef struct {
     u8 class_code;
     u8 subclass;
@@ -432,10 +434,28 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
                        iclass, isubclass, iprotocol);
 
                 if (iclass == 0x03 && isubclass == 0x01) {
-                    if (iprotocol == 0x01)
+                    if (iprotocol == 0x01) {
                         printf("USB.%s.%u:%u:%u.%u: HID keyboard found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
-                    else if (iprotocol == 0x02)
+                        u64 high = ((controller_type - 1) << 32);
+                        u64 mid_high = controller.index << 24;
+                        u64 mid_mid = (port - 1) << 16;
+                        u64 mid_low = i << 8;
+                        u64 low = 0;
+                        if (Device.interfaces[i].descriptor.bAlternateSetting == 0) {
+                            for (u8 j = 0; j < Device.interfaces[i].endpoint_count; j++) {
+                                const usb_endpoint &ep = Device.interfaces[i].endpoints[j];
+
+                                if (ep.transfer_type == 3 && (ep.address & 0x80)) {
+                                    low = j;
+                                    break;
+                                }
+
+                            }
+                        }
+                        keyboard_usb_address = (high | mid_high | mid_mid | mid_low);
+
+                    } else if (iprotocol == 0x02)
                         printf("USB.%s.%u:%u:%u.%u: HID mouse found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
 

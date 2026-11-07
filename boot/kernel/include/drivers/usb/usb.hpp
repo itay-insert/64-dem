@@ -43,8 +43,13 @@
 #define TIMEOUT 6
 #define FAILED 7
 #define INVALID_LENGTH 8
+#define TRANSFER_PENDING 9
+#define TRANSFER_BUSY 10
+#define INVALID_REQUEST 11
+#define TRANSFER_CANCELLED 12
 
 typedef struct {
+    u64 request_id;
     u32 hardware_status;
     u32 actual_length;
     u8 controller_index;
@@ -205,14 +210,49 @@ typedef struct {
     usb_device *device = nullptr;
 } usb_port_descriptor;
 
+// Internal state of the controller's single outstanding packet. Caller buffers
+// are never retained: OUT is copied at submission, IN is copied at collection.
+struct usb_async_request {
+    usb_transfer_result result = {};
+    void *endpoint = nullptr;
+    void *dma_buffer = nullptr;
+    u32 length = 0;
+    u32 timeout = 0;
+    u32 phase = 0;
+    u32 saved_command = 0;
+    u32 frame = 0;
+    u32 retired = 0;
+    u64 elapsed = 0;
+    u64 phase_elapsed = 0;
+    u32 previous_tick = 0;
+    bool active = false;
+    bool completed = false;
+    bool in = false;
+    bool cancel = false;
+};
+
 class usb_controller {
+    protected:
+        usb_async_request async;
+        unsigned async_api_busy = 0;
+        u64 next_request_id = 0;
+        virtual usb_transfer_result start_transfer(u32 endpoint_handle,
+            void *buffer, u32 length, TimerSource &timer) = 0;
+        virtual void advance_transfer(TimerSource &timer) = 0;
+        bool transfer_expired(TimerSource &timer) const;
+        bool phase_expired(TimerSource &timer, u32 milliseconds) const;
+        void transfer_phase(u32 phase);
+        void transfer_complete(int status);
+        usb_transfer_result transfer_result(int status, u32 handle = 0) const;
     public:
+        bool usb_transfer_pending() const { return async.active; }
         char vendor[5];
         usb_controller_t controller;
         u8 class_code;
         u8 subclass;
         u8 prog_if;
         u8 type;
+        u8 controller_type;
         int status;
         usb_port_descriptor *ports;
         int ports_count;
@@ -229,7 +269,15 @@ class usb_controller {
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
         virtual int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer) = 0;
-        virtual usb_transfer_result usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout) = 0;
+        // Foreground/service-context API; read/cancel progress hardware without
+        // sleeping. timeout=0 means no packet deadline for async submissions.
+        usb_transfer_result usb_submit_transfer(u32 endpoint_handle, const void *out_buffer,
+            u32 length, TimerSource &timer, u32 timeout = 0);
+        usb_transfer_result usb_read_transfer(u64 request_id, void *buffer,
+            u32 capacity, TimerSource &timer);
+        usb_transfer_result usb_cancel_transfer(u64 request_id, TimerSource &timer);
+        virtual usb_transfer_result usb_transfer(u32 endpoint_address, void *buffer,
+            u32 length, TimerSource &timer, u32 timeout);
         configuration_descriptor get_config(u8 address, TimerSource &timer, u32 maxpacketsize, u8 port);
 
 };

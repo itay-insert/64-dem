@@ -38,11 +38,12 @@ xhci_controller::xhci_controller() {
     prog_if = 0x30;
     type = MMIO;
     controller = {0};
+    controller_type = xHCI;
     construct_controller();
 }
 
 static bool xhci_wait_clear(volatile u32 *reg, u32 mask) {
-    u32 attempts = TIMEOUT;
+    u32 attempts = XHCI_POLL_LIMIT;
 
     while (attempts--) {
         if ((*reg & mask) == 0)
@@ -57,7 +58,7 @@ static bool xhci_wait_clear(volatile u32 *reg, u32 mask) {
 
 
 static bool xhci_wait_set(volatile u32 *reg, u32 mask)  {
-    u32 attempts = TIMEOUT;
+    u32 attempts = XHCI_POLL_LIMIT;
 
     while (attempts--) {
         if ((*reg & mask) == mask)
@@ -1619,6 +1620,8 @@ usb_device xhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 void *xhci_controller::usb_send_packet(usb_setup_packet packet,
                                        u32 maxpacketsize, u64 length,
                                        u8 address, TimerSource &timer, u8 port) {
+    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+
     if (controller.needs_reinit || !slots || !doorbells || !dcbaa ||
         port == 0 || port > ports_count || length != packet.wLength ||
         length > 4096)
@@ -1757,6 +1760,144 @@ void *xhci_controller::usb_send_packet(usb_setup_packet packet,
         memcpy(response, (const void *)data_dma.virtual_address, length);
     free_dma(data_dma.virtual_address);
     return response;
+}
+
+usb_transfer_result xhci_controller::start_transfer(
+    u32 handle, void *buffer, u32 length, TimerSource &timer)
+{
+    (void)timer;
+
+    usb_transfer_result result = {};
+    result.controller_type = xHCI;
+    result.controller_index = controller.index;
+    result.endpoint_handle = handle;
+    result.status_code = FAILED;
+
+    const u32 port_index = (handle >> 16) & 0xffu;
+    const u32 interface_index = (handle >> 8) & 0xffu;
+    const u32 endpoint_index = handle & 0xffu;
+    if ((handle >> 24) || controller.needs_reinit || !ports || !slots ||
+        !dcbaa || !doorbells || port_index >= (u32)ports_count)
+        return result;
+    usb_port_descriptor &port = ports[port_index];
+    if (!port.connected) {
+        result.status_code = NOT_CONNECTED;
+        return result;
+    }
+    usb_device *device = port.device;
+    if (!device || !device->discovered) {
+        result.status_code = NOT_DISCOVERED;
+        return result;
+    }
+    if (!device->interfaces || interface_index >= device->usb_interface_count)
+        return result;
+    const usb_interface &interface = device->interfaces[interface_index];
+    if (interface.descriptor.bAlternateSetting != 0 || !interface.endpoints ||
+        endpoint_index >= interface.endpoint_count)
+        return result;
+    const usb_endpoint &endpoint = interface.endpoints[endpoint_index];
+    const bool in = (endpoint.address & 0x80u) != 0;
+    const u32 number = endpoint.address & 0x0fu;
+    if (!number || (endpoint.address & 0x70u) ||
+        (endpoint.transfer_type != 2 && endpoint.transfer_type != 3) ||
+        !endpoint.max_packet_size || (length && !in && !buffer))
+        return result;
+    if (length > endpoint.max_packet_size) {
+        result.status_code = INVALID_LENGTH;
+        return result;
+    }
+    if (!port.port_number || port.port_number > ports_count)
+        return result;
+    usb_slot &slot = slots[port.port_number - 1];
+    const u32 dci = number * 2u + (in ? 1u : 0u);
+    xhci_endpoint_ring &endpoint_ring = slot.endpoint_rings[dci];
+    const u32 expected_type = endpoint.transfer_type == 2
+        ? (in ? 6u : 2u) : (in ? 7u : 3u);
+    if (!slot.slot_id || slot.address != device->address ||
+        dcbaa[slot.slot_id] != slot.output_context_physical ||
+        !endpoint_ring.configured || !endpoint_ring.dma.virtual_address ||
+        endpoint_ring.endpoint_type != expected_type ||
+        endpoint_ring.endpoint_address != endpoint.address ||
+        endpoint_ring.enqueue_index >= EP0_LINK ||
+        __atomic_load_n(&transfer_waiting, __ATOMIC_ACQUIRE))
+        return result;
+
+    // Requests are serialized with the existing
+    // controller-wide event waiter. Keep DMA owned by the endpoint on timeout.
+    if (!endpoint_ring.packet_dma.virtual_address &&
+        !xhci_dma_alloc(&endpoint_ring.packet_dma,
+                        endpoint.max_packet_size, addr64))
+        return result;
+    const dma_ret &packet = endpoint_ring.packet_dma;
+    // One Normal TRB must not cross a 64 KiB physical boundary.
+    if (length && ((packet.physical_address & 0xffffu) + length > 0x10000u))
+        return result;
+    if (!in && length)
+        memcpy((void *)packet.virtual_address, buffer, length);
+
+    const u32 index = endpoint_ring.enqueue_index;
+    const u32 cycle = endpoint_ring.cycle;
+    auto *ring = (XhciTrb *)endpoint_ring.dma.virtual_address;
+    const u64 trb_phys = endpoint_ring.dma.physical_address + index * sizeof(XhciTrb);
+    transfer_slot = slot.slot_id;
+    transfer_endpoint = (u8)dci;
+    transfer_trb_pointer = trb_phys;
+    __atomic_store_n(&transfer_completed, false, __ATOMIC_RELAXED);
+    __atomic_store_n(&transfer_waiting, true, __ATOMIC_RELEASE);
+
+    // Publish the cycle bit last. Direction comes from the endpoint context.
+    ring[index].d0 = (u32)packet.physical_address;
+    ring[index].d1 = (u32)(packet.physical_address >> 32);
+    ring[index].d2 = length;
+    asm volatile("mfence" ::: "memory");
+    ring[index].d3 = TRB_TYPE(1) | TRB_IOC | (in ? TRB_ISP : 0) | cycle;
+    if (index + 1 == EP0_LINK)
+        ring[EP0_LINK].d3 = TRB_TYPE(6) | (1u << 1) | cycle;
+    asm volatile("mfence" ::: "memory");
+    doorbells[slot.slot_id] = dci;
+
+    async.endpoint = &endpoint_ring;
+    async.dma_buffer = (void *)packet.virtual_address;
+    async.in = in;
+    transfer_phase(3);
+    result.status_code = TRANSFER_PENDING;
+    return result;
+}
+
+void xhci_controller::advance_transfer(TimerSource &timer) {
+    xhci_process_events();
+    if (!__atomic_load_n(&transfer_completed, __ATOMIC_ACQUIRE)) {
+        if (async.cancel || transfer_expired(timer) || controller.needs_reinit) {
+            // Stop Endpoint recovery is not implemented. Quarantine DMA and
+            // reject further operations rather than reusing an owned TRB.
+            controller.needs_reinit = true;
+            __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
+            transfer_complete(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+        }
+        return;
+    }
+    auto &endpoint_ring = *(xhci_endpoint_ring *)async.endpoint;
+    const XhciTrb completion = transfer_completion;
+    __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
+    async.result.hardware_status = completion.d2;
+    const u32 code = completion.d2 >> 24;
+    const u32 residual = completion.d2 & 0xffffffu;
+    if (code != 1 && !(async.in && code == 13)) {
+        controller.needs_reinit = true;
+        transfer_complete(FAILED);
+        return;
+    }
+    if (residual > async.length) {
+        controller.needs_reinit = true;
+        transfer_complete(INVALID_LENGTH);
+        return;
+    }
+    if (++endpoint_ring.enqueue_index == EP0_LINK) {
+        endpoint_ring.enqueue_index = 0;
+        endpoint_ring.cycle ^= 1u;
+    }
+    async.result.actual_length = async.length - residual;
+    transfer_complete(TRANSFER_SUCCESS);
 }
 
 int xhci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue,

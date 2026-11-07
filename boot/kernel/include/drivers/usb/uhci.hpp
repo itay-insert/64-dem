@@ -71,6 +71,10 @@ class uhci_controller : public usb_controller {
         bool unlink_qh(uhci_endpoint_state &ep, TimerSource &timer);
     
 
+    protected:
+        usb_transfer_result start_transfer(u32 endpoint_handle, void *buffer,
+            u32 length, TimerSource &timer) override;
+        void advance_transfer(TimerSource &timer) override;
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
@@ -80,7 +84,7 @@ class uhci_controller : public usb_controller {
         usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port);
         void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port);
         int configure_endpoints(usb_device device, u16 bConfigurationValue, u32 maxpacketsize, u8 address, TimerSource &timer);
-        usb_transfer_result usb_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer, u32 timeout);
+
         uhci_controller();
 
 };

@@ -7,6 +7,16 @@ cd "$project_root"
 
 kernel_includes="-Iboot/kernel/include"
 
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g \
+    -fsanitize=undefined $kernel_includes tests/test_usb_periodic.cpp \
+    -o /tmp/64-dem-test-usb-periodic
+/tmp/64-dem-test-usb-periodic
+
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
+    -fsanitize=undefined $kernel_includes tests/test_usb_async.cpp \
+    boot/kernel/drivers/usb/usb_async.cpp -o /tmp/64-dem-test-usb-async
+/tmp/64-dem-test-usb-async
+
 cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     -fsanitize=undefined -ffreestanding \
     -Dmemset=kernel_memset -Dmemcpy=kernel_memcpy -Dmemcmp=kernel_memcmp \
