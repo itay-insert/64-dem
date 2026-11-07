@@ -12,6 +12,11 @@ c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
     -o /tmp/64-dem-test-usb-keyboard-selection
 /tmp/64-dem-test-usb-keyboard-selection
 
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
+    $kernel_includes tests/test_usb_bulk_endpoints.cpp \
+    -o /tmp/64-dem-test-usb-bulk-endpoints
+/tmp/64-dem-test-usb-bulk-endpoints
+
 c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
     -fno-builtin -ffunction-sections -fdata-sections -Wl,--gc-sections \
     $kernel_includes tests/test_usb_irq.cpp boot/kernel/drivers/usb/usb_irq.cpp \

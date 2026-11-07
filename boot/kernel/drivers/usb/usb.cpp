@@ -627,3 +627,91 @@ void GlobalUSB::service_interrupts(TimerSource &timer) {
     for (u32 i = 0; i < ehci_count; ++i) service_controller(ehci_controllers[i], timer);
     for (u32 i = 0; i < xhci_count; ++i) service_controller(xhci_controllers[i], timer);
 }
+
+
+static bool append_interface(usb_interface_return &results,
+                             const usb_programming_interface &match) {
+    if (results.interface_count == 0xffff)
+        return false;
+
+    const u64 old_size = sizeof(match) * results.interface_count;
+    const u64 new_size = old_size + sizeof(match);
+    auto *grown = (usb_programming_interface *)krealloc(results.interfaces,
+                                                         old_size, new_size);
+    if (!grown)
+        return false;
+
+    results.interfaces = grown;
+    results.interfaces[results.interface_count++] = match;
+    return true;
+}
+
+static bool collect_interfaces(usb_controller &controller, u8 class_code,
+                               u8 subclass, bool usepr, u8 protocol,
+                               usb_interface_return &results) {
+    if (controller.status || !controller.ports || controller.ports_count <= 0)
+        return true;
+
+    for (int port_index = 0; port_index < controller.ports_count; ++port_index) {
+        const usb_port_descriptor &port = controller.ports[port_index];
+        if (!port.connected || !port.device || !port.device->discovered ||
+            !port.device->interfaces)
+            continue;
+
+        const usb_device &device = *port.device;
+        // Transfer handles reserve one byte for the interface array index.
+        for (u16 interface_index = 0;
+             interface_index < device.usb_interface_count && interface_index < 256;
+             ++interface_index) {
+            const usb_interface &current = device.interfaces[interface_index];
+            const usb_interface_descriptor &desc = current.descriptor;
+            if (desc.bInterfaceClass != class_code ||
+                desc.bInterfaceSubClass != subclass ||
+                (usepr && desc.bInterfaceProtocol != protocol))
+                continue;
+
+            u8 bulk_in = 0, bulk_out = 0;
+            if (!usb_find_bulk_endpoints(current, bulk_in, bulk_out))
+                continue;
+
+            usb_programming_interface match = {};
+            match.class_code = desc.bInterfaceClass;
+            match.subclass = desc.bInterfaceSubClass;
+            match.protocol = desc.bInterfaceProtocol;
+            match.port_index = (u8)port_index;
+            match.interface_index = (u8)interface_index;
+            match.endpoint_bulk_in = bulk_in;
+            match.endpoint_bulk_out = bulk_out;
+            match.controller = &controller;
+            if (!append_interface(results, match))
+                return false;
+        }
+    }
+    return true;
+}
+
+usb_interface_return GlobalUSB::find_interface(u8 class_code, u8 subclass,
+                                                bool usepr, u8 protocol) {
+    usb_interface_return results = {};
+    for (u8 i = 0; i < uhci_count; ++i)
+        if (!collect_interfaces(uhci_controllers[i], class_code, subclass,
+                                usepr, protocol, results))
+            goto allocation_failure;
+    for (u8 i = 0; i < ohci_count; ++i)
+        if (!collect_interfaces(ohci_controllers[i], class_code, subclass,
+                                usepr, protocol, results))
+            goto allocation_failure;
+    for (u8 i = 0; i < ehci_count; ++i)
+        if (!collect_interfaces(ehci_controllers[i], class_code, subclass,
+                                usepr, protocol, results))
+            goto allocation_failure;
+    for (u8 i = 0; i < xhci_count; ++i)
+        if (!collect_interfaces(xhci_controllers[i], class_code, subclass,
+                                usepr, protocol, results))
+            goto allocation_failure;
+    return results;
+
+allocation_failure:
+    kfree(results.interfaces);
+    return {};
+}

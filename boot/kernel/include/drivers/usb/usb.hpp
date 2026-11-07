@@ -49,6 +49,7 @@
 #define INVALID_REQUEST 11
 #define TRANSFER_CANCELLED 12
 
+
 typedef struct {
     u64 request_id;
     u32 hardware_status;
@@ -335,6 +336,57 @@ class usb_controller {
 
 };
 
+typedef struct {
+    u8 class_code;
+    u8 subclass;
+    u8 protocol;
+    u8 port_index;
+    u8 interface_index;
+    u8 endpoint_bulk_in;
+    u8 endpoint_bulk_out;
+    usb_controller *controller;
+} usb_programming_interface;
+
+
+typedef struct {
+    usb_programming_interface *interfaces;
+    u16 interface_count;
+} usb_interface_return;
+
+// The indices refer to entries in interface.endpoints, not USB endpoint numbers.
+// Only the default alternate setting is active during the boot-time scan.
+inline bool usb_find_bulk_endpoints(const usb_interface &interface, u8 &bulk_in,
+                                    u8 &bulk_out) {
+    if (interface.descriptor.bAlternateSetting != 0 || !interface.endpoints)
+        return false;
+
+    bool found_in = false;
+    bool found_out = false;
+    u8 in_index = 0, out_index = 0;
+    for (u16 i = 0; i < interface.endpoint_count; ++i) {
+        const usb_endpoint &endpoint = interface.endpoints[i];
+        if (endpoint.transfer_type != 2 || !endpoint.max_packet_size ||
+            !(endpoint.address & 0x0f) || (endpoint.address & 0x70))
+            continue;
+
+        if (endpoint.address & IN) {
+            if (!found_in) {
+                in_index = (u8)i;
+                found_in = true;
+            }
+        } else if (!found_out) {
+            out_index = (u8)i;
+            found_out = true;
+        }
+    }
+    if (!found_in || !found_out)
+        return false;
+    bulk_in = in_index;
+    bulk_out = out_index;
+    return true;
+}
+
+
 
 class xhci_controller;
 class ehci_controller;
@@ -355,6 +407,8 @@ class GlobalUSB {
         uhci_controller *uhci_controllers = nullptr;
         u8 uhci_count = 0;
         GlobalUSB();
+        // Returns only active interfaces with both bulk directions; free interfaces with kfree().
+        usb_interface_return find_interface(u8 class_code, u8 subclass, bool usepr, u8 protocol);
         void service_interrupts(TimerSource &timer);
         
 };
