@@ -181,6 +181,11 @@ static inline u64 port_to_address(u32 port) {
     return port_base;
 }
 
+#define SCTL_DET_MASK 0xF
+#define SCTL_DET_OFF 4
+
+#define CMD_ST (1u << 0)
+#define CMD_CR (1u << 15)
 
 static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port);
@@ -228,7 +233,45 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
             goto next;
 
         case 4:
-            // TODO: later
+            if ((sctl & SCTL_DET_MASK) == SCTL_DET_OFF) {
+                // software disabled the SATA PHY.
+                u32 cmd = port_reg->CMD; // read the port's command register
+                
+                if (cmd & CMD_ST) {
+                    port->CMD = cmd & ~CMD_ST;
+
+                    bool stopped = false;
+                    for (u32 i = 0; i < 1000; i++) {// 1 second timeout
+                        if (!(port->CMD & CMD_CR)) {
+                            stopped = true;
+                            break;
+                        }
+
+                        wait_ms(timer, 1);
+                    }
+
+                    if (!stopped)
+                        return false;
+                }
+
+                u32 sctl = port_reg->SCTL;
+                port_reg->SCTL = sctl & ~SCTL_DET_MASK;
+
+                for (u32 i = 0; i < 2000; i++) {
+
+                    u32 det = port_reg->SSTS & 0xF;
+
+                    if (det == 3)
+                        goto next;
+
+                    wait_ms(timer, 1);
+                }
+
+                return false;
+            } else {
+                printf("SATA: offline condition disabled the SATA PHY\n");
+                return false;
+            }
             
         default:
             printf("SATA: incorrect det value for port 0x%b\n", port);
@@ -236,6 +279,38 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     }
 
     next:
+
+    u32 sig = port->SIG;
+
+    if (sig == 0xFFFFFFFF) {
+        // signature haven't been recieved, try reset
+    } else {
+        switch (sig) {
+            case 0x00000101:
+                // SATA ATA device
+                // TODO: make identify_device
+                break;
+            
+            case 0xEB140101:
+                // ATAPI device
+
+                break;
+
+            case 0xC33C0101:
+                // Enclousure management bridge
+
+                break;
+
+            case 0x96690101:
+                // port multiplier
+
+                break;
+
+            default:
+
+                break;
+        }
+    }
     
 }
 
