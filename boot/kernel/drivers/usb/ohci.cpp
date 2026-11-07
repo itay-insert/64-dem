@@ -2349,3 +2349,21 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
     default: fail(FAILED); return;
     }
 }
+
+
+void ohci_controller::service_irq_events() {
+    auto *regs = (volatile ohci_registers_t *)controller.io_base;
+    const u32 status = regs->interrupt_status;
+    if (status & (1u << 4)) {
+        controller.needs_reinit = true;
+        regs->interrupt_status = 1u << 4;
+        return;
+    }
+    ohci_transfer_watch watch = {};
+    if (async.active && async.endpoint) {
+        watch.data_phys = ((ohci_endpoint_state *)async.endpoint)->data_td_phys;
+        watch.retired_mask = (u8)async.retired;
+    }
+    if (!process_done_queue(hcca, regs, &watch)) controller.needs_reinit = true;
+    if (async.active) async.retired = watch.retired_mask;
+}

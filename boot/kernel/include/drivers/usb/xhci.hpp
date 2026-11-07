@@ -180,6 +180,7 @@ u8 wanted_id);
         bool wait_transfer_event(TimerSource &timer, u8 slot_id, u8 endpoint_id, u64 expected_trb, XhciTrb *result, u32 timeout);
                         
     protected:
+        void service_irq_events() override;
         usb_transfer_result start_transfer(u32 endpoint_handle, void *buffer,
             u32 length, TimerSource &timer) override;
         void advance_transfer(TimerSource &timer) override;

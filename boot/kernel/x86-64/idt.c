@@ -1,6 +1,7 @@
 #include "uint_definitions.h"
 #include "x86-64/lowlevel.h"
 #include "x86-64/interrupts.h"
+#include "x86-64/irq.h"
 
 #define INTERRUPT_GATE 0xE
 
@@ -59,6 +60,11 @@ void setup_execptions(void) {
 
     idt_set_gate(0x40, timer, 0, INTERRUPT_GATE);
     idt_set_gate(0x41, keyboard, 0, INTERRUPT_GATE);
+
+    extern const i64 device_irq_stub_table[DEVICE_IRQ_COUNT];
+    for (u32 i = 0; i < DEVICE_IRQ_COUNT; ++i)
+        idt_set_gate(DEVICE_IRQ_FIRST + i,
+            (u64)device_irq_stub_table + device_irq_stub_table[i], 0, INTERRUPT_GATE);
 
     idtr_t idtr = {
         .limit = sizeof(idt) - 1,

@@ -13,7 +13,6 @@ void PS2K::init() {
     scancode_top = 0;
 }
 
-bool set = false;
 volatile u64 keyboard_irq_count = 0;
 
 
@@ -283,21 +282,18 @@ char scancode_to_ascii(u8 scancode)
 
 
 extern "C" void keyboard_handler() {
-    if (!set) {
-        globalkeyboard = new GlobalKeyboard;
-        set = true;
-    }
-
     u8 status = inb(0x64);
 
     if (status & 1) {
         u8 scancode = inb(0x60);
+        if (!globalkeyboard || !globalkeyboard->keyboards[0])
+            return;
         if (scancode == 0x57) {
             AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiReset();
+            acpi->AcpiReset(); // acpi reset if scancode is 0x57
         } else if (scancode == 0x58) {
             AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiShutDown();
+            acpi->AcpiShutDown(); // acpi shutdown if scancode is 0x58
         }
             
         globalkeyboard->keyboards[0]->buffer[globalkeyboard->keyboards[0]->scancode_top] = scancode;

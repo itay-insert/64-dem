@@ -1825,6 +1825,7 @@ usb_transfer_result ehci_controller::start_transfer(u32 endpoint_address, void *
     ep.data_qtd->next_qtd = 1;
     ep.data_qtd->alternate_next_qtd = 1;
     ep.data_qtd->token =
+        EHCI_QTD_IOC |
         (1u << 7) | // Active.
         ((in ? 1u : 0u) << 8) |
         (3u << 10) | // CERR.

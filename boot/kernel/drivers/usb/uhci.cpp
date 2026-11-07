@@ -1621,6 +1621,7 @@ usb_transfer_result uhci_controller::start_transfer(u32 endpoint_address, void *
 
     ep.td->status =
         TD_ACTLEN_INIT |
+        uhci::td::interrupt |
         uhci::td::active |
         uhci::td::error_count |
         (ep.speed == USB_SPEED_LOW ? uhci::td::low_speed : 0);

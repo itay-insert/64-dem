@@ -70,6 +70,17 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/keyboard/ps2.cpp -o ps2.o
    
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/keyboard/hid.cpp -o hid.o
+
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/keyboard/hid_report.cpp -o hid_report.o
+
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -mgeneral-regs-only -c kernel/x86-64/irq.c -o irq.o
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/pci/irq.c -o pci_irq.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -mgeneral-regs-only \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/usb/usb_irq.cpp -o usb_irq.o
+
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o

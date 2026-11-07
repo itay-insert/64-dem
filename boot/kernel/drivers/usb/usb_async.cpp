@@ -112,3 +112,79 @@ usb_transfer_result usb_controller::usb_transfer(
     } while (result.status_code == TRANSFER_PENDING || result.status_code == TRANSFER_BUSY);
     return result;
 }
+
+
+bool usb_controller::usb_register_interrupt(u32 handle, u32 length,
+    usb_interrupt_callback callback, void *context)
+{
+    if (!callback || !length || length > sizeof(interrupt_buffer) ||
+        interrupt_callback || interrupt_request || interrupt_servicing)
+        return false;
+    const u32 port = (handle >> 16) & 0xff;
+    const u32 iface = (handle >> 8) & 0xff;
+    const u32 ep = handle & 0xff;
+    if ((handle >> 24) || !ports || port >= (u32)ports_count ||
+        !ports[port].connected || !ports[port].device)
+        return false;
+    const usb_device &device = *ports[port].device;
+    if (!device.discovered || !device.interfaces || iface >= device.usb_interface_count)
+        return false;
+    const usb_interface &interface = device.interfaces[iface];
+    if (!interface.endpoints || ep >= interface.endpoint_count)
+        return false;
+    const usb_endpoint &endpoint = interface.endpoints[ep];
+    if (endpoint.transfer_type != 3 || !(endpoint.address & IN) ||
+        length > (endpoint.max_packet_size & 0x7ff))
+        return false;
+    interrupt_handle = handle;
+    interrupt_length = length;
+    interrupt_context = context;
+    interrupt_stopping = false;
+    interrupt_callback = callback;
+    return true;
+}
+
+void usb_controller::usb_unregister_interrupt(TimerSource &timer) {
+    interrupt_callback = nullptr;
+    interrupt_context = nullptr;
+    interrupt_stopping = true;
+    if (interrupt_request) usb_cancel_transfer(interrupt_request, timer);
+}
+
+void usb_controller::usb_service_interrupts(TimerSource &timer) {
+    if (interrupt_servicing) return;
+    interrupt_servicing = true;
+    if (interrupt_request) {
+        auto result = usb_read_transfer(interrupt_request, interrupt_buffer,
+                                        sizeof(interrupt_buffer), timer);
+        if (result.status_code == TRANSFER_PENDING || result.status_code == TRANSFER_BUSY) {
+            interrupt_servicing = false;
+            return;
+        }
+        interrupt_request = 0;
+        // Errors stop the subscription. A callback may explicitly recover later.
+        auto callback = interrupt_callback;
+        void *context = interrupt_context;
+        if (result.status_code != TRANSFER_SUCCESS) {
+            interrupt_callback = nullptr;
+            interrupt_context = nullptr;
+            interrupt_stopping = true;
+        }
+        if (callback) callback(context, result, interrupt_buffer);
+    }
+    if (interrupt_callback && !interrupt_stopping) {
+        auto result = usb_submit_transfer(interrupt_handle, nullptr,
+                                          interrupt_length, timer, 0);
+        if (result.status_code == TRANSFER_PENDING) {
+            interrupt_request = result.request_id;
+        } else if (result.status_code != TRANSFER_BUSY) {
+            auto callback = interrupt_callback;
+            void *context = interrupt_context;
+            interrupt_callback = nullptr;
+            interrupt_context = nullptr;
+            interrupt_stopping = true;
+            callback(context, result, nullptr);
+        }
+    }
+    interrupt_servicing = false;
+}

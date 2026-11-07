@@ -2084,3 +2084,11 @@ int xhci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
     free_dma(input_context.virtual_address);
     return 0;
 }
+
+
+void xhci_controller::service_irq_events() {
+    auto *op = (volatile xhci_op_regs *)(xhci_base +
+        ((volatile xhci_cap_regs *)xhci_base)->caplength);
+    if (op->usbsts & (1u << 2)) controller.needs_reinit = true;
+    xhci_process_events();
+}

@@ -58,6 +58,22 @@ public:
     const unsigned char *packet() const { return dma; }
 };
 
+struct CallbackState {
+    FakeController *controller;
+    FakeTimer *timer;
+    unsigned calls = 0;
+    bool detach = false;
+};
+static void completed(void *context, const usb_transfer_result &result, const u8 *data) {
+    auto &state = *static_cast<CallbackState *>(context);
+    assert(result.status_code == TRANSFER_SUCCESS && result.actual_length == 8);
+    for (unsigned i = 0; i < 8; ++i) assert(data[i] == i + 1);
+    ++state.calls;
+    // Recursive service must not collect/rearm twice.
+    state.controller->usb_service_interrupts(*state.timer);
+    if (state.detach) state.controller->usb_unregister_interrupt(*state.timer);
+}
+
 int main() {
     FakeController hc;
     FakeTimer timer;
@@ -101,5 +117,52 @@ int main() {
     auto blocking = hc.usb_transfer(0, buffer, 8, timer, 100);
     assert(blocking.status_code == TRANSFER_SUCCESS && sleeps == 2);
     assert(hc.usb_cancel_transfer(id, timer).status_code == INVALID_REQUEST);
-    puts("USB asynchronous lifecycle tests passed");
+    usb_endpoint endpoint = {};
+    endpoint.address = 0x81;
+    endpoint.transfer_type = 3;
+    endpoint.max_packet_size = 8;
+    usb_interface interface = {};
+    interface.endpoints = &endpoint;
+    interface.endpoint_count = 1;
+    usb_device device = {};
+    device.discovered = true;
+    device.interfaces = &interface;
+    device.usb_interface_count = 1;
+    usb_port_descriptor port = {};
+    port.connected = true;
+    port.device = &device;
+    hc.ports = &port;
+    hc.ports_count = 1;
+    CallbackState state;
+    state.controller = &hc;
+    state.timer = &timer;
+    assert(!hc.usb_register_interrupt(0, 0, completed, &state));
+    assert(!hc.usb_register_interrupt(1, 8, completed, &state));
+    assert(!hc.usb_register_interrupt(0, 9, completed, &state));
+    endpoint.address = 1;
+    assert(!hc.usb_register_interrupt(0, 8, completed, &state));
+    endpoint.address = 0x81;
+    assert(hc.usb_register_interrupt(0, 8, completed, &state));
+    assert(!hc.usb_register_interrupt(0, 8, completed, &state));
+    // Subscription waits for a request owned by another caller.
+    auto other = hc.usb_submit_transfer(0, nullptr, 8, timer);
+    hc.usb_service_interrupts(timer);
+    assert(state.calls == 0);
+    hc.usb_cancel_transfer(other.request_id, timer);
+    hc.usb_read_transfer(other.request_id, buffer, 8, timer);
+    hc.usb_read_transfer(other.request_id, buffer, 8, timer);
+    for (unsigned i = 0; i < 4; ++i) hc.usb_service_interrupts(timer);
+    assert(state.calls == 1 && hc.usb_transfer_pending()); // Automatically rearmed.
+    hc.usb_unregister_interrupt(timer);
+    assert(hc.usb_interrupt_registered()); // Cancellation still owns DMA.
+    assert(!hc.usb_register_interrupt(0, 8, completed, &state));
+    hc.usb_service_interrupts(timer);
+    hc.usb_service_interrupts(timer);
+    assert(state.calls == 1 && !hc.usb_interrupt_registered());
+    state.detach = true;
+    assert(hc.usb_register_interrupt(0, 8, completed, &state));
+    for (unsigned i = 0; i < 4; ++i) hc.usb_service_interrupts(timer);
+    assert(state.calls == 2 && !hc.usb_interrupt_registered());
+    assert(!hc.usb_transfer_pending());
+    puts("USB asynchronous lifecycle and interrupt subscription tests passed");
 }

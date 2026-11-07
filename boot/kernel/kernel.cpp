@@ -21,6 +21,7 @@
 #include "drivers/pcspkr.h"
 #include "drivers/keyboard/keyboard.hpp"
 #include "drivers/keyboard/ps2.hpp"
+#include "drivers/keyboard/hid.hpp"
 #include "drivers/usb/usb.hpp"
 #include "x86-64/tsc.h"
 
@@ -221,6 +222,9 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     GlobalUSB USB;
     usb_addr = (u64)&USB;
 
+    // HIDK::init needs USB discovery and both global addresses to be ready.
+    globalkeyboard = new GlobalKeyboard;
+
     printf("ps/2 controller init status: 0x%b\n", ps2_controller_init());
 
     u32 low = ioapic_read_register(0x12);
@@ -284,16 +288,41 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
+    // Reserve a fixed area, including a spare bottom row so printing the last
+    // buffer character cannot scroll the framebuffer and invalidate our anchor.
+    const int keyboard_columns = info32->horizontal_resolution >= 8
+        ? info32->horizontal_resolution / 8 : 1;
+    const int keyboard_buffer_rows = (256 + keyboard_columns - 1) / keyboard_columns;
+    const int keyboard_screen_rows = info32->vertical_resolution / 16;
+    const int keyboard_display_row = keyboard_screen_rows > keyboard_buffer_rows + 2
+        ? keyboard_screen_rows - keyboard_buffer_rows - 2 : 0;
     u64 old_keyboard_count = keyboard_irq_count;
     while (1) {
+        USB.service_interrupts(*timer.Src);
         if (keyboard_irq_count > old_keyboard_count) {
             old_keyboard_count = keyboard_irq_count;
-            text_data td = printf("Keyboard IRQ count: %lu\n", old_keyboard_count);
-            for (int i = 0; i < 256; i++) {
-                printf("%c", globalkeyboard->keyboards[globalkeyboard->index]->ascii[i]);
+            const keyboard &usb_keyboard = *globalkeyboard->keyboards[1];
+            // Paint whole rows, including blanks, so boot logs and old buffer
+            // contents cannot remain beside the current status or input.
+            for (int row = 0; row <= keyboard_buffer_rows; ++row) {
+                for (int column = 0; column < keyboard_columns; column += 256) {
+                    const int remaining = keyboard_columns - column;
+                    const int length = remaining < 256 ? remaining : 256;
+                    char line[257];
+                    for (int i = 0; i < length; ++i) {
+                        const int index = (row - 1) * keyboard_columns + column + i;
+                        const char character = row > 0 && index < 256
+                            ? usb_keyboard.ascii[index] : 0;
+                        line[i] = character != 0 ? character : ' ';
+                    }
+                    line[length] = 0;
+                    cursor_Setpos(column, keyboard_display_row + row);
+                    printf("%s", line);
+                }
             }
-
-            cursor_Setpos(td.coulmn, td.row);
+            cursor_Setpos(0, keyboard_display_row);
+            printf("Keyboard IRQ count: %lu", old_keyboard_count);
+            cursor_Setpos(0, keyboard_display_row);
         }
     }
     

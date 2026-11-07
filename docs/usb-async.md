@@ -87,3 +87,101 @@ References: [Linux USB host API](https://docs.kernel.org/driver-api/usb/usb.html
 [OHCI specification](https://www.cs.usfca.edu/~cruse/cs698f11/hcir1_0a.pdf),
 [EHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf),
 [xHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf).
+
+
+## Foreground interrupt subscriptions
+
+`usb_register_interrupt(handle, length, callback, context)` installs one recurring
+interrupt-IN subscription per controller. Registration validates the discovered
+endpoint and accepts reports up to 64 bytes and no larger than its packet size.
+Call `GlobalUSB::service_interrupts(timer)` regularly from the foreground loop.
+The first service submits a read; later calls collect it, invoke the callback,
+and rearm on success. A controller occupied by another request is retried later.
+Callbacks receive a terminal result and controller-owned data valid only during
+the call (null on submission failure). Errors stop the subscription. Recursive
+service calls are ignored; callbacks may unregister themselves.
+
+`usb_unregister_interrupt(timer)` detaches the callback immediately and requests
+cancellation. Keep servicing until `usb_interrupt_registered()` is false before
+reusing/destroying controller state. The callback context can be released after
+unregister returns, provided no foreground callback is executing. These APIs are
+single-foreground-context APIs, not thread-safe or IRQ-safe registration methods.
+
+`HIDK::init()` selects boot protocol, registers the keyboard callback, and starts
+its first read. Boot reports become PC Set 1 make/break bytes in the inherited
+`keyboard::buffer` and US-layout ASCII in `keyboard::ascii`. Both are 256-byte
+circular write buffers using the existing counters. Consumers must track their
+own progress; old bytes are overwritten. Typematic repetition, hotplug discovery,
+and automatic recovery after a terminal controller error are not implemented.
+The current kernel discovers devices at startup and services subscriptions in
+its main loop after boot-device work has finished.
+
+## Controller IRQ setup
+
+Every successfully initialized controller calls `usb_setup_irq()` after boot-time
+port enumeration. It allocates a vector from 0x50–0x7f and configures single-message
+PCI MSI, or MSI-X table entry zero when MSI is unavailable. The target is the boot
+CPU's xAPIC ID. MSI-X table storage is mapped uncached, bounds-checked against its
+BAR, and unused entries are masked. Failed setup leaves controller sources masked
+and keeps the existing polling path available. Boot logs explicitly report MSI,
+MSI-X, or polling for each controller.
+
+The IDT contains an assembly stub for every reserved device vector. Stubs preserve
+integer registers, clear DF, align the stack for C, dispatch the registered context,
+acknowledge the Local APIC, and return with `iretq`. Both the dispatcher and USB top
+half are compiled with `-mgeneral-regs-only`; they do not use SIMD/FPU state, allocate,
+log, take foreground locks, invoke keyboard callbacks, or modify DMA schedules.
+
+The USB top half checks the source and masks controller interrupt delivery, retaining
+status and DMA ownership for foreground processing. This deasserts the source before
+APIC EOI without prematurely clearing OHCI WDH or consuming xHCI events. IRQ counters
+are available through `usb_irq_count()` and route status through `usb_irq_ready()`.
+
+`GlobalUSB::service_interrupts(timer)` masks sources, acknowledges UHCI/EHCI transfer
+status, reaps OHCI DoneHead with the current request's retirement watch, drains the
+xHCI event ring, services subscriptions, and reenables interrupt delivery. Fatal
+controller errors leave interrupts masked and mark the controller for recovery.
+UHCI TDs and EHCI qTDs now request completion interrupts; OHCI and xHCI already did.
+Continue calling foreground service regularly: schedule/retirement state machines
+and timeout accounting need progress even when no hardware interrupt arrives.
+Blocking control/command waits retain polling so an IRQ arriving during boot work
+cannot deadlock a caller waiting for foreground dispatch.
+
+PCI INTx routing is not inferred from the Interrupt Line byte. The kernel has no
+ACPI AML `_PRT`/interrupt-link resolver, so INTx-only controllers automatically use
+polling. MSI/MSI-X setup currently targets the boot CPU's 8-bit xAPIC ID and is not
+an SMP interrupt migration or interrupt-remapping implementation. MSI-X MMIO uses
+the existing direct-map window and rejects physical addresses at or above 1 TiB.
+No hotplug reenumeration or fatal-controller recovery is added by IRQ setup.
+
+The single-outstanding-request limitation still applies: a pending keyboard read
+can block storage/control transfers on the same controller.
+
+Controller register references: [Intel xHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf),
+[Intel EHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf),
+[OHCI specification](https://www.cs.usfca.edu/~cruse/cs698f11/hcir1_0a.pdf), and
+[Linux PCI MSI guide](https://www.kernel.org/doc/html/v6.6/PCI/msi-howto.html).
+
+### IRQ validation
+
+`tests/run_tests.sh` includes PCI config-space tests for 32/64-bit MSI, vector
+masking, MSI-X table masking and BAR bounds, invalid BIRs, mapping failures, and
+configuration-write rollback. USB top-half tests verify source masking, repeated
+IRQ suppression, and retention of OHCI WDH for foreground processing.
+
+Headless QEMU checks used `qemu-xhci` with `usb-kbd` in three modes:
+`msi=on,msix=off`, `msi=off,msix=on`, and `msi=off,msix=off`. Monitor-injected
+`sendkey a` and `sendkey shift-b` produced `aB` in each case. QEMU `-d int` traces
+confirmed repeated deliveries of vector 0x50 in MSI/MSI-X modes and zero deliveries
+of that vector in polling mode. Legacy controller hardware IRQ paths have not
+been verified on physical machines.
+
+
+Keyboard selection retains the first boot-keyboard interrupt-IN endpoint in
+configuration descriptor order and publishes it only after device configuration
+succeeds. A later interface or another device cannot silently overwrite that
+selection. `selected keyboard port ... interface ... endpoint ...` identifies the
+actual choice; the earlier `HID keyboard found` lines only identify candidates.
+
+Idle interrupt-IN requests remain pending silently until input arrives. Only
+initialization, first-report, and actual transfer-error diagnostics are printed.

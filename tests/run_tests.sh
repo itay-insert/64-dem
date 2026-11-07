@@ -7,6 +7,28 @@ cd "$project_root"
 
 kernel_includes="-Iboot/kernel/include"
 
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
+    $kernel_includes tests/test_usb_keyboard_selection.cpp \
+    -o /tmp/64-dem-test-usb-keyboard-selection
+/tmp/64-dem-test-usb-keyboard-selection
+
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
+    -fno-builtin -ffunction-sections -fdata-sections -Wl,--gc-sections \
+    $kernel_includes tests/test_usb_irq.cpp boot/kernel/drivers/usb/usb_irq.cpp \
+    -o /tmp/64-dem-test-usb-irq
+/tmp/64-dem-test-usb-irq
+
+cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
+    $kernel_includes tests/test_pci_irq.c boot/kernel/drivers/pci/irq.c \
+    -o /tmp/64-dem-test-pci-irq
+/tmp/64-dem-test-pci-irq
+
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
+    -fsanitize=undefined $kernel_includes tests/test_hid_keyboard.cpp \
+    boot/kernel/drivers/keyboard/hid_report.cpp -o /tmp/64-dem-test-hid
+/tmp/64-dem-test-hid
+
+
 c++ -std=c++11 -Wall -Wextra -Werror -O1 -g \
     -fsanitize=undefined $kernel_includes tests/test_usb_periodic.cpp \
     -o /tmp/64-dem-test-usb-periodic

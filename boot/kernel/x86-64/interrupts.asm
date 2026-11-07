@@ -257,3 +257,66 @@ align 8
 
 keyboard_stub:
     dq isr_keyboard - keyboard_stub
+
+; Device vectors 0x50..0x7f. No error code is pushed for external IRQs.
+extern device_irq_dispatch
+global device_irq_stub_table
+section .text
+%assign irq_vector 0x50
+%rep 48
+device_irq_%+irq_vector:
+    push qword irq_vector
+    jmp device_irq_common
+%assign irq_vector irq_vector+1
+%endrep
+
+device_irq_common:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rbp
+    push rdi
+    push rsi
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    cld
+    mov rdi, [rsp + 120]
+    mov rbp, rsp
+    and rsp, -16
+    call device_irq_dispatch
+    mov rsp, rbp
+    mov rax, [rel APIC_base]
+    mov dword [rax + 0xB0], 0
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rsi
+    pop rdi
+    pop rbp
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 8
+    iretq
+
+section .rodata
+align 8
+device_irq_stub_table:
+%assign irq_vector 0x50
+%rep 48
+    dq device_irq_%+irq_vector - device_irq_stub_table
+%assign irq_vector irq_vector+1
+%endrep

@@ -33,6 +33,7 @@ const char *codes[] = {
 extern u64 timeradd;
 
 u64 keyboard_usb_address = 0;
+bool keyboard_usb_found = false;
 
 typedef struct {
     u8 class_code;
@@ -437,24 +438,6 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
                     if (iprotocol == 0x01) {
                         printf("USB.%s.%u:%u:%u.%u: HID keyboard found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
-                        u64 high = ((controller_type - 1) << 32);
-                        u64 mid_high = controller.index << 24;
-                        u64 mid_mid = (port - 1) << 16;
-                        u64 mid_low = i << 8;
-                        u64 low = 0;
-                        if (Device.interfaces[i].descriptor.bAlternateSetting == 0) {
-                            for (u8 j = 0; j < Device.interfaces[i].endpoint_count; j++) {
-                                const usb_endpoint &ep = Device.interfaces[i].endpoints[j];
-
-                                if (ep.transfer_type == 3 && (ep.address & 0x80)) {
-                                    low = j;
-                                    break;
-                                }
-
-                            }
-                        }
-                        keyboard_usb_address = (high | mid_high | mid_mid | mid_low);
-
                     } else if (iprotocol == 0x02)
                         printf("USB.%s.%u:%u:%u.%u: HID mouse found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
@@ -498,6 +481,19 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
     }
 
 
+    // Publish only a fully configured device. Later interfaces/devices must not
+    // silently replace a primary keyboard already selected during discovery.
+    u8 keyboard_interface = 0, keyboard_endpoint = 0;
+    if (!keyboard_usb_found && usb_find_boot_keyboard(Device, keyboard_interface, keyboard_endpoint)) {
+        keyboard_usb_address = (u64(controller_type - 1) << 32) |
+            (u64(controller.index) << 24) | (u64(port - 1) << 16) |
+            (u64(keyboard_interface) << 8) | keyboard_endpoint;
+        keyboard_usb_found = true;
+        printf("USB.%s: selected keyboard port %u interface %u endpoint 0x%b\n",
+            vendor, (u32)port,
+            (u32)Device.interfaces[keyboard_interface].descriptor.bInterfaceNumber,
+            Device.interfaces[keyboard_interface].endpoints[keyboard_endpoint].address);
+    }
     return Device;
 
 }
@@ -550,6 +546,8 @@ void usb_controller::construct_controller() {
             printf("%s: port enumeration failed (%d)\n", vendor, ports_count);
         
     }
+
+    if (!status) usb_setup_irq();
 
     segment[Addr_count] = controller.pci_address.segment;
     bus[Addr_count] = controller.pci_address.bus;
@@ -614,4 +612,18 @@ GlobalUSB::GlobalUSB() {
         delete[] Device;
         delete[] function;
     }
+}
+
+static void service_controller(usb_controller &controller, TimerSource &timer) {
+    if (controller.status) return;
+    controller.usb_begin_irq_service();
+    controller.usb_service_interrupts(timer);
+    controller.usb_end_irq_service();
+}
+
+void GlobalUSB::service_interrupts(TimerSource &timer) {
+    for (u32 i = 0; i < uhci_count; ++i) service_controller(uhci_controllers[i], timer);
+    for (u32 i = 0; i < ohci_count; ++i) service_controller(ohci_controllers[i], timer);
+    for (u32 i = 0; i < ehci_count; ++i) service_controller(ehci_controllers[i], timer);
+    for (u32 i = 0; i < xhci_count; ++i) service_controller(xhci_controllers[i], timer);
 }

@@ -104,6 +104,7 @@ class ohci_controller : public usb_controller {
         bool unlink_interrupt_ed(ohci_endpoint_state &ep, TimerSource &timer);
 
     protected:
+        void service_irq_events() override;
         usb_transfer_result start_transfer(u32 endpoint_handle, void *buffer,
             u32 length, TimerSource &timer) override;
         void advance_transfer(TimerSource &timer) override;

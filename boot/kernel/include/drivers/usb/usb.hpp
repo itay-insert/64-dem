@@ -3,6 +3,7 @@
 #include "drivers/devdef.h"
 #include "drivers/timers/timer.hpp"
 #include "x86-64/memory/dma.h"
+#include "drivers/usb/irq.hpp"
 
 
 #define NEEDS_REINIT 0
@@ -210,6 +211,30 @@ typedef struct {
     usb_device *device = nullptr;
 } usb_port_descriptor;
 
+// Pick the first boot-keyboard interrupt-IN endpoint in descriptor order.
+// Return array indices, not bInterfaceNumber/bEndpointAddress.
+inline bool usb_find_boot_keyboard(const usb_device &device, u8 &interface_index,
+                                   u8 &endpoint_index) {
+    if (!device.discovered || !device.interfaces) return false;
+    for (u16 i = 0; i < device.usb_interface_count && i < 256; ++i) {
+        const usb_interface &interface = device.interfaces[i];
+        const auto &desc = interface.descriptor;
+        if (desc.bInterfaceClass != 3 || desc.bInterfaceSubClass != 1 ||
+            desc.bInterfaceProtocol != 1 || desc.bAlternateSetting != 0 ||
+            !interface.endpoints) continue;
+        for (u16 j = 0; j < interface.endpoint_count; ++j) {
+            const usb_endpoint &endpoint = interface.endpoints[j];
+            if (endpoint.transfer_type == 3 && (endpoint.address & IN) &&
+                (endpoint.max_packet_size & 0x7ff) >= 8) {
+                interface_index = (u8)i;
+                endpoint_index = (u8)j;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Internal state of the controller's single outstanding packet. Caller buffers
 // are never retained: OUT is copied at submission, IN is copied at collection.
 struct usb_async_request {
@@ -231,9 +256,23 @@ struct usb_async_request {
     bool cancel = false;
 };
 
+// Called only by usb_service_interrupts() in foreground context. Data is valid
+// only during the callback. One subscription per controller (current DMA limit).
+using usb_interrupt_callback = void (*)(void *, const usb_transfer_result &, const u8 *);
+
 class usb_controller {
     protected:
+        usb_irq_state irq;
+        virtual void service_irq_events() {}
         usb_async_request async;
+        usb_interrupt_callback interrupt_callback = nullptr;
+        void *interrupt_context = nullptr;
+        u32 interrupt_handle = 0;
+        u32 interrupt_length = 0;
+        u64 interrupt_request = 0;
+        bool interrupt_stopping = false;
+        bool interrupt_servicing = false;
+        u8 interrupt_buffer[64] = {};
         unsigned async_api_busy = 0;
         u64 next_request_id = 0;
         virtual usb_transfer_result start_transfer(u32 endpoint_handle,
@@ -245,6 +284,20 @@ class usb_controller {
         void transfer_complete(int status);
         usb_transfer_result transfer_result(int status, u32 handle = 0) const;
     public:
+        // Called automatically after enumeration. Sources are masked in the ISR;
+        // foreground service drains controller events and unmasks them again.
+        bool usb_setup_irq();
+        void usb_begin_irq_service();
+        void usb_end_irq_service();
+        bool usb_irq_ready() const { return irq.ready; }
+        u64 usb_irq_count() const { return __atomic_load_n(&irq.count, __ATOMIC_RELAXED); }
+        // Foreground-only registration; buffer storage belongs to this controller.
+        bool usb_register_interrupt(u32 handle, u32 length,
+            usb_interrupt_callback callback, void *context);
+        // Detaches callback immediately; service until false before freeing controller.
+        void usb_unregister_interrupt(TimerSource &timer);
+        bool usb_interrupt_registered() const { return interrupt_callback || interrupt_request; }
+        void usb_service_interrupts(TimerSource &timer);
         bool usb_transfer_pending() const { return async.active; }
         char vendor[5];
         usb_controller_t controller;
@@ -302,6 +355,7 @@ class GlobalUSB {
         uhci_controller *uhci_controllers = nullptr;
         u8 uhci_count = 0;
         GlobalUSB();
+        void service_interrupts(TimerSource &timer);
         
 };
 
