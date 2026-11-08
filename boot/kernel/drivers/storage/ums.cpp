@@ -1,6 +1,12 @@
 #include "drivers/display/vga.h"
 #include "drivers/usb/usb.hpp"
 #include "drivers/timers/timer.hpp"
+#include "x86-64/memory/memory_helpers.h"
+
+static constexpr u32 MSC_CBW_SIGNATURE = 0x43425355;
+static constexpr u32 MSC_CSW_SIGNATURE = 0x53425355;
+static constexpr u8 MSC_DIRECTION_IN = 0x80;
+static constexpr u8 MSC_DIRECTION_OUT = 0x00;
 
 extern u64 usb_addr;
 extern u64 timeradd;
@@ -48,29 +54,6 @@ typedef struct {
 
 usb_mass_storage *drives = nullptr;
 
-void ums_discover() {
-    GlobalUSB *USB = (GlobalUSB *)usb_addr;
-
-    
-
-    usb_interface_return result = USB->find_interface(0x08, 0x06, true, 0x50);
-    drives = new usb_mass_storage[result.interface_count];
-
-    for (u16 i = 0; i < result.interface_count; i++) {
-        drives[i] = {};
-        drives[i].controller = result.interfaces[i].controller;
-        u32 port_index = (result.interfaces[i].port_index << 16);
-        u32 interface_index = i << 8;
-        u32 endpoint_in = result.interfaces[i].endpoint_bulk_in;
-        u32 endpoint_out = result.interfaces[i].endpoint_bulk_out;
-        drives[i].endpoint_in_addr = port_index | interface_index | endpoint_in;
-        drives[i].endpoint_out_addr = port_index | interface_index | endpoint_out;
-        
-    }
-
-    
-}
-
 
 bool ums_prepare_cbw(
     msc_cbw &cbw,
@@ -90,7 +73,7 @@ bool ums_prepare_cbw(
 
     cbw.signature = MSC_CBW_SIGNATURE;
 
-    cbw.tag = ++msc.next_tag;
+    cbw.tag = ++ums.next_tag;
 
     cbw.data_transfer_length = data_length;
 
@@ -150,19 +133,18 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
     msc_cbw cbw = {};
     msc_csw csw = {};
     
-    Timer timer = (Timer *)timeradd;
-    TimerSource &Timer = timer->Src;
+    Timer *timer = (Timer *)timeradd;
+    TimerSource &timer_source = *timer->Src;
 
     if (!ums_prepare_data_buffer(data, data_length))
         return 1;
 
-    if (!ums_prepare_cbw(cbw, drive, cdb, cdb_length, data_length, device_to_host))
+    if (!ums_prepare_cbw(cbw, *drive, cdb, cdb_length, data_length, device_to_host))
         return 1;
 
-    if (!ums_prepare_csw(csw, drive, cdb, cdb_length, data_length, device_to_host))
-        return 1;
+    ums_prepare_csw(csw);
 
-    usb_transfer_result result = drive->controller->usb_transfer(drive->endpoint_out_addr, &cbw, sizeof(cbw), Timer, timeout);
+    usb_transfer_result result = drive->controller->usb_transfer(drive->endpoint_out_addr, &cbw, sizeof(cbw), timer_source, timeout);
 
     if (result.status_code != TRANSFER_SUCCESS || result.actual_length != sizeof(cbw))
         return 1;
@@ -178,7 +160,7 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
             endpoint,
             data,
             data_length,
-            Timer,
+            timer_source,
             timeout
         );
 
@@ -192,7 +174,7 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
         drive->endpoint_in_addr,
         &csw,
         sizeof(csw),
-        Timer,
+        timer_source,
         timeout
     );
 
@@ -210,6 +192,14 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
 
 }
 
+
+static inline u64 USB_make_address(usb_mass_storage *drive) {
+    u64 address = ((drive->endpoint_in_addr & ~0xFF) >> 8);
+    u64 index = (u64(drive->controller->controller.index) << 16);
+    u64 type_index = u64(drive->controller->controller_type - 1) << 24;
+    return (address | index | type_index);
+}
+
 bool ums_init(usb_mass_storage *drive) {
     drive->initialized = false;
 
@@ -220,10 +210,11 @@ bool ums_init(usb_mass_storage *drive) {
         0x00,
         0x00,
         0x00,
-        0x24
+        0x24,
         0x00
     };
 
+    // INQUIRY(6)
     if (ums_command(drive, cdb0, 6, inquiry_buffer, 36, true, 5000) != 0) {
         printf("UMS: inquiry failed\n");
         return false;
@@ -232,10 +223,13 @@ bool ums_init(usb_mass_storage *drive) {
     u8 cdb1[6] = { 0x00, 0, 0, 0, 0, 0 };
 
     bool try_again = true;
-
+    again:
+    // TEST UNIT(6)
     if (ums_command(drive, cdb1, 6, nullptr, 0, false, 5000) != 0) {
         u8 cdb2[6] = { 0x03, 0x00, 0x00, 0x00, 18, 0x00 };
         u8 sense[18] = {};
+
+        printf("UMS: test unit ready failed, requesting sense\n");
 
         if (ums_command(drive, cdb2, 6, sense, 18, true, 5000) != 0) {
             printf("UMS: request sense failed\n");
@@ -245,12 +239,104 @@ bool ums_init(usb_mass_storage *drive) {
         u8 sense_key = sense[2] & 0x0f;
         u8 asc = sense[12];
         u8 ascq = sense[13];
+        if (sense_key == 0x02 && asc == 0x04 && ascq == 0x01) {
+            if (try_again) {
+                try_again = false;
+                printf("UMS: trying test unit again\n");
+                goto again;
+            }
+        } else {
+            printf("UMS: test unit failed\n");
+            return false;
+        }
     }
+
+    // READ CAPACITY(10)
+    u8 cdb3[10] = {0}; // make everything zero
+    cdb3[0] = 0x25; // only the first cell has a number, the opcode, rest is 0
+
+    u8 capacity[8] = {};
+    if (ums_command(drive, cdb3, 10, capacity, 8, true, 5000) != 0) {
+        printf("UMS: READ CAPACITY(10) failed\n");
+        return false;
+    }
+
+    u32 *cap = (u32 *)capacity;
+    u32 last_lba = cap[0];
+    u32 block_size = cap[1];
+
+    drive->block_count = last_lba + 1;
+    drive->block_size = block_size;
+
+    scsi_inquiry *inquiry = (scsi_inquiry *)inquiry_buffer;  
+    u64 device_address = USB_make_address(drive);
+    printf("UMS: USB mass storage device discovered\n");
+    char vendor[9] = {};
+    char revision[5] = {};
+    memcpy(vendor, inquiry->vendor, sizeof(inquiry->vendor));
+    memcpy(revision, inquiry->Revision, sizeof(inquiry->Revision));
+    printf("USB handle: 0x%lx  vendor: %s\n", device_address, vendor);
+    printf("Revision: %s  Block_size: %u  block_count: %u\n",
+           revision, block_size, drive->block_count);
+    return true;
 }
 
-void ums_write(usb_mass_storage *drive, u32 lba, u32 sectors, void *buffer) {
-    Timer timer = (Timer *)timeradd;
-    TimerSource &Timer = timer->Src;
+u8 sector[512] = {};
 
-    drive->controller->usb_transfer(drive->endpoint_out_addr, &cbw, sizeof(cbw), Timer)
+void read_first_sector(usb_mass_storage *drive) {
+    u8 cdb[10] = {
+        0x28, // READ(10)
+        0x00,
+        0x00, 0x00, 0x00, 0x00, // LBA = 0
+        0x00,
+        0x00, 0x01,             // Transfer 1 block
+        0x00
+    };
+
+    ums_command(drive, cdb, 10, sector, 512, true, 5000);
+}
+
+
+void ums_discover() {
+    GlobalUSB *USB = (GlobalUSB *)usb_addr;
+
+    
+
+    usb_interface_return result = USB->find_interface(0x08, 0x06, true, 0x50);
+    drives = new usb_mass_storage[result.interface_count];
+
+    for (u16 i = 0; i < result.interface_count; i++) {
+        drives[i] = {};
+        drives[i].controller = result.interfaces[i].controller;
+        u32 port_index = (result.interfaces[i].port_index << 16);
+        u32 interface_index = i << 8;
+        u32 endpoint_in = result.interfaces[i].endpoint_bulk_in;
+        u32 endpoint_out = result.interfaces[i].endpoint_bulk_out;
+        drives[i].endpoint_in_addr = port_index | interface_index | endpoint_in;
+        drives[i].endpoint_out_addr = port_index | interface_index | endpoint_out;
+        if (!ums_init(&drives[i])) {
+            printf("UMS: failed to initialize drive 0x%w\n", i);
+        }
+        read_first_sector(&drives[i]);
+        if (sector[450] == 0x0B | sector[450] == 0x0C) {
+            printf("Boot drive first sector:\n");
+            for (int i = 0; i < 512; i++) {
+                printf("0x%b  ", sector[i]);
+            }
+        }
+
+    }
+
+    
+}
+
+
+
+void ums_write(usb_mass_storage *drive, u32 lba, u32 sectors, void *buffer) {
+    // WRITE(10) is not implemented yet.
+    (void)drive;
+    (void)lba;
+    (void)sectors;
+    (void)buffer;
+    printf("UMS: ums_write is not implemented\n");
 }

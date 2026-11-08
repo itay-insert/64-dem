@@ -1186,7 +1186,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
 #define EHCI_QH_S_MASK(v)     ((u32)(v) & 0xFF)
 
 void *ehci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
-    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+    if (!prepare_control(timer)) return nullptr;
 
     if (!maxpacketsize || length != packet.wLength || length > 4096 ||
         (length && !(packet.BmRequestType & IN)))
@@ -1718,7 +1718,7 @@ bool ehci_controller::unlink_qh(ehci_endpoint_state &ep, TimerSource &timer) {
 }
 
 
-usb_transfer_result ehci_controller::start_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
+usb_transfer_result ehci_controller::start_transfer(usb_async_request &async, u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
     (void)timer;
 
     usb_transfer_result transfer = {0};
@@ -1798,6 +1798,16 @@ usb_transfer_result ehci_controller::start_transfer(u32 endpoint_address, void *
         return transfer;
     }
 
+    for (const auto &other : requests) {
+        if (&other == &async || !other.active || !other.endpoint) continue;
+        const auto &occupied = *(const ehci_endpoint_state *)other.endpoint;
+        if (&occupied == &ep || (ep.transfer_type == 3 &&
+            occupied.transfer_type == 3 && !other.completed)) {
+            transfer.status_code = TRANSFER_BUSY;
+            return transfer;
+        }
+    }
+
     const bool in = (ep.endpoint_address & 0x80u) != 0;
 
     if (!in && length)
@@ -1846,18 +1856,15 @@ usb_transfer_result ehci_controller::start_transfer(u32 endpoint_address, void *
     ep.qh->next_qtd = ep.data_qtd_phys;
     asm volatile("mfence" ::: "memory");
 
-    auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
-    auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
     async.endpoint = &ep;
     async.dma_buffer = ep.buffer;
     async.in = in;
-    async.saved_command = op->command;
-    transfer_phase(10); // Wait for a prior schedule transition, without sleeping.
+    transfer_phase(async, 10); // Wait for a prior schedule transition, without sleeping.
     transfer.status_code = TRANSFER_PENDING;
     return transfer;
 }
 
-void ehci_controller::advance_transfer(TimerSource &timer) {
+void ehci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     auto &ep = *(ehci_endpoint_state *)async.endpoint;
     auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
     auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
@@ -1866,22 +1873,24 @@ void ehci_controller::advance_transfer(TimerSource &timer) {
     const u32 running = periodic ? EHCI_PSS : ASS;
     auto fail = [&](int code) {
         controller.needs_reinit = true;
-        transfer_complete(code);
+        transfer_complete(async, code);
     };
     if (controller.needs_reinit) { fail(FAILED); return; }
     switch (async.phase) {
     case 10:
+        if (!acquire_schedule(async)) return;
         if (((op->status & running) != 0) != ((op->command & enable) != 0)) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
+        async.saved_command = op->command;
         op->command &= ~enable;
         (void)op->command;
-        transfer_phase(1);
+        transfer_phase(async, 1);
         return;
     case 1:
         if (op->status & running) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
         if (periodic) {
@@ -1900,26 +1909,29 @@ void ehci_controller::advance_transfer(TimerSource &timer) {
         asm volatile("mfence" ::: "memory");
         op->command |= enable;
         (void)op->command;
-        transfer_phase(2);
+        transfer_phase(async, 2);
         return;
     case 2:
         if (!(op->status & running)) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
-        transfer_phase(3);
+        release_schedule(async);
+        transfer_phase(async, 3);
         return;
     case 3:
         if (((volatile ehci_qtd *)ep.data_qtd)->token & (1u << 7)) {
-            if (!async.cancel && !transfer_expired(timer)) return;
+            if (!async.cancel && !transfer_expired(async, timer)) return;
         }
+        if (!acquire_schedule(async)) return;
+        async.saved_command = op->command;
         op->command &= ~enable;
         (void)op->command;
-        transfer_phase(4);
+        transfer_phase(async, 4);
         return;
     case 4:
         if (op->status & running) {
-            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(UNLINK_ERROR);
             return;
         }
         if (periodic) {
@@ -1950,11 +1962,11 @@ void ehci_controller::advance_transfer(TimerSource &timer) {
         asm volatile("mfence" ::: "memory");
         op->command = (op->command & ~enable) | (async.saved_command & enable);
         (void)op->command;
-        transfer_phase(6);
+        transfer_phase(async, 6);
         return;
     case 6: {
         if (((op->status & running) != 0) != ((async.saved_command & enable) != 0)) {
-            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(UNLINK_ERROR);
             return;
         }
         const u32 token = ((volatile ehci_qtd *)ep.data_qtd)->token;
@@ -1968,7 +1980,7 @@ void ehci_controller::advance_transfer(TimerSource &timer) {
             const u32 remaining = (token >> 16) & 0x7fffu;
             if (remaining > async.length) { fail(INVALID_LENGTH); return; }
             async.result.actual_length = async.length - remaining;
-            transfer_complete(TRANSFER_SUCCESS);
+            transfer_complete(async, TRANSFER_SUCCESS);
         }
         return;
     }

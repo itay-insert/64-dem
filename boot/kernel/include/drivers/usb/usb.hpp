@@ -236,7 +236,7 @@ inline bool usb_find_boot_keyboard(const usb_device &device, u8 &interface_index
     return false;
 }
 
-// Internal state of the controller's single outstanding packet. Caller buffers
+// Internal state of one endpoint's outstanding packet. Caller buffers
 // are never retained: OUT is copied at submission, IN is copied at collection.
 struct usb_async_request {
     usb_transfer_result result = {};
@@ -255,17 +255,33 @@ struct usb_async_request {
     bool completed = false;
     bool in = false;
     bool cancel = false;
+    // xHCI completion routing, independent of the synchronous EP0 waiter.
+    u64 trb_physical = 0;
+    u32 event[4] = {};
+    u8 slot_id = 0;
+    u8 endpoint_id = 0;
+    bool event_received = false;
 };
 
 // Called only by usb_service_interrupts() in foreground context. Data is valid
-// only during the callback. One subscription per controller (current DMA limit).
+// only during the callback. One subscription per controller (subscription limit).
 using usb_interrupt_callback = void (*)(void *, const usb_transfer_result &, const u8 *);
 
 class usb_controller {
     protected:
         usb_irq_state irq;
         virtual void service_irq_events() {}
-        usb_async_request async;
+        static constexpr unsigned request_capacity = 32;
+        usb_async_request requests[request_capacity] = {};
+        // Legacy schedule edits may span polls. Never hold this while waiting
+        // for device input; other endpoints keep their own request state.
+        usb_async_request *schedule_editor = nullptr;
+        bool acquire_schedule(usb_async_request &request);
+        void release_schedule(usb_async_request &request);
+        void advance_requests(TimerSource &timer);
+        bool prepare_control(TimerSource &timer);
+        usb_async_request *find_request(u64 id);
+
         usb_interrupt_callback interrupt_callback = nullptr;
         void *interrupt_context = nullptr;
         u32 interrupt_handle = 0;
@@ -276,13 +292,13 @@ class usb_controller {
         u8 interrupt_buffer[64] = {};
         unsigned async_api_busy = 0;
         u64 next_request_id = 0;
-        virtual usb_transfer_result start_transfer(u32 endpoint_handle,
+        virtual usb_transfer_result start_transfer(usb_async_request &async, u32 endpoint_handle,
             void *buffer, u32 length, TimerSource &timer) = 0;
-        virtual void advance_transfer(TimerSource &timer) = 0;
-        bool transfer_expired(TimerSource &timer) const;
-        bool phase_expired(TimerSource &timer, u32 milliseconds) const;
-        void transfer_phase(u32 phase);
-        void transfer_complete(int status);
+        virtual void advance_transfer(usb_async_request &async, TimerSource &timer) = 0;
+        bool transfer_expired(const usb_async_request &async, TimerSource &timer) const;
+        bool phase_expired(const usb_async_request &async, TimerSource &timer, u32 milliseconds) const;
+        void transfer_phase(usb_async_request &async, u32 phase);
+        void transfer_complete(usb_async_request &async, int status);
         usb_transfer_result transfer_result(int status, u32 handle = 0) const;
     public:
         // Called automatically after enumeration. Sources are masked in the ISR;
@@ -299,7 +315,12 @@ class usb_controller {
         void usb_unregister_interrupt(TimerSource &timer);
         bool usb_interrupt_registered() const { return interrupt_callback || interrupt_request; }
         void usb_service_interrupts(TimerSource &timer);
-        bool usb_transfer_pending() const { return async.active; }
+        bool usb_transfer_pending() const {
+            for (const auto &request : requests) if (request.active) return true;
+            return false;
+        }
+        // Progress all endpoints without collecting caller-owned results.
+        void usb_service_transfers(TimerSource &timer);
         char vendor[5];
         usb_controller_t controller;
         u8 class_code;

@@ -463,8 +463,19 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
 
                 transfer_completion = event;
                 __atomic_store_n(&transfer_completed, true, __ATOMIC_RELEASE);
-            } else {
-            // Handle or queue unrelated Transfer Events.
+            } else if (!event_data) {
+                for (auto &request : requests) {
+                    if (!request.active || request.completed || request.event_received ||
+                        request.slot_id != slot_id || request.endpoint_id != endpoint_id ||
+                        (trb_pointer != request.trb_physical &&
+                         (completion_code == 1 || completion_code == 13))) continue;
+                    request.event[0] = event.d0;
+                    request.event[1] = event.d1;
+                    request.event[2] = event.d2;
+                    request.event[3] = event.d3;
+                    request.event_received = true;
+                    break;
+                }
             }
         } else if (type == 37) { // Host Controller Event
             // Add controller error reporting when recovery is implemented.
@@ -1620,7 +1631,7 @@ usb_device xhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 void *xhci_controller::usb_send_packet(usb_setup_packet packet,
                                        u32 maxpacketsize, u64 length,
                                        u8 address, TimerSource &timer, u8 port) {
-    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+    if (!prepare_control(timer)) return nullptr;
 
     if (controller.needs_reinit || !slots || !doorbells || !dcbaa ||
         port == 0 || port > ports_count || length != packet.wLength ||
@@ -1763,7 +1774,7 @@ void *xhci_controller::usb_send_packet(usb_setup_packet packet,
 }
 
 usb_transfer_result xhci_controller::start_transfer(
-    u32 handle, void *buffer, u32 length, TimerSource &timer)
+    usb_async_request &async, u32 handle, void *buffer, u32 length, TimerSource &timer)
 {
     (void)timer;
 
@@ -1818,12 +1829,14 @@ usb_transfer_result xhci_controller::start_transfer(
         !endpoint_ring.configured || !endpoint_ring.dma.virtual_address ||
         endpoint_ring.endpoint_type != expected_type ||
         endpoint_ring.endpoint_address != endpoint.address ||
-        endpoint_ring.enqueue_index >= EP0_LINK ||
-        __atomic_load_n(&transfer_waiting, __ATOMIC_ACQUIRE))
+        endpoint_ring.enqueue_index >= EP0_LINK)
         return result;
 
-    // Requests are serialized with the existing
-    // controller-wide event waiter. Keep DMA owned by the endpoint on timeout.
+    for (const auto &other : requests) {
+        if (&other != &async && other.active && other.endpoint == &endpoint_ring)
+            return transfer_result(TRANSFER_BUSY, handle);
+    }
+    // Each endpoint owns its ring, DMA packet and completion route.
     if (!endpoint_ring.packet_dma.virtual_address &&
         !xhci_dma_alloc(&endpoint_ring.packet_dma,
                         endpoint.max_packet_size, addr64))
@@ -1839,11 +1852,12 @@ usb_transfer_result xhci_controller::start_transfer(
     const u32 cycle = endpoint_ring.cycle;
     auto *ring = (XhciTrb *)endpoint_ring.dma.virtual_address;
     const u64 trb_phys = endpoint_ring.dma.physical_address + index * sizeof(XhciTrb);
-    transfer_slot = slot.slot_id;
-    transfer_endpoint = (u8)dci;
-    transfer_trb_pointer = trb_phys;
-    __atomic_store_n(&transfer_completed, false, __ATOMIC_RELAXED);
-    __atomic_store_n(&transfer_waiting, true, __ATOMIC_RELEASE);
+    async.slot_id = slot.slot_id;
+    async.endpoint_id = (u8)dci;
+    async.trb_physical = trb_phys;
+    async.endpoint = &endpoint_ring;
+    async.dma_buffer = (void *)packet.virtual_address;
+    async.in = in;
 
     // Publish the cycle bit last. Direction comes from the endpoint context.
     ring[index].d0 = (u32)packet.physical_address;
@@ -1856,40 +1870,37 @@ usb_transfer_result xhci_controller::start_transfer(
     asm volatile("mfence" ::: "memory");
     doorbells[slot.slot_id] = dci;
 
-    async.endpoint = &endpoint_ring;
-    async.dma_buffer = (void *)packet.virtual_address;
-    async.in = in;
-    transfer_phase(3);
+    transfer_phase(async, 3);
     result.status_code = TRANSFER_PENDING;
     return result;
 }
 
-void xhci_controller::advance_transfer(TimerSource &timer) {
+void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     xhci_process_events();
-    if (!__atomic_load_n(&transfer_completed, __ATOMIC_ACQUIRE)) {
-        if (async.cancel || transfer_expired(timer) || controller.needs_reinit) {
+    if (!async.event_received) {
+        if (async.cancel || transfer_expired(async, timer) || controller.needs_reinit) {
             // Stop Endpoint recovery is not implemented. Quarantine DMA and
             // reject further operations rather than reusing an owned TRB.
+            const int status = async.cancel ? TRANSFER_CANCELLED :
+                (transfer_expired(async, timer) ? TIMEOUT : FAILED);
             controller.needs_reinit = true;
-            __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
-            transfer_complete(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+            transfer_complete(async, status);
         }
         return;
     }
     auto &endpoint_ring = *(xhci_endpoint_ring *)async.endpoint;
-    const XhciTrb completion = transfer_completion;
-    __atomic_store_n(&transfer_waiting, false, __ATOMIC_RELEASE);
+    const XhciTrb completion = {async.event[0], async.event[1], async.event[2], async.event[3]};
     async.result.hardware_status = completion.d2;
     const u32 code = completion.d2 >> 24;
     const u32 residual = completion.d2 & 0xffffffu;
     if (code != 1 && !(async.in && code == 13)) {
         controller.needs_reinit = true;
-        transfer_complete(FAILED);
+        transfer_complete(async, FAILED);
         return;
     }
     if (residual > async.length) {
         controller.needs_reinit = true;
-        transfer_complete(INVALID_LENGTH);
+        transfer_complete(async, INVALID_LENGTH);
         return;
     }
     if (++endpoint_ring.enqueue_index == EP0_LINK) {
@@ -1897,7 +1908,7 @@ void xhci_controller::advance_transfer(TimerSource &timer) {
         endpoint_ring.cycle ^= 1u;
     }
     async.result.actual_length = async.length - residual;
-    transfer_complete(TRANSFER_SUCCESS);
+    transfer_complete(async, TRANSFER_SUCCESS);
 }
 
 int xhci_controller::configure_endpoints(usb_device device, u16 bConfigurationValue,

@@ -461,6 +461,8 @@ struct ohci_transfer_watch {
     // Bit 1 = DATA retired
     // Bit 2 = STATUS retired
     u8 retired_mask;
+    usb_async_request *requests = nullptr;
+    unsigned request_count = 0;
 };
 
 #define OHCI_TD_SETUP_DONE  (1u << 0)
@@ -532,6 +534,15 @@ bool process_done_queue(
 
             else if (phys == watch->status_phys)
                 watch->retired_mask |= OHCI_TD_STATUS_DONE;
+        }
+
+        if (watch && watch->requests) {
+            for (unsigned j = 0; j < watch->request_count; ++j) {
+                auto &request = watch->requests[j];
+                if (request.active && !request.completed && request.endpoint &&
+                    ((ohci_endpoint_state *)request.endpoint)->data_td_phys == phys)
+                    request.retired |= OHCI_TD_DATA_DONE;
+            }
         }
 
         process_completed_td(phys, td);
@@ -1540,7 +1551,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
 void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
-    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+    if (!prepare_control(timer)) return nullptr;
 
     volatile ohci_registers_t *ohci_regs = (volatile ohci_registers_t *)controller.io_base;
 
@@ -1725,6 +1736,8 @@ void *ohci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
         0
     };
 
+    watch.requests = requests;
+    watch.request_count = request_capacity;
     u32 received = 0;
     auto result = wait_for_descriptor(
         ed,
@@ -2094,7 +2107,7 @@ bool ohci_controller::unlink_ed(ohci_endpoint_state &ep, TimerSource &timer) {
     return true;
 }
 
-usb_transfer_result ohci_controller::start_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
+usb_transfer_result ohci_controller::start_transfer(usb_async_request &async, u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
     (void)timer;
 
     usb_transfer_result transfer = {0};
@@ -2173,6 +2186,16 @@ usb_transfer_result ohci_controller::start_transfer(u32 endpoint_address, void *
         return transfer;
     }
 
+    for (const auto &other : requests) {
+        if (&other == &async || !other.active || !other.endpoint) continue;
+        const auto &occupied = *(const ohci_endpoint_state *)other.endpoint;
+        if (&occupied == &ep || (ep.transfer_type == 3 &&
+            occupied.transfer_type == 3 && !other.completed)) {
+            transfer.status_code = TRANSFER_BUSY;
+            return transfer;
+        }
+    }
+
     const bool in = (ep.endpoint_address & 0x80u) != 0;
 
     ohci_td *data_td = ep.dummy_td;
@@ -2205,23 +2228,15 @@ usb_transfer_result ohci_controller::start_transfer(u32 endpoint_address, void *
     ep.data_td = data_td;
     ep.data_td_phys = data_td_phys;
 
-    auto *regs = (volatile ohci_registers_t *)controller.io_base;
-    auto *hc = (volatile ohci_hcca *)hcca;
-    const u32 enable = ep.transfer_type == 3 ? OHCI_PLE : OHCI_BLE;
     async.endpoint = &ep;
     async.dma_buffer = ep.buffer;
     async.in = in;
-    async.saved_command = regs->control;
-    regs->control &= ~enable;
-    (void)regs->control;
-    asm volatile("mfence" ::: "memory");
-    async.frame = hc->frame_number;
-    transfer_phase(1);
+    transfer_phase(async, 10);
     transfer.status_code = TRANSFER_PENDING;
     return transfer;
 }
 
-void ohci_controller::advance_transfer(TimerSource &timer) {
+void ohci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     auto &ep = *(ohci_endpoint_state *)async.endpoint;
     auto *regs = (volatile ohci_registers_t *)controller.io_base;
     auto *hc = (volatile ohci_hcca *)hcca;
@@ -2231,19 +2246,25 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
     const u32 enable = periodic ? OHCI_PLE : OHCI_BLE;
     auto fail = [&](int code) {
         controller.needs_reinit = true;
-        transfer_complete(code);
+        transfer_complete(async, code);
     };
     if (controller.needs_reinit) { fail(FAILED); return; }
     // The done queue is shared, so consume it even while stopping schedules.
-    ohci_transfer_watch watch = {};
-    watch.data_phys = ep.data_td_phys;
-    watch.retired_mask = (u8)async.retired;
-    if (!process_done_queue(hcca, regs, &watch)) { fail(FAILED); return; }
-    async.retired = watch.retired_mask;
+    service_irq_events();
+    if (controller.needs_reinit) { fail(FAILED); return; }
     switch (async.phase) {
+    case 10:
+        if (!acquire_schedule(async)) return;
+        async.saved_command = regs->control;
+        regs->control &= ~enable;
+        (void)regs->control;
+        asm volatile("mfence" ::: "memory");
+        async.frame = hc->frame_number;
+        transfer_phase(async, 1);
+        return;
     case 1:
         if (hc->frame_number == async.frame) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
         if (periodic) {
@@ -2264,22 +2285,25 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
         regs->control |= enable;
         if (!periodic) regs->command_status = OHCI_BLF;
         (void)regs->control;
-        transfer_phase(3);
+        release_schedule(async);
+        transfer_phase(async, 3);
         return;
     case 3:
         if (!(async.retired & OHCI_TD_DATA_DONE) &&
             !(ed->headp & OHCI_ED_HEAD_HALTED) &&
-            !async.cancel && !transfer_expired(timer)) return;
+            !async.cancel && !transfer_expired(async, timer)) return;
+        if (!acquire_schedule(async)) return;
+        async.saved_command = regs->control;
         ep.ed->control |= ohci::ed::skip;
         asm volatile("mfence" ::: "memory");
         regs->control &= ~enable;
         (void)regs->control;
         async.frame = hc->frame_number;
-        transfer_phase(4);
+        transfer_phase(async, 4);
         return;
     case 4:
         if (hc->frame_number == async.frame) {
-            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(UNLINK_ERROR);
             return;
         }
         if (periodic) {
@@ -2308,14 +2332,14 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
         ep.scheduled = false;
         ep.ed->next_ed = 0;
         asm volatile("mfence" ::: "memory");
-        transfer_phase(5);
+        transfer_phase(async, 5);
         return;
     case 5: {
         const u32 control = td->control;
         const u32 cc = (control >> 28) & 15u;
         async.result.hardware_status = control;
         if (cc < 14 && !(async.retired & OHCI_TD_DATA_DONE)) {
-            if (phase_expired(timer, 20)) fail(FAILED);
+            if (phase_expired(async, timer, 20)) fail(FAILED);
             return;
         }
         // Hardware no longer references the retired/cancelled packet TD.
@@ -2326,7 +2350,7 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
             regs->command_status = OHCI_BLF;
         (void)regs->control;
         if (cc >= 14) {
-            transfer_complete(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+            transfer_complete(async, async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
             return;
         }
         if (cc != 0) { fail(FAILED); return; }
@@ -2343,7 +2367,7 @@ void ohci_controller::advance_transfer(TimerSource &timer) {
             actual = (u32)((u64)cbp - base);
         }
         async.result.actual_length = actual;
-        transfer_complete(TRANSFER_SUCCESS);
+        transfer_complete(async, TRANSFER_SUCCESS);
         return;
     }
     default: fail(FAILED); return;
@@ -2360,10 +2384,7 @@ void ohci_controller::service_irq_events() {
         return;
     }
     ohci_transfer_watch watch = {};
-    if (async.active && async.endpoint) {
-        watch.data_phys = ((ohci_endpoint_state *)async.endpoint)->data_td_phys;
-        watch.retired_mask = (u8)async.retired;
-    }
+    watch.requests = requests;
+    watch.request_count = request_capacity;
     if (!process_done_queue(hcca, regs, &watch)) controller.needs_reinit = true;
-    if (async.active) async.retired = watch.retired_mask;
 }

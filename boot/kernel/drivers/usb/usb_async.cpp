@@ -11,45 +11,93 @@ usb_transfer_result usb_controller::transfer_result(int status, u32 handle) cons
     return result;
 }
 
-bool usb_controller::phase_expired(TimerSource &timer, u32 ms) const {
-    const u64 ticks = (timer.read_freq() * ms + 999) / 1000;
-    return async.phase_elapsed >= ticks;
+bool usb_controller::phase_expired(const usb_async_request &async, TimerSource &timer, u32 ms) const {
+    return async.phase_elapsed >= (timer.read_freq() * ms + 999) / 1000;
 }
-
-bool usb_controller::transfer_expired(TimerSource &timer) const {
-    return async.timeout && async.elapsed >=
-        (timer.read_freq() * async.timeout + 999) / 1000;
+bool usb_controller::transfer_expired(const usb_async_request &async, TimerSource &timer) const {
+    return async.timeout && async.elapsed >= (timer.read_freq() * async.timeout + 999) / 1000;
 }
-
-void usb_controller::transfer_phase(u32 phase) {
+void usb_controller::transfer_phase(usb_async_request &async, u32 phase) {
     async.phase = phase;
     async.phase_elapsed = 0;
 }
-
-void usb_controller::transfer_complete(int status) {
+void usb_controller::transfer_complete(usb_async_request &async, int status) {
     async.result.status_code = status;
     async.completed = true;
+    release_schedule(async);
+}
+bool usb_controller::acquire_schedule(usb_async_request &request) {
+    if (schedule_editor && schedule_editor != &request) return false;
+    if (!schedule_editor) request.phase_elapsed = 0;
+    schedule_editor = &request;
+    return true;
+}
+void usb_controller::release_schedule(usb_async_request &request) {
+    if (schedule_editor == &request) schedule_editor = nullptr;
+}
+usb_async_request *usb_controller::find_request(u64 id) {
+    if (id) for (auto &request : requests)
+        if (request.active && request.result.request_id == id) return &request;
+    return nullptr;
+}
+void usb_controller::advance_requests(TimerSource &timer) {
+    // Every endpoint gets service, including a schedule editor whose caller
+    // is currently waiting on a different endpoint. Results stay owned until read.
+    for (auto &request : requests) {
+        if (!request.active || request.completed) continue;
+        const u32 now = (u32)timer.read() & 0xffffffu;
+        const u32 delta = (now - request.previous_tick) & 0xffffffu;
+        request.previous_tick = now;
+        request.elapsed += delta;
+        request.phase_elapsed += delta;
+        advance_transfer(request, timer);
+    }
+}
+void usb_controller::usb_service_transfers(TimerSource &timer) {
+    usb_periodic::request_guard guard(async_api_busy);
+    if (guard) advance_requests(timer);
+}
+
+// Synchronous EP0 code may edit the same lists. Finish a bounded schedule
+// transition first, without waiting for pending endpoint packets to complete.
+// These APIs share one foreground context; no callbacks run inside this helper.
+bool usb_controller::prepare_control(TimerSource &timer) {
+    for (unsigned elapsed = 0; elapsed < 500; ++elapsed) {
+        if (controller.needs_reinit) return false;
+        if (!schedule_editor) return true;
+        usb_service_transfers(timer);
+        wait_ms(timer, 1);
+    }
+    return false;
 }
 
 usb_transfer_result usb_controller::usb_submit_transfer(
     u32 handle, const void *buffer, u32 length, TimerSource &timer, u32 timeout)
 {
     usb_periodic::request_guard guard(async_api_busy);
-    if (!guard || async.active) return transfer_result(TRANSFER_BUSY, handle);
+    if (!guard) return transfer_result(TRANSFER_BUSY, handle);
     if (controller.needs_reinit || !timer.read_freq() || next_request_id == ~0ULL)
         return transfer_result(FAILED, handle);
+    usb_async_request *available = nullptr;
+    for (auto &request : requests) {
+        if (request.active && request.result.endpoint_handle == handle)
+            return transfer_result(TRANSFER_BUSY, handle);
+        if (!request.active && !available) available = &request;
+    }
+    if (!available) return transfer_result(TRANSFER_BUSY, handle);
+    auto &async = *available;
     async = {};
     async.result = transfer_result(TRANSFER_PENDING, handle);
     async.length = length;
     async.timeout = timeout;
     async.previous_tick = (u32)timer.read() & 0xffffffu;
     async.active = true;
-    usb_transfer_result result = start_transfer(handle, const_cast<void *>(buffer), length, timer);
+    auto result = start_transfer(async, handle, const_cast<void *>(buffer), length, timer);
     if (result.status_code != TRANSFER_PENDING) {
+        release_schedule(async);
         async.active = false;
         return result;
     }
-    // Never reuse IDs, including after collection. Zero is always invalid.
     async.result.request_id = ++next_request_id;
     return async.result;
 }
@@ -59,25 +107,16 @@ usb_transfer_result usb_controller::usb_read_transfer(
 {
     usb_periodic::request_guard guard(async_api_busy);
     if (!guard) return transfer_result(TRANSFER_BUSY);
-    if (!id || !async.active || id != async.result.request_id)
-        return transfer_result(INVALID_REQUEST);
-    if (!async.completed) {
-        // Match wait_ms(): accumulate wrapping 24-bit timer samples. Service
-        // pending requests at least once per timer wrap (about 4.7 s for PM).
-        const u32 now = (u32)timer.read() & 0xffffffu;
-        const u32 delta = (now - async.previous_tick) & 0xffffffu;
-        async.previous_tick = now;
-        async.elapsed += delta;
-        async.phase_elapsed += delta;
-        advance_transfer(timer);
-    }
+    auto *request = find_request(id);
+    if (!request) return transfer_result(INVALID_REQUEST);
+    advance_requests(timer);
+    auto &async = *request;
     if (!async.completed) return async.result;
-    if (async.result.status_code == TRANSFER_SUCCESS && async.in &&
-        async.result.actual_length) {
+    if (async.result.status_code == TRANSFER_SUCCESS && async.in && async.result.actual_length) {
         if (!buffer || capacity < async.result.actual_length) {
             auto result = async.result;
             result.status_code = INVALID_LENGTH;
-            return result; // Keep completion available for a larger buffer.
+            return result;
         }
         memcpy(buffer, async.dma_buffer, async.result.actual_length);
     }
@@ -85,28 +124,30 @@ usb_transfer_result usb_controller::usb_read_transfer(
     async.active = false;
     return result;
 }
-
 usb_transfer_result usb_controller::usb_cancel_transfer(u64 id, TimerSource &timer) {
     (void)timer;
     usb_periodic::request_guard guard(async_api_busy);
     if (!guard) return transfer_result(TRANSFER_BUSY);
-    if (!id || !async.active || id != async.result.request_id)
-        return transfer_result(INVALID_REQUEST);
-    async.cancel = true;
-    return async.result; // Keep reading until cancellation/completion is collected.
+    auto *request = find_request(id);
+    if (!request) return transfer_result(INVALID_REQUEST);
+    request->cancel = true;
+    return request->result;
 }
-
 usb_transfer_result usb_controller::usb_transfer(
     u32 handle, void *buffer, u32 length, TimerSource &timer, u32 timeout)
 {
     if (length && !buffer) return transfer_result(INVALID_LENGTH, handle);
-    auto result = usb_submit_transfer(handle, buffer, length, timer, timeout);
+    // Zero retains the blocking API's finite one-millisecond deadline.
+    auto result = usb_submit_transfer(handle, buffer, length, timer, timeout ? timeout : 1);
     if (result.status_code != TRANSFER_PENDING) return result;
     const u64 id = result.request_id;
-    // Keep zero as a finite deadline for the legacy blocking API.
-    if (!timeout) async.timeout = 1;
     do {
+        usb_begin_irq_service();
         result = usb_read_transfer(id, buffer, length, timer);
+        // Callbacks run outside the request guard. A long bulk wait must not
+        // postpone keyboard collection and rearming until the disk finishes.
+        if (usb_interrupt_registered()) usb_service_interrupts(timer);
+        usb_end_irq_service();
         if (result.status_code == TRANSFER_PENDING || result.status_code == TRANSFER_BUSY)
             wait_ms(timer, 1);
     } while (result.status_code == TRANSFER_PENDING || result.status_code == TRANSFER_BUSY);
@@ -154,6 +195,7 @@ void usb_controller::usb_unregister_interrupt(TimerSource &timer) {
 void usb_controller::usb_service_interrupts(TimerSource &timer) {
     if (interrupt_servicing) return;
     interrupt_servicing = true;
+    if (!interrupt_request) usb_service_transfers(timer);
     if (interrupt_request) {
         auto result = usb_read_transfer(interrupt_request, interrupt_buffer,
                                         sizeof(interrupt_buffer), timer);

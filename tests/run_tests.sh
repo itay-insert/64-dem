@@ -30,7 +30,8 @@ cc -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
 
 c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
     -fsanitize=undefined $kernel_includes tests/test_hid_keyboard.cpp \
-    boot/kernel/drivers/keyboard/hid_report.cpp -o /tmp/64-dem-test-hid
+    boot/kernel/drivers/keyboard/hid_report.cpp \
+    boot/kernel/drivers/keyboard/keyboard.cpp -o /tmp/64-dem-test-hid
 /tmp/64-dem-test-hid
 
 

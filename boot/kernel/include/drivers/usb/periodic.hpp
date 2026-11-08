@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-// Planning for the one-periodic-request-at-a-time transfer API.
+// Planning for legacy controllers with one admitted periodic endpoint.
 namespace usb_periodic {
 class request_guard {
     unsigned &flag;
@@ -37,7 +37,7 @@ inline ehci_plan high_speed_plan(unsigned interval) {
 }
 
 // Refuse occupied schedules. This avoids corrupting another endpoint's links
-// until concurrent requests and bandwidth admission are implemented.
+// until a periodic tree and bandwidth admission are implemented.
 inline bool install(volatile uint32_t *table, unsigned entries,
                     unsigned period, uint32_t empty, uint32_t link) {
     if (!period || period > entries) return false;

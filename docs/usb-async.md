@@ -39,10 +39,17 @@ a later request.
 - A terminal result is collected once. If a successful IN result needs a larger
   buffer, INVALID_LENGTH leaves it available for another read; actual_length tells
   the caller how many bytes are required.
-- There is one outstanding/uncollected request per controller. A second submission
-  returns TRANSFER_BUSY. A pending keyboard request therefore currently prevents
-  storage transfers and EP0 requests on that same controller. Multiple concurrent
-  endpoint queues remain future work.
+- There is one outstanding/uncollected request per endpoint, with 32 request
+  slots per controller. Different endpoints can run concurrently: an idle keyboard
+  interrupt-IN read does not prevent bulk storage reads/writes on that controller.
+  Submitting to an occupied endpoint, or exhausting the controller's request slots,
+  returns TRANSFER_BUSY. A completed result still owns its endpoint and DMA buffer
+  until collected. Requests are not queued behind another packet on the same endpoint.
+- UHCI supports multiple scheduled endpoint QHs. OHCI/EHCI still admit only one
+  outstanding periodic endpoint per controller because their periodic-table helpers
+  do not implement a tree or bandwidth admission. Another periodic endpoint returns
+  TRANSFER_BUSY; bulk endpoints remain independent. There is still only one recurring
+  interrupt subscription per controller, including on xHCI.
 - `usb_cancel_transfer(id, timer)` marks cancellation. Keep calling read until a
   terminal result is collected. A packet that completed before cancellation may
   still return success. Do not reset/free controller state while cancellation is
@@ -57,13 +64,37 @@ a later request.
   DMA, and legacy completion processing can emit diagnostics.
 - The original blocking `usb_transfer` is a submit/read wrapper. Its timeout zero
   is treated as a finite one-millisecond deadline. Callers can use it unchanged.
+  Its waits progress every active endpoint and collect/rearm the interrupt
+  subscription, so keyboard callbacks can run during a blocking storage call.
+  Each iteration also acknowledges/drains controller IRQ events and reenables
+  delivery, rather than leaving the source masked until the bulk call returns.
+  Callbacks run outside the request guard and should keep their work bounded.
+- `usb_read_transfer` advances all active requests, preserving other callers'
+  completed results. `usb_service_transfers(timer)` also progresses every request
+  without collecting results. Foreground interrupt service includes this progress;
+  callers using raw asynchronous I/O still collect their own request IDs.
 
 ## Controller behavior
 
 UHCI waits for halt/start using polled states. OHCI waits for a new frame after
 disabling a list, then reaps DoneHead references before recycling either TD.
 EHCI waits for the correct ASS/PSS transition before editing its async/periodic
-list. xHCI uses its configured endpoint ring and event waiter.
+list. A per-controller schedule editor serializes these bounded legacy transitions,
+not the lifetime of a pending packet. Schedule enable state is sampled at each edit,
+so retiring one endpoint cannot restore a stale state and disable another endpoint.
+UHCI briefly pauses the controller for an edit; OHCI/EHCI pause the affected list.
+These transitions can add latency; they are not bandwidth or real-time guarantees.
+
+OHCI routes each TD in the shared DoneHead to its owning request before acknowledging
+WDH, including when a synchronous control transfer drains that queue. xHCI routes
+Transfer Events by slot, endpoint ID and expected TRB to independent request records;
+its synchronous EP0 waiter is separate from the bulk/interrupt routes.
+
+Synchronous EP0 calls finish any in-progress schedule edit before installing their
+control descriptors. They do not wait for idle keyboard reads to complete. UHCI
+keeps existing endpoint QHs reachable while EP0 runs. Control calls retain polling
+and dispatch no foreground callbacks until they return. Enumeration, endpoint
+reconfiguration and controller destruction still require callers to quiesce I/O.
 
 UHCI/OHCI can cancel an unexecuted packet after quiescence. EHCI/xHCI cancellation
 and timeout conservatively require controller recovery; xHCI retains its DMA
@@ -96,7 +127,7 @@ interrupt-IN subscription per controller. Registration validates the discovered
 endpoint and accepts reports up to 64 bytes and no larger than its packet size.
 Call `GlobalUSB::service_interrupts(timer)` regularly from the foreground loop.
 The first service submits a read; later calls collect it, invoke the callback,
-and rearm on success. A controller occupied by another request is retried later.
+and rearm on success. An occupied subscription endpoint or unavailable request slot is retried later.
 Callbacks receive a terminal result and controller-owned data valid only during
 the call (null on submission failure). Errors stop the subscription. Recursive
 service calls are ignored; callbacks may unregister themselves.
@@ -113,8 +144,9 @@ its first read. Boot reports become PC Set 1 make/break bytes in the inherited
 circular write buffers using the existing counters. Consumers must track their
 own progress; old bytes are overwritten. Typematic repetition, hotplug discovery,
 and automatic recovery after a terminal controller error are not implemented.
-The current kernel discovers devices at startup and services subscriptions in
-its main loop after boot-device work has finished.
+The current kernel discovers devices at startup. Service subscriptions regularly
+from the foreground loop; blocking bulk waits also service the same controller's
+subscription.
 
 ## Controller IRQ setup
 
@@ -136,9 +168,11 @@ The USB top half checks the source and masks controller interrupt delivery, reta
 status and DMA ownership for foreground processing. This deasserts the source before
 APIC EOI without prematurely clearing OHCI WDH or consuming xHCI events. IRQ counters
 are available through `usb_irq_count()` and route status through `usb_irq_ready()`.
+The counter records asserted sources handled by the top half; a queued vector
+arriving after foreground polling cleared its source is ignored and not counted.
 
 `GlobalUSB::service_interrupts(timer)` masks sources, acknowledges UHCI/EHCI transfer
-status, reaps OHCI DoneHead with the current request's retirement watch, drains the
+status, routes OHCI DoneHead to each request's retirement watch, drains the
 xHCI event ring, services subscriptions, and reenables interrupt delivery. Fatal
 controller errors leave interrupts masked and mark the controller for recovery.
 UHCI TDs and EHCI qTDs now request completion interrupts; OHCI and xHCI already did.
@@ -154,8 +188,9 @@ an SMP interrupt migration or interrupt-remapping implementation. MSI-X MMIO use
 the existing direct-map window and rejects physical addresses at or above 1 TiB.
 No hotplug reenumeration or fatal-controller recovery is added by IRQ setup.
 
-The single-outstanding-request limitation still applies: a pending keyboard read
-can block storage/control transfers on the same controller.
+Keyboard, bulk and synchronous control traffic can share one controller. Hardware
+interrupt setup does not change the request ownership or foreground-service rules
+above.
 
 Controller register references: [Intel xHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf),
 [Intel EHCI specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/ehci-specification-for-usb.pdf),
@@ -185,3 +220,29 @@ actual choice; the earlier `HID keyboard found` lines only identify candidates.
 
 Idle interrupt-IN requests remain pending silently until input arrives. Only
 initialization, first-report, and actual transfer-error diagnostics are printed.
+
+## Concurrent keyboard/storage validation
+
+Run `bash tests/run_tests.sh` for the host suite. The asynchronous tests cover an
+idle keyboard during repeated bulk calls, callback delivery before a blocking bulk
+request finishes, independent DMA/results, per-request cancellation and wrapping
+deadlines, retained completions, capacity exhaustion and stale IDs.
+
+`python3 tests/run_usb_concurrency_qemu.py --work-dir /tmp/usb-concurrency-check`
+builds an isolated temporary kernel and boots QEMU with a keyboard and read-only
+patterned mass-storage disk on the same controller. The directory must be empty.
+It requires the normal UEFI/kernel build dependencies, QEMU, OVMF, dosfstools,
+mtools and sfdisk. Use `--controller xhci --irq-mode msi` for one case.
+
+The probe checks 144 READ(10) sectors per case, including 16 reads while the
+keyboard is idle and subsequent reads while QMP injects keys. It also exercises
+EP0 with keyboard and bulk IN requests outstanding. UHCI/OHCI/EHCI polling and
+xHCI MSI/MSI-X/polling passed these data/input/control checks. The runner records
+QEMU interrupt traces to distinguish actual vector delivery from source counters
+that can miss vectors already acknowledged by foreground polling. Repeated xHCI
+MSI vector 0x50 delivery was additionally verified after adding IRQ service to
+blocking bulk waits. Physical hardware concurrency remains unverified.
+
+The probe is test-only; it does not change the production kernel or implement the
+mass-storage abstraction. Existing single-packet limits and conservative
+EHCI/xHCI timeout/cancellation recovery requirements still apply.

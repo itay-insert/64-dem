@@ -1068,7 +1068,7 @@ usb_device uhci_controller::set_address(usb_device_descriptor &desc, TimerSource
 
 
 void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) {
-    if (usb_transfer_pending() || controller.needs_reinit) return nullptr; // EP0 must not steal pending DMA/events.
+    if (!prepare_control(timer)) return nullptr;
 
     if (!maxpacketsize || length != packet.wLength || length > 4096 ||
         (length && !(packet.BmRequestType & IN)))
@@ -1196,7 +1196,8 @@ void *uhci_controller::usb_send_packet(usb_setup_packet packet, u32 maxpacketsiz
 
     *qh = {};
 
-    qh->head_link = UHCI_LINK_TERMINATE;
+    // Keep existing endpoint queues reachable during the synchronous EP0 wait.
+    qh->head_link = anchor ? (anchor_phys | 2u) : UHCI_LINK_TERMINATE;
     qh->element_link = setup_td_phys;
 
 
@@ -1530,7 +1531,7 @@ bool uhci_controller::unlink_qh(uhci_endpoint_state &ep, TimerSource &timer) {
 }
 
 
-usb_transfer_result uhci_controller::start_transfer(u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
+usb_transfer_result uhci_controller::start_transfer(usb_async_request &async, u32 endpoint_address, void *buffer, u32 length, TimerSource &timer) {
     (void)timer;
 
     usb_transfer_result transfer = {0};
@@ -1605,6 +1606,13 @@ usb_transfer_result uhci_controller::start_transfer(u32 endpoint_address, void *
         return transfer;
     }
 
+    for (const auto &other : requests) {
+        if (&other != &async && other.active && other.endpoint == &ep) {
+            transfer.status_code = TRANSFER_BUSY;
+            return transfer;
+        }
+    }
+
     const bool in = (ep.endpoint_address & 0x80u) != 0;
      
     *ep.td = {};
@@ -1636,26 +1644,29 @@ usb_transfer_result uhci_controller::start_transfer(u32 endpoint_address, void *
     async.endpoint = &ep;
     async.dma_buffer = dma_buffer;
     async.in = in;
-    const u16 base = (u16)controller.io_base;
-    async.saved_command = inw(base + UHCI_USBCMD);
-    outw(base + UHCI_USBCMD, (u16)(async.saved_command & ~1u));
-    transfer_phase(1);
+    transfer_phase(async, 10);
     transfer.status_code = TRANSFER_PENDING;
     return transfer;
 }
 
-void uhci_controller::advance_transfer(TimerSource &timer) {
+void uhci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     auto &ep = *(uhci_endpoint_state *)async.endpoint;
     const u16 base = (u16)controller.io_base;
     auto fail = [&](int code) {
         controller.needs_reinit = true;
-        transfer_complete(code);
+        transfer_complete(async, code);
     };
     if (controller.needs_reinit) { fail(FAILED); return; }
     switch (async.phase) {
+    case 10:
+        if (!acquire_schedule(async)) return;
+        async.saved_command = inw(base + UHCI_USBCMD);
+        outw(base + UHCI_USBCMD, (u16)(async.saved_command & ~1u));
+        transfer_phase(async, 1);
+        return;
     case 1:
         if (!(inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
         ep.qh->head_link = anchor->head_link;
@@ -1664,25 +1675,28 @@ void uhci_controller::advance_transfer(TimerSource &timer) {
         ep.scheduled = true;
         asm volatile("mfence" ::: "memory");
         outw(base + UHCI_USBCMD, (u16)(async.saved_command | 1u));
-        transfer_phase(2);
+        transfer_phase(async, 2);
         return;
     case 2:
         if (inw(base + UHCI_USBSTS) & UHCI_STS_HCH) {
-            if (phase_expired(timer, 100)) fail(LINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(LINK_ERROR);
             return;
         }
-        transfer_phase(3);
+        release_schedule(async);
+        transfer_phase(async, 3);
         return;
     case 3:
         if (((volatile uhci_td *)ep.td)->status & uhci::td::active) {
-            if (!async.cancel && !transfer_expired(timer)) return;
+            if (!async.cancel && !transfer_expired(async, timer)) return;
         }
-        outw(base + UHCI_USBCMD, (u16)(inw(base + UHCI_USBCMD) & ~1u));
-        transfer_phase(4);
+        if (!acquire_schedule(async)) return;
+        async.saved_command = inw(base + UHCI_USBCMD);
+        outw(base + UHCI_USBCMD, (u16)(async.saved_command & ~1u));
+        transfer_phase(async, 4);
         return;
     case 4: {
         if (!(inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
-            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(UNLINK_ERROR);
             return;
         }
         volatile uhci_qh *previous = anchor;
@@ -1706,18 +1720,18 @@ void uhci_controller::advance_transfer(TimerSource &timer) {
         ep.qh->element_link = 1;
         asm volatile("mfence" ::: "memory");
         outw(base + UHCI_USBCMD, (u16)async.saved_command);
-        transfer_phase(6);
+        transfer_phase(async, 6);
         return;
     }
     case 6: {
         if ((async.saved_command & 1u) && (inw(base + UHCI_USBSTS) & UHCI_STS_HCH)) {
-            if (phase_expired(timer, 100)) fail(UNLINK_ERROR);
+            if (phase_expired(async, timer, 100)) fail(UNLINK_ERROR);
             return;
         }
         const u32 status = ((volatile uhci_td *)ep.td)->status;
         async.result.hardware_status = status;
         if (status & uhci::td::active) {
-            transfer_complete(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
+            transfer_complete(async, async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
         } else if (status & 0x00760000u) { // Terminal errors, excluding NAK.
             fail(FAILED);
         } else {
@@ -1725,7 +1739,7 @@ void uhci_controller::advance_transfer(TimerSource &timer) {
             const u32 actual = ((status & 0x7ffu) + 1u) & 0x7ffu;
             if (actual > async.length) { fail(INVALID_LENGTH); return; }
             async.result.actual_length = actual;
-            transfer_complete(TRANSFER_SUCCESS);
+            transfer_complete(async, TRANSFER_SUCCESS);
         }
         return;
     }

@@ -1,12 +1,20 @@
 #include <assert.h>
 #include <stdio.h>
 #include "drivers/keyboard/hid.hpp"
-volatile u64 keyboard_irq_count = 0;
+#include "drivers/keyboard/ps2.hpp"
+#include "drivers/acpiPM.hpp"
+GlobalKeyboard *globalkeyboard = nullptr;
+u64 acpiadd = 0;
 // Hardware discovery is excluded from this report decoder test.
 void HIDK::init() {}
+void PS2K::init() {}
+void AcpiPM::AcpiReset() { assert(false); }
+void AcpiPM::AcpiShutDown() { assert(false); }
 int main() {
+    GlobalKeyboard buffers;
+    globalkeyboard = &buffers;
     HIDK hid;
-    keyboard *base = &hid;
+    GlobalKeyboard *base = globalkeyboard;
     hid.process_report({0, 0, {4}}); // A press
     assert(base->scancode_top == 1 && u8(base->buffer[0]) == 0x1e);
     assert(base->ascii_top == 1 && base->ascii[0] == 'a');

@@ -72,9 +72,9 @@ class uhci_controller : public usb_controller {
     
 
     protected:
-        usb_transfer_result start_transfer(u32 endpoint_handle, void *buffer,
+        usb_transfer_result start_transfer(usb_async_request &async, u32 endpoint_handle, void *buffer,
             u32 length, TimerSource &timer) override;
-        void advance_transfer(TimerSource &timer) override;
+        void advance_transfer(usb_async_request &async, TimerSource &timer) override;
     public:
         int controller_init(TimerSource &timer) override;
         int enumrate_ports();
