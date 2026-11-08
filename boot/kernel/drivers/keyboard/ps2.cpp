@@ -6,15 +6,9 @@
 
 extern GlobalKeyboard *globalkeyboard;
 
-extern u64 acpiadd;
-
 void PS2K::init() {
     memcpy(vendor, "PS2", 4);
-    scancode_top = 0;
 }
-
-volatile u64 keyboard_irq_count = 0;
-
 
 struct KeyMap {
     u8 scancode;
@@ -75,6 +69,109 @@ static char lookup_scancode(u8 code, u8 shift, u8 caps_lock)
 
     return 0;
 }
+
+
+char scancode_to_ascii(u8 scancode)
+{
+    static bool left_shift = false;
+    static bool right_shift = false;
+    static bool caps_lock = false;
+    static bool caps_down = false;
+    static bool num_lock = false;
+    static bool num_down = false;
+    static bool extended = false;
+    static u8 pause_bytes = 0;
+
+    if (pause_bytes) {
+        --pause_bytes;
+        return 0;
+    }
+
+    if (scancode == 0xE1) {
+        pause_bytes = 5;
+        extended = false;
+        return 0;
+    }
+
+    if (scancode == 0xE0) {
+        extended = true;
+        return 0;
+    }
+
+    bool ext = extended;
+    extended = false;
+
+    bool released = (scancode & 0x80) != 0;
+    u8 code = scancode & 0x7F;
+
+    if (ext) {
+        if (!released && code == 0x1C) return '\n';
+        if (!released && code == 0x35) return '/';
+        return 0;
+    }
+
+    switch (code) {
+    case 0x2A:
+        left_shift = !released;
+        return 0;
+
+    case 0x36:
+        right_shift = !released;
+        return 0;
+
+    case 0x3A:
+        if (released)
+            caps_down = false;
+        else if (!caps_down) {
+            caps_lock = !caps_lock;
+            caps_down = true;
+        }
+        return 0;
+
+    case 0x45:
+        if (released)
+            num_down = false;
+        else if (!num_down) {
+            num_lock = !num_lock;
+            num_down = true;
+        }
+        return 0;
+    }
+
+    if (released)
+        return 0;
+
+    bool shift = left_shift || right_shift;
+
+    /* Keypad operators work independently of Num Lock. */
+    if (code == 0x4A) return '-';
+    if (code == 0x4E) return '+';
+
+    /* Numeric keypad digits and decimal point. */
+    if (code >= 0x47 && code <= 0x53) {
+        char c = 0;
+
+        switch (code) {
+        case 0x47: c = '7'; break;
+        case 0x48: c = '8'; break;
+        case 0x49: c = '9'; break;
+        case 0x4B: c = '4'; break;
+        case 0x4C: c = '5'; break;
+        case 0x4D: c = '6'; break;
+        case 0x4F: c = '1'; break;
+        case 0x50: c = '2'; break;
+        case 0x51: c = '3'; break;
+        case 0x52: c = '0'; break;
+        case 0x53: c = '.'; break;
+        }
+
+        return ((num_lock ^ shift) && c) ? c : 0;
+    }
+
+    return lookup_scancode(code, shift, caps_lock);
+}
+
+
 
 static bool ps2_wait_input_empty()
 {
@@ -180,134 +277,21 @@ bool ps2_controller_init()
     return true;
 }
 
-char scancode_to_ascii(u8 scancode)
-{
-    static bool left_shift = false;
-    static bool right_shift = false;
-    static bool caps_lock = false;
-    static bool caps_down = false;
-    static bool num_lock = false;
-    static bool num_down = false;
-    static bool extended = false;
-    static u8 pause_bytes = 0;
-
-    if (pause_bytes) {
-        --pause_bytes;
-        return 0;
-    }
-
-    if (scancode == 0xE1) {
-        pause_bytes = 5;
-        extended = false;
-        return 0;
-    }
-
-    if (scancode == 0xE0) {
-        extended = true;
-        return 0;
-    }
-
-    bool ext = extended;
-    extended = false;
-
-    bool released = (scancode & 0x80) != 0;
-    u8 code = scancode & 0x7F;
-
-    if (ext) {
-        if (!released && code == 0x1C) return '\n';
-        if (!released && code == 0x35) return '/';
-        return 0;
-    }
-
-    switch (code) {
-    case 0x2A:
-        left_shift = !released;
-        return 0;
-
-    case 0x36:
-        right_shift = !released;
-        return 0;
-
-    case 0x3A:
-        if (released)
-            caps_down = false;
-        else if (!caps_down) {
-            caps_lock = !caps_lock;
-            caps_down = true;
-        }
-        return 0;
-
-    case 0x45:
-        if (released)
-            num_down = false;
-        else if (!num_down) {
-            num_lock = !num_lock;
-            num_down = true;
-        }
-        return 0;
-    }
-
-    if (released)
-        return 0;
-
-    bool shift = left_shift || right_shift;
-
-    /* Keypad operators work independently of Num Lock. */
-    if (code == 0x4A) return '-';
-    if (code == 0x4E) return '+';
-
-    /* Numeric keypad digits and decimal point. */
-    if (code >= 0x47 && code <= 0x53) {
-        char c = 0;
-
-        switch (code) {
-        case 0x47: c = '7'; break;
-        case 0x48: c = '8'; break;
-        case 0x49: c = '9'; break;
-        case 0x4B: c = '4'; break;
-        case 0x4C: c = '5'; break;
-        case 0x4D: c = '6'; break;
-        case 0x4F: c = '1'; break;
-        case 0x50: c = '2'; break;
-        case 0x51: c = '3'; break;
-        case 0x52: c = '0'; break;
-        case 0x53: c = '.'; break;
-        }
-
-        return ((num_lock ^ shift) && c) ? c : 0;
-    }
-
-    return lookup_scancode(code, shift, caps_lock);
-}
-
 
 extern "C" void keyboard_handler() {
     u8 status = inb(0x64);
 
     if (status & 1) {
         u8 scancode = inb(0x60);
-        if (!globalkeyboard || !globalkeyboard->keyboards[0])
+        if (!globalkeyboard)
             return;
-        if (scancode == 0x57) {
-            AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiReset(); // acpi reset if scancode is 0x57
-        } else if (scancode == 0x58) {
-            AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiShutDown(); // acpi shutdown if scancode is 0x58
-        }
-            
-        globalkeyboard->keyboards[0]->buffer[globalkeyboard->keyboards[0]->scancode_top] = scancode;
-        globalkeyboard->keyboards[0]->scancode_top++;
+       
+        globalkeyboard->proccess_scancode(scancode);
         char ascii = scancode_to_ascii(scancode);
         if (ascii != 0 && !(scancode & 0x80)) {
-            globalkeyboard->keyboards[0]->ascii[globalkeyboard->keyboards[0]->ascii_top] = ascii;
-            globalkeyboard->keyboards[0]->ascii_top++;
+            globalkeyboard->proccess_ascii(ascii);
         }
-        if (globalkeyboard->keyboards[0]->scancode_top == 256)
-            globalkeyboard->keyboards[0]->scancode_top = 0;
-        if (globalkeyboard->keyboards[0]->ascii_top == 256)
-            globalkeyboard->keyboards[0]->ascii_top = 0;
-        keyboard_irq_count++;
+        
     }
     
 }

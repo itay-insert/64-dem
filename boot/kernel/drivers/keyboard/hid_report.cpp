@@ -1,8 +1,7 @@
 #include "drivers/keyboard/hid.hpp"
-#include "drivers/acpiPM.hpp"
 
-extern volatile u64 keyboard_irq_count;
-extern u64 acpiadd;
+
+extern GlobalKeyboard *globalkeyboard;
 
 static bool contains(const hid_keyboard_report &report, u8 key) {
     for (u8 value : report.keys) if (value == key) return true;
@@ -46,15 +45,10 @@ void HIDK::key(u8 usage, bool pressed, u8 modifiers) {
     else if (usage == 0x65) code = 0x15d;
     else if (usage >= 0xe0 && usage <= 0xe7) code = modifier_codes[usage - 0xe0];
     auto append = [this](u8 byte) {
-        buffer[scancode_top] = byte;
-        if (byte == 0x57) {
-            AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiReset();
-        } else if (byte == 0x58) {
-            AcpiPM *acpi = (AcpiPM *)acpiadd;
-            acpi->AcpiShutDown();
-        }
-        scancode_top = (scancode_top + 1) % sizeof(buffer);
+        if (!globalkeyboard)
+            return;
+
+        globalkeyboard->proccess_scancode(byte);
     };
     if (usage == 0x46) { // Print Screen
         append(0xe0); append(pressed ? 0x2a : 0xb7);
@@ -104,9 +98,11 @@ void HIDK::key(u8 usage, bool pressed, u8 modifiers) {
             }
         }
         if (character) {
-            ascii[ascii_top] = character;
-            ascii_top = (ascii_top + 1) % sizeof(ascii);
+            if (!globalkeyboard)
+                return;
+
+            globalkeyboard->proccess_ascii(character);
         }
     }
-    if (code || usage == 0x46 || (usage == 0x48 && pressed)) ++keyboard_irq_count;
+    
 }

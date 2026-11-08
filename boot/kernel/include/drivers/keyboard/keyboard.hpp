@@ -1,13 +1,9 @@
 #pragma once
-
+#include "uint_definitions.h"
 
 class keyboard {
     public:
-        int scancode_top = 0;
-        int ascii_top = 0;
         char vendor[4] = {};
-        char buffer[256] = {};
-        char ascii[256] = {};
         virtual void init() {}
 };
 
@@ -15,6 +11,11 @@ class keyboard {
 class GlobalKeyboard {
     public:
         keyboard *keyboards[2] = {};
-        int index;
+        int scancode_top = 0;
+        int ascii_top = 0;
+        char buffer[256] = {};
+        char ascii[256] = {};
+        void proccess_scancode(u8 scancode);
+        void proccess_ascii(char ch);
         GlobalKeyboard();
 };
