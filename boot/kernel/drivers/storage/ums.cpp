@@ -317,13 +317,6 @@ void ums_discover() {
         if (!ums_init(&drives[i])) {
             printf("UMS: failed to initialize drive 0x%w\n", i);
         }
-        read_first_sector(&drives[i]);
-        if (sector[450] == 0x0B | sector[450] == 0x0C) {
-            printf("Boot drive first sector:\n");
-            for (int i = 0; i < 512; i++) {
-                printf("0x%b  ", sector[i]);
-            }
-        }
 
     }
 
