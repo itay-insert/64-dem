@@ -23,6 +23,18 @@ typedef struct __attribute__((packed)) {
     u8 status;
 } msc_csw;
 
+typedef struct __attribute__((packed)) {
+    u8 pDeviceType;
+    u8 Removable;
+    u8 Version;
+    u8 response_data_format;
+    u8 adittional_length;
+    u8 flags[3];
+    char vendor[8];
+    char product[16];
+    char Revision[4];
+} scsi_inquiry;
+
 typedef struct {
     u32 endpoint_in_addr;
     u32 endpoint_out_addr;
@@ -36,7 +48,7 @@ typedef struct {
 
 usb_mass_storage *drives = nullptr;
 
-void ums_init() {
+void ums_discover() {
     GlobalUSB *USB = (GlobalUSB *)usb_addr;
 
     
@@ -44,6 +56,17 @@ void ums_init() {
     usb_interface_return result = USB->find_interface(0x08, 0x06, true, 0x50);
     drives = new usb_mass_storage[result.interface_count];
 
+    for (u16 i = 0; i < result.interface_count; i++) {
+        drives[i] = {};
+        drives[i].controller = result.interfaces[i].controller;
+        u32 port_index = (result.interfaces[i].port_index << 16);
+        u32 interface_index = i << 8;
+        u32 endpoint_in = result.interfaces[i].endpoint_bulk_in;
+        u32 endpoint_out = result.interfaces[i].endpoint_bulk_out;
+        drives[i].endpoint_in_addr = port_index | interface_index | endpoint_in;
+        drives[i].endpoint_out_addr = port_index | interface_index | endpoint_out;
+        
+    }
 
     
 }
@@ -190,8 +213,39 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
 bool ums_init(usb_mass_storage *drive) {
     drive->initialized = false;
 
+    u8 inquiry_buffer[36] = {0};
 
+    u8 cdb0[6] = {
+        0x12,
+        0x00,
+        0x00,
+        0x00,
+        0x24
+        0x00
+    };
 
+    if (ums_command(drive, cdb0, 6, inquiry_buffer, 36, true, 5000) != 0) {
+        printf("UMS: inquiry failed\n");
+        return false;
+    }
+
+    u8 cdb1[6] = { 0x00, 0, 0, 0, 0, 0 };
+
+    bool try_again = true;
+
+    if (ums_command(drive, cdb1, 6, nullptr, 0, false, 5000) != 0) {
+        u8 cdb2[6] = { 0x03, 0x00, 0x00, 0x00, 18, 0x00 };
+        u8 sense[18] = {};
+
+        if (ums_command(drive, cdb2, 6, sense, 18, true, 5000) != 0) {
+            printf("UMS: request sense failed\n");
+            return false;
+        }
+
+        u8 sense_key = sense[2] & 0x0f;
+        u8 asc = sense[12];
+        u8 ascq = sense[13];
+    }
 }
 
 void ums_write(usb_mass_storage *drive, u32 lba, u32 sectors, void *buffer) {
