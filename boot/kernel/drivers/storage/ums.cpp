@@ -325,11 +325,73 @@ void free_drives() {
     kfree(drives);
 }
 
-void ums_write(usb_mass_storage *drive, u32 lba, u32 sectors, void *buffer) {
-    // WRITE(10) is not implemented yet.
-    (void)drive;
-    (void)lba;
-    (void)sectors;
-    (void)buffer;
-    printf("UMS: ums_write is not implemented\n");
+void ums_read(usb_mass_storage *drive, u32 lba, u16 sectors, void *buffer) {
+
+    u8 cdb[10] = {
+        0x28, // READ(10)
+        0x00,
+        (lba >> 24), (lba >> 16), (lba >> 8), lba, // LBA = 0
+        0x00,
+        (sectors>>8), sectors,             
+        0x00
+    };
+
+    ums_command(drive, cdb, 10, buffer, (512*sectors), true, 60000);
+}
+
+
+
+void ums_write(usb_mass_storage *drive, u32 lba, u16 sectors, void *buffer) {
+
+    u8 cdb[10] = {
+        0x2A, // READ(10)
+        0x00,
+        (lba >> 24), (lba >> 16), (lba >> 8), lba, // LBA = 0
+        0x00,
+        (sectors>>8), sectors,             
+        0x00
+    };
+
+    ums_command(drive, cdb, 10, buffer, (512*sectors), true, 60000);
+}
+
+
+void UMS_drive::read_sectors(u32 lba, u32 sector_count, void *buffer) {
+    u32 iterations = (sector_count & ~0xFFFF) >> 16;
+    u32 remainder = sector_count & 0xFFFF;
+
+    if (remainder != 0) {
+        ums_read(drive, lba, remainder, buffer);
+        lba += remainder;
+        buffer = (void *)((u8 *)buffer + (remainder << 9));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ums_read(drive, lba, 0xFFFF, buffer);
+        lba += 0xFFFF;
+        buffer = (void *)((u8 *)buffer + (0xFFFF << 9));
+    }
+
+
+}
+
+
+
+void UMS_drive::write_sectors(u32 lba, u32 sector_count, void *buffer) {
+    u32 iterations = (sector_count & ~0xFFFF) >> 16;
+    u32 remainder = sector_count & 0xFFFF;
+
+    if (remainder != 0) {
+        ums_write(drive, lba, remainder, buffer);
+        lba += remainder;
+        buffer = (void *)((u8 *)buffer + (remainder << 9));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ums_write(drive, lba, 0xFFFF, buffer);
+        lba += 0xFFFF;
+        buffer = (void *)((u8 *)buffer + (0xFFFF << 9));
+    }
+
+
 }
