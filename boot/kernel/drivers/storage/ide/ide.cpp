@@ -89,4 +89,56 @@ void ATA_drive::init() {
     drive = Search_bitmap();
     if (!drive.found) 
         ata_end = true;
+    else {
+        ata_probe_t probe = ata_probe_device(drive);
+        if (probe != ATA_DEVICE_ATA && probe != ATA_DEVICE_ATAPI) {
+            printf("ATA: unknown device or probe error\n");
+            drive.found = false;
+            return;
+        }
+    }
+
+}
+
+
+void ATA_drive::read_sectors(u32 lba, u32 sector_count, void *buffer) {
+    if (buffer == nullptr)
+        return;
+    
+    u32 iterations = ((sector_count & ~0xFF) >> 8);
+    u8 remainder = sector_count & 0xFF;
+    
+    if (remainder != 0) {
+        ata_read(&drive, lba, buffer, remainder);
+        buffer = (void *)((u8 *)buffer + (remainder << 9)); // << 9 == * 512
+        lba += remainder;
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ata_read(&drive, lba, buffer, 0xFF);
+        buffer = (void *)((u8 *)buffer + (0xFF << 9));
+        lba += 0xFF;
+    }
+
+}
+
+
+void ATA_drive::write_sectors(u32 lba, u32 sector_count, void *buffer) {
+    if (buffer == nullptr)
+        return;
+
+    u32 iterations = ((sector_count & ~0xFF) >> 8);
+    u8 remainder = sector_count & 0xFF;
+
+    if (remainder != 0) {
+        ata_write(&drive, lba, buffer, remainder);
+        buffer = (void *)((u8 *)buffer + (remainder << 9)); // << 9 == * 512
+        lba += remainder;
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ata_write(&drive, lba, buffer, 0xFF);
+        buffer = (void *)((u8 *)buffer + (0xFF << 9));
+        lba += 0xFF;
+    }
 }
