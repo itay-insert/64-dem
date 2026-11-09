@@ -6,7 +6,6 @@
 typedef struct {
     ata_drive_t disk;
     u32 block_count;
-    bool set;
     bool found;
 } ata_drive;
 

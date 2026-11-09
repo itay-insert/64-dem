@@ -82,6 +82,11 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/ums.cpp -o ums.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/storage.cpp -o storage.o
+gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/storage/ide/ata.c -o ata.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/ide/ide.cpp -o ide.o
 
 ld -T kernel/link.ld -o kernel.elf *.o
 

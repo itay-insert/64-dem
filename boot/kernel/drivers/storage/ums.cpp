@@ -3,6 +3,7 @@
 #include "drivers/timers/timer.hpp"
 #include "x86-64/memory/memory_helpers.h"
 #include "drivers/storage/ums.hpp"
+#include "x86-64/memory/kmalloc.h"
 
 static constexpr u32 MSC_CBW_SIGNATURE = 0x43425355;
 static constexpr u32 MSC_CSW_SIGNATURE = 0x53425355;
@@ -252,9 +253,17 @@ bool ums_init(usb_mass_storage *drive) {
         return false;
     }
 
-    u32 *cap = (u32 *)capacity;
-    u32 last_lba = cap[0];
-    u32 block_size = cap[1];
+    u32 last_lba = 
+        ((u32)capacity[0] << 24) |
+        ((u32)capacity[1] << 16) |
+        ((u32)capacity[2] << 8) |
+        ((u32)capacity[3]);
+
+    u32 block_size =
+        ((u32)capacity[4] << 24) |
+        ((u32)capacity[5] << 16) |
+        ((u32)capacity[6] << 8) |
+        ((u32)capacity[7]);
 
     drive->block_count = last_lba + 1;
     drive->block_size = block_size;
@@ -327,6 +336,7 @@ void free_drives() {
 
 void ums_read(usb_mass_storage *drive, u32 lba, u16 sectors, void *buffer) {
 
+
     u8 cdb[10] = {
         0x28, // READ(10)
         0x00,
@@ -336,7 +346,7 @@ void ums_read(usb_mass_storage *drive, u32 lba, u16 sectors, void *buffer) {
         0x00
     };
 
-    ums_command(drive, cdb, 10, buffer, (512*sectors), true, 60000);
+    ums_command(drive, cdb, 10, buffer, (drive->block_size*sectors), true, 60000);
 }
 
 
@@ -352,46 +362,115 @@ void ums_write(usb_mass_storage *drive, u32 lba, u16 sectors, void *buffer) {
         0x00
     };
 
-    ums_command(drive, cdb, 10, buffer, (512*sectors), true, 60000);
+    ums_command(drive, cdb, 10, buffer, (drive->block_size*sectors), false, 60000);
 }
 
 
 void UMS_drive::read_sectors(u32 lba, u32 sector_count, void *buffer) {
-    u32 iterations = (sector_count & ~0xFFFF) >> 16;
-    u32 remainder = sector_count & 0xFFFF;
+    if (!drive || !buffer || sector_count == 0 || drive->block_size == 0)
+        return;
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % drive->block_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / drive->block_size
+        + (covered_bytes % drive->block_size != 0);
+    u64 first_block = byte_start / drive->block_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * drive->block_size);
+    if (!temp)
+        return;
+
+    void *original_temp = temp;
+
+
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
 
     if (remainder != 0) {
-        ums_read(drive, lba, remainder, buffer);
+        ums_read(drive, lba, remainder, temp);
         lba += remainder;
-        buffer = (void *)((u8 *)buffer + (remainder << 9));
+        temp = (void *)((u8 *)temp + (remainder * drive->block_size));
     }
 
     for (u32 i = 0; i < iterations; i++) {
-        ums_read(drive, lba, 0xFFFF, buffer);
+        ums_read(drive, lba, 0xFFFF, temp);
         lba += 0xFFFF;
-        buffer = (void *)((u8 *)buffer + (0xFFFF << 9));
+        temp = (void *)((u8 *)temp + (0xFFFF * drive->block_size));
     }
 
+    memcpy(buffer, static_cast<u8 *>(original_temp) + lba_remainder, byte_count);
+    kfree(original_temp);
+}
+
+static inline void temp_read(usb_mass_storage *drive, u32 lba, u32 iterations, u32 remainder, void *temp) {
+    if (remainder != 0) {
+        ums_read(drive, lba, remainder, temp);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * drive->block_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ums_read(drive, lba, 0xFFFF, temp);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * drive->block_size));
+    }
 
 }
 
-
-
 void UMS_drive::write_sectors(u32 lba, u32 sector_count, void *buffer) {
-    u32 iterations = (sector_count & ~0xFFFF) >> 16;
-    u32 remainder = sector_count & 0xFFFF;
+    if (!drive || !buffer || sector_count == 0 || drive->block_size == 0)
+        return;
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % drive->block_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / drive->block_size
+        + (covered_bytes % drive->block_size != 0);
+    u64 first_block = byte_start / drive->block_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * drive->block_size);
+    if (!temp)
+        return;
+    
+    void *original_temp = temp;
+    
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
+
+    u64 RemSize = 0;
+    u64 usb_size = blocks * drive->block_size;
+    u64 legacy_size = sector_count << 9;
+    if (usb_size > legacy_size)
+        RemSize = usb_size - legacy_size;
+
+    if (RemSize) {
+        temp_read(drive, (u32)lba, iterations, remainder, temp);
+    }
+
+    memcpy(static_cast<u8 *>(temp) + lba_remainder, buffer, byte_count);
 
     if (remainder != 0) {
-        ums_write(drive, lba, remainder, buffer);
+        ums_write(drive, lba, remainder, temp);
         lba += remainder;
-        buffer = (void *)((u8 *)buffer + (remainder << 9));
+        temp = (void *)((u8 *)temp + (remainder * drive->block_size));
     }
 
     for (u32 i = 0; i < iterations; i++) {
-        ums_write(drive, lba, 0xFFFF, buffer);
+        ums_write(drive, lba, 0xFFFF, temp);
         lba += 0xFFFF;
-        buffer = (void *)((u8 *)buffer + (0xFFFF << 9));
+        temp = (void *)((u8 *)temp + (0xFFFF * drive->block_size));
     }
 
-
+    kfree(original_temp);
 }

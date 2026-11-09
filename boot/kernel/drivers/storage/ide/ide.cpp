@@ -36,10 +36,14 @@ void ata_find_callback(const PCI_ret *device, void *context) {
         .function = device->Function
     };
 
-    pci_bar_t bar0 = pci_read_bar(pci_address, 0, 0, &bar0);
-    pci_bar_t bar1 = pci_read_bar(pci_address, 1, 0, &bar1);
-    pci_bar_t bar2 = pci_read_bar(pci_address, 2, 0, &bar2);
-    pci_bar_t bar3 = pci_read_bar(pci_address, 3, 0, &bar3);
+    pci_bar_t bar0; 
+    pci_read_bar(pci_address, 0, 0, &bar0);
+    pci_bar_t bar1; 
+    pci_read_bar(pci_address, 1, 0, &bar1);
+    pci_bar_t bar2; 
+    pci_read_bar(pci_address, 2, 0, &bar2);
+    pci_bar_t bar3; 
+    pci_read_bar(pci_address, 3, 0, &bar3);
 
     // if ata is in pci native mode, use i/o bases from bars otherwise use legacy i/o bases
 
@@ -65,7 +69,7 @@ static ata_drive Search_bitmap(void) {
 
     for (u8 i = 0; i < 4; i++) {
         if (!ata_bitmap[i]) {
-            drive.disk.channel = i < 2 ? primary_channel : secondary_channel;
+            drive.disk.channel = i < 2 ? &primary_channel : &secondary_channel;
             drive.disk.slave = (i & 1);
             drive.found = true;
             ata_bitmap[i] = true;
@@ -75,6 +79,7 @@ static ata_drive Search_bitmap(void) {
 
     drive.found = false;
     printf("ATA: no free drive found\n");
+    return drive;
 }
 
 void ATA_drive::init() {
@@ -90,7 +95,8 @@ void ATA_drive::init() {
     if (!drive.found) 
         ata_end = true;
     else {
-        ata_probe_t probe = ata_probe_device(drive);
+        drive.block_count = 512;
+        ata_probe_t probe = ata_probe_device(&drive.disk);
         if (probe != ATA_DEVICE_ATA && probe != ATA_DEVICE_ATAPI) {
             printf("ATA: unknown device or probe error\n");
             drive.found = false;
@@ -105,17 +111,17 @@ void ATA_drive::read_sectors(u32 lba, u32 sector_count, void *buffer) {
     if (buffer == nullptr)
         return;
     
-    u32 iterations = ((sector_count & ~0xFF) >> 8);
-    u8 remainder = sector_count & 0xFF;
+    u32 iterations = sector_count / 0xFF;
+    u8 remainder = sector_count % 0xFF;
     
     if (remainder != 0) {
-        ata_read(&drive, lba, buffer, remainder);
+        ata_read(&drive.disk, lba, buffer, remainder);
         buffer = (void *)((u8 *)buffer + (remainder << 9)); // << 9 == * 512
         lba += remainder;
     }
 
     for (u32 i = 0; i < iterations; i++) {
-        ata_read(&drive, lba, buffer, 0xFF);
+        ata_read(&drive.disk, lba, buffer, 0xFF);
         buffer = (void *)((u8 *)buffer + (0xFF << 9));
         lba += 0xFF;
     }
@@ -127,17 +133,17 @@ void ATA_drive::write_sectors(u32 lba, u32 sector_count, void *buffer) {
     if (buffer == nullptr)
         return;
 
-    u32 iterations = ((sector_count & ~0xFF) >> 8);
-    u8 remainder = sector_count & 0xFF;
+    u32 iterations = sector_count / 0xFF;
+    u8 remainder = sector_count % 0xFF;
 
     if (remainder != 0) {
-        ata_write(&drive, lba, buffer, remainder);
+        ata_write(&drive.disk, lba, buffer, remainder);
         buffer = (void *)((u8 *)buffer + (remainder << 9)); // << 9 == * 512
         lba += remainder;
     }
 
     for (u32 i = 0; i < iterations; i++) {
-        ata_write(&drive, lba, buffer, 0xFF);
+        ata_write(&drive.disk, lba, buffer, 0xFF);
         buffer = (void *)((u8 *)buffer + (0xFF << 9));
         lba += 0xFF;
     }
