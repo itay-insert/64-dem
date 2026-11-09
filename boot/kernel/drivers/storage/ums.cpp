@@ -2,6 +2,7 @@
 #include "drivers/usb/usb.hpp"
 #include "drivers/timers/timer.hpp"
 #include "x86-64/memory/memory_helpers.h"
+#include "drivers/storage/ums.hpp"
 
 static constexpr u32 MSC_CBW_SIGNATURE = 0x43425355;
 static constexpr u32 MSC_CSW_SIGNATURE = 0x53425355;
@@ -41,16 +42,6 @@ typedef struct __attribute__((packed)) {
     char Revision[4];
 } scsi_inquiry;
 
-typedef struct {
-    u32 endpoint_in_addr;
-    u32 endpoint_out_addr;
-    usb_controller *controller;
-    bool initialized;
-    u8 lun;
-    u32 next_tag;
-    u32 block_size;
-    u32 block_count;
-} usb_mass_storage;
 
 usb_mass_storage *drives = nullptr;
 
@@ -296,6 +287,8 @@ void read_first_sector(usb_mass_storage *drive) {
     ums_command(drive, cdb, 10, sector, 512, true, 5000);
 }
 
+u16 usb_drive_count = 0;
+u16 current_drive = 0;
 
 void ums_discover() {
     GlobalUSB *USB = (GlobalUSB *)usb_addr;
@@ -304,6 +297,7 @@ void ums_discover() {
 
     usb_interface_return result = USB->find_interface(0x08, 0x06, true, 0x50);
     drives = new usb_mass_storage[result.interface_count];
+    usb_drive_count = result.interface_count;
 
     for (u16 i = 0; i < result.interface_count; i++) {
         drives[i] = {};
@@ -314,16 +308,22 @@ void ums_discover() {
         u32 endpoint_out = result.interfaces[i].endpoint_bulk_out;
         drives[i].endpoint_in_addr = port_index | interface_index | endpoint_in;
         drives[i].endpoint_out_addr = port_index | interface_index | endpoint_out;
-        if (!ums_init(&drives[i])) {
-            printf("UMS: failed to initialize drive 0x%w\n", i);
-        }
-
     }
 
     
 }
 
+void UMS_drive::init() {
+    drive = &drives[current_drive];
+    if (!ums_init(drive)) {
+        printf("UMS: failed to initialize drive 0x%w\n", current_drive);
+    }
+    current_drive++;
+}
 
+void free_drives() {
+    kfree(drives);
+}
 
 void ums_write(usb_mass_storage *drive, u32 lba, u32 sectors, void *buffer) {
     // WRITE(10) is not implemented yet.

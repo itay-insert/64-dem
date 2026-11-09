@@ -7,14 +7,6 @@
 #define ERR_INVALID_TYPE 3
 #define ERR_IO 4
 
-#define P_CTL 0x3F6
-#define S_CTL 0x376
-
-#define PB 0x3F4
-#define SB 0x374
-
-#define Primary 0x1F0
-#define Secondary 0x170
 
 #define ATA_SR_ERR  0x01
 #define ATA_SR_DRQ  0x08

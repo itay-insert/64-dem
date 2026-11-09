@@ -49,8 +49,6 @@ extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
 
-extern void ums_discover();
-
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
 
@@ -288,7 +286,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
-    ums_discover();
+    
     u64 old_keyboard_irq = keyboard_irq_count;
     while (1) {
         USB.service_interrupts(*timer.Src);

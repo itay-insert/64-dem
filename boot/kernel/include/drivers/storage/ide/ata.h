@@ -39,9 +39,6 @@ typedef struct {
     spinlock_t lock;
 } ata_channel_t;
 
-extern ata_channel_t primary_channel;
-extern ata_channel_t secondary_channel;
-
 typedef struct {
     ata_channel_t *channel;
     bool slave;

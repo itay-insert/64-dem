@@ -2,17 +2,12 @@
 #include "x86-64/ports.h"
 #include <stddef.h>
 
-ata_channel_t primary_channel = {
-    .io_base = Primary,
-    .control_port = P_CTL,
-    .lock = { .locked = 0 }
-};
+u16 Primary = 0;
+u16 Secondary = 0;
 
-ata_channel_t secondary_channel = {
-    .io_base = Secondary,
-    .control_port = S_CTL,
-    .lock = { .locked = 0 }
-};
+u16 PB = 0;
+u16 SB = 0;
+
 
 ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_count) {
     if (!drive || !drive->channel || drive->type != ATA_DEVICE_ATA)
