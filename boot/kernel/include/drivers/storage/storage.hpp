@@ -15,8 +15,8 @@ class disk_drive {
 
 class storage {
     private:
-        void increase_drives(u64 ClassSize);
-        void increase_offsets(u8 count);
+        bool increase_drives(u64 ClassSize);
+        bool increase_offsets(u8 count);
 
     public:
         disk_drive *drives;

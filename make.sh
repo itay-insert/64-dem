@@ -1,3 +1,11 @@
+set -e
+
+if [ "${NVME_QEMU_PROBE:-0}" = 1 ]; then
+    NVME_PROBE_FLAG=-DNVME_QEMU_PROBE
+else
+    NVME_PROBE_FLAG=
+fi
+
 cd EFI
 cd boot
 
@@ -12,7 +20,7 @@ nasm -f elf64 kernel/entry.asm -o entry.o
 nasm -f elf64 kernel/x86-64/lowlevel.asm -o lowlevel.o
 nasm -f elf64 kernel/x86-64/cpuid.asm -o cpuid.o
 nasm -f elf64 kernel/x86-64/interrupts.asm -o interrupts.o
-g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone $NVME_PROBE_FLAG \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/kernel.cpp -o kernel.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/display/font.c -o font.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/display/vga.c -o vga.o
@@ -84,6 +92,8 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/ums.cpp -o ums.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/storage.cpp -o storage.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/NVMe.cpp -o nvme.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/storage/ide/ata.c -o ata.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/storage/ide/ide.cpp -o ide.o

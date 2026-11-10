@@ -23,7 +23,11 @@
 #include "drivers/keyboard/ps2.hpp"
 #include "drivers/keyboard/hid.hpp"
 #include "drivers/usb/usb.hpp"
+#include "drivers/storage/storage.hpp"
 #include "x86-64/tsc.h"
+#ifdef NVME_QEMU_PROBE
+#include "../../tests/nvme_qemu_probe.hpp"
+#endif
 
 #define RGB 0
 #define BGR 1
@@ -277,6 +281,12 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         printf(".");
         wait_ms(*timer.Src, 1000);
     }
+
+    storage disks;
+    printf("Storage: %u drives registered\n", (u32)disks.drive_count);
+#ifdef NVME_QEMU_PROBE
+    nvme_qemu_probe(disks);
+#endif
 
 
     printf("\n");

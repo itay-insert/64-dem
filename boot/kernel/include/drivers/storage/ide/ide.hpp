@@ -15,6 +15,7 @@ class ATA_drive : public disk_drive {
         ata_drive drive;
 
     public:
+        bool is_found() const { return drive.found; }
         void read_sectors(u32 lba, u32 sector_count, void *buffer) override;
         void write_sectors(u32 lba, u32 sector_count, void *buffer) override;
         void init() override;

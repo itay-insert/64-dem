@@ -6,6 +6,7 @@
 #include "drivers/display/vga.h"
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
+#include "x86-64/memory/kmalloc.h"
 
 #define CAP_NP 0x1f
 #define CAP_NCS(x) (((x) & 0x1fff) >> 8)
@@ -19,6 +20,8 @@
 
 #define ATA 0
 #define ATAPI 1
+
+extern u64 timeradd;
 
 typedef struct {
     u32 CAP;
@@ -578,6 +581,265 @@ static bool ATA_identify(u32 port, volatile ahci_port *port_reg, TimerSource &ti
     return true;
 }
 
+#define ATA_READ_DMA_EXT  0x25
+#define ATA_WRITE_DMA_EXT 0x35
+
+#define ATA_MAX_TRANSFER 0x400000
+
+static bool ATA_transfer(
+    u32 port,
+    volatile ahci_port *port_reg,
+    u64 lba,
+    u16 sector_count,
+    dma_ret *buffer,
+    bool write,
+    TimerSource &timer
+) {
+    if (!buffer || !sector_count)
+        return false;
+
+    if (!ports[port].initialized ||
+        ports[port].device_type != ATA)
+        return false;
+
+    u32 sector_size = ports[port].sector_size;
+
+    if (!sector_size)
+        return false;
+
+    // Validate the requested LBA range.
+    if (lba >= ports[port].capacity ||
+        sector_count > ports[port].capacity - lba)
+        return false;
+
+    u64 byte_count = (u64)sector_count * sector_size;
+
+    // This implementation uses one PRDT entry.
+    if (byte_count > ATA_MAX_TRANSFER)
+        return false;
+
+    // Ensure the DMA allocation is large enough.
+    if (buffer->size < byte_count)
+        return false;
+
+    if (!buffer->physical_address)
+        return false;
+
+    dma_ret CMD_LIST = ports[port].Command_list;
+    dma_ret CMD_TBL = ports[port].Command_Table;
+
+    auto *header =
+        (AHCI_command_header *)CMD_LIST.virtual_address;
+
+    auto *cmd_table =
+        (AHCI_command_table *)CMD_TBL.virtual_address;
+
+    // Prepare command header.
+    memset(header, 0, sizeof(*header));
+
+    header->flags = 5;
+
+    if (write)
+        header->flags |= AHCI_CMD_W;
+
+    header->prdtl = 1;
+    header->prdbc = 0;
+
+    u64 table_phys = CMD_TBL.physical_address;
+
+    header->ctba = (u32)table_phys;
+    header->ctbau = (u32)(table_phys >> 32);
+
+    // Prepare command table.
+    memset(cmd_table, 0, 144);
+
+    // Build Register Host-to-Device FIS.
+    u8 *fis = cmd_table->CFIS;
+
+    fis[0] = 0x27;
+    fis[1] = 1u << 7;
+
+    fis[2] = write
+        ? ATA_WRITE_DMA_EXT
+        : ATA_READ_DMA_EXT;
+
+    // 48-bit LBA.
+    fis[4] = (u8)lba;
+    fis[5] = (u8)(lba >> 8);
+    fis[6] = (u8)(lba >> 16);
+
+    // Enable LBA mode.
+    fis[7] = 1u << 6;
+
+    fis[8]  = (u8)(lba >> 24);
+    fis[9]  = (u8)(lba >> 32);
+    fis[10] = (u8)(lba >> 40);
+
+    // Sector count (16-bit).
+    fis[12] = (u8)sector_count;
+    fis[13] = (u8)(sector_count >> 8);
+
+    // Configure PRDT.
+    u64 buffer_phys = buffer->physical_address;
+
+    cmd_table->PRDT[0].DBA = (u32)buffer_phys;
+    cmd_table->PRDT[0].DBAU = (u32)(buffer_phys >> 32);
+    cmd_table->PRDT[0].reserved = 0;
+    cmd_table->PRDT[0].DBC = (u32)(byte_count - 1);
+
+    // Clear previous errors.
+    port_reg->IS = 0xFFFFFFFF;
+    port_reg->SERR = 0xFFFFFFFF;
+
+    // Make DMA structures visible before submission.
+    asm volatile("mfence" ::: "memory");
+
+    // Submit command through slot 0.
+    if (!ATA_issue_command(port_reg, 0, timer)) {
+        printf("ATA: transfer failed on port %u\n", port);
+        return false;
+    }
+
+    // Ensure DMA writes are visible to the CPU.
+    asm volatile("mfence" ::: "memory");
+
+    if (header->prdbc != byte_count) {
+        printf("ATA: incomplete transfer: %u / %u bytes\n",
+            header->prdbc, (u32)byte_count);
+
+        return false;
+    }
+
+    return true;
+}
+
+static bool ATA_read_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
+    Timer timer = (Timer *)timeradd;
+    TimerSource &timer_source = *timer->Src;
+
+    if (!port || !buffer || sector_count == 0 || port->block_size == 0)
+        return;
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % port->block_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / port->block_size
+        + (covered_bytes % port->block_size != 0);
+    u64 first_block = byte_start / port->block_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * port->block_size);
+    if (!temp)
+        return;
+
+    void *original_temp = temp;
+    
+    volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
+
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
+
+    if (remainder != 0) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer_source);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * drive->block_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, 0xFFFF, temp, false, timer_source);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * drive->block_size));
+    }
+
+    memcpy(buffer, static_cast<u8 *>(original_temp) + lba_remainder, byte_count);
+    kfree(original_temp);
+
+   
+
+}
+
+static inline void temp_read(port_descriptor *port, u32 lba, u32 iterations, u32 remainder, void *temp, TimerSource &timer) {
+    if (remainder != 0) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * port->block_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * port->block_size));
+    }
+
+}
+
+
+static bool ATA_write_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
+    Timer timer = (Timer *)timeradd;
+    TimerSource &timer_source = *timer->Src;
+
+    volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
+
+    if (!port || !buffer || sector_count == 0 || port->block_size == 0)
+        return;
+
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % port->block_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / port->block_size
+        + (covered_bytes % port->block_size != 0);
+    u64 first_block = byte_start / port->block_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * port->block_size);
+    if (!temp)
+        return;
+    
+    void *original_temp = temp;
+    
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
+
+    u64 RemSize = 0;
+    u64 ata_size = blocks * port->block_size;
+    u64 legacy_size = sector_count << 9;
+    if (ata_size > legacy_size)
+        RemSize = ata_size - legacy_size;
+
+    if (RemSize) {
+        temp_read(drive, (u32)lba, iterations, remainder, temp, timer_source);
+    }
+
+    memcpy(static_cast<u8 *>(temp) + lba_remainder, buffer, byte_count);
+
+    if (remainder != 0) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, true, timer_source);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * port->block_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATA_transfer(port->port_number, port_reg, (u64)lba, 0xFFFF, temp, true, timer_source);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * port->block_size));
+    }
+
+    kfree(original_temp);
+}
+
+
+
+
+
 static bool ATAPI_get_packet_size(
     const u16 *identify,
     u8 &packet_size
@@ -792,6 +1054,7 @@ static bool ATAPI_packet(u32 port, volatile ahci_port *port_reg, const u8 *cdb, 
 }
 
 
+
 static u32 read_be32(const u8 *p) {
     return ((u32)p[0] << 24) |
            ((u32)p[1] << 16) |
@@ -875,6 +1138,22 @@ static bool ATAPI_init(u32 port, volatile ahci_port *port_reg, TimerSource &time
     return true;
 }
 
+
+static void ATAPI_read(port_descriptor *port, u32 lba, u16 sector_count, void *buffer) {
+    volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
+
+
+    u8 cdb[10] = {
+        0x28, // READ(10)
+        0x00,
+        (lba >> 24), (lba >> 16), (lba >> 8), lba, // LBA = 0
+        0x00,
+        (sectors>>8), sectors,             
+        0x00
+    };
+
+    ATAPI_packet(port->port_number, port_reg, cdb, 10, )
+}
 
 static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port);

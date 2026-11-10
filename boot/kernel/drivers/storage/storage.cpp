@@ -3,6 +3,7 @@
 #include "drivers/storage/ide/ide.hpp"
 #include "x86-64/memory/kmalloc.h"
 #include "drivers/storage/ums.hpp"
+#include "drivers/storage/nvme.hpp"
 
 
 extern bool ata_end;
@@ -11,27 +12,36 @@ extern u16 current_drive;
 extern u16 usb_drive_count;
 extern void ums_discover();
 extern void free_drives();
+extern u64 timeradd;
 
-void storage::increase_drives(u64 ClassSize) {
+bool storage::increase_drives(u64 ClassSize) {
+    if (!ClassSize || ClassSize > ~0ull - drives_size)
+        return false;
     if (drives == nullptr || drives_size == 0) {
         drives = (disk_drive *)kmalloc(ClassSize);
-        drives_size += ClassSize;
-        return;
+        if (!drives) return false;
+        drives_size = ClassSize;
+        return true;
     }
 
-    drives = (disk_drive *)krealloc(drives, drives_size, (drives_size+ClassSize));
+    disk_drive *grown = (disk_drive *)krealloc(drives, drives_size, drives_size + ClassSize);
+    if (!grown) return false;
+    drives = grown;
     drives_size += ClassSize;
+    return true;
 }
 
 
-void storage::increase_offsets(u8 count) {
+bool storage::increase_offsets(u8 count) {
     if (offsets == nullptr || count == 0) {
-        offsets = new u64[1];
-        return;
+        offsets = (u64 *)kmalloc(sizeof(u64));
+        return offsets != nullptr;
     }
 
-    offsets = (u64 *)krealloc(offsets, count<<3, (count+1)<<3);
-    return;
+    u64 *grown = (u64 *)krealloc(offsets, (u64)count << 3, ((u64)count + 1) << 3);
+    if (!grown) return false;
+    offsets = grown;
+    return true;
 }
 
 
@@ -47,33 +57,45 @@ storage::storage() {
     current_drive = 0;
     usb_drive_count = 0;
 
-    while (!ata_end) {
+    while (!ata_end && drive_count < 255) {
         u64 old_size = drives_size;
-        increase_drives(sizeof(ATA_drive));
+        if (!increase_drives(sizeof(ATA_drive))) break;
         void *slot = reinterpret_cast<u8 *>(drives) + old_size;
         ATA_drive *drive = new (slot) ATA_drive{};
-        increase_offsets(drive_count);
-        offsets[drive_count] = (u64)drive - (u64)drives;
         drive->init();
+        if (!drive->is_found())
+            continue;
+        if (!increase_offsets(drive_count)) break;
+        offsets[drive_count] = (u64)drive - (u64)drives;
         drive_count++;
     }
 
     ums_discover(); // discover USB devices;
 
-    while (current_drive < usb_drive_count) {
+    while (current_drive < usb_drive_count && drive_count < 255) {
         u64 old_size = drives_size;
-        increase_drives(sizeof(UMS_drive));
+        if (!increase_drives(sizeof(UMS_drive))) break;
         void *slot = reinterpret_cast<u8 *>(drives) + old_size;
         UMS_drive *drive = new (slot) UMS_drive{};
-        increase_offsets(drive_count);
+        if (!increase_offsets(drive_count)) break;
         offsets[drive_count] = (u64)drive - (u64)drives;
         drive->init();
         drive_count++;
     }
-    
 
-
+    Timer *timer = (Timer *)timeradd;
+    if (timer && timer->Src) {
+        nvme_discover(*timer->Src);
+        u32 count = nvme_namespace_count();
+        for (u32 i = 0; i < count && drive_count < 255; ++i) {
+            u64 old_size = drives_size;
+            if (!increase_drives(sizeof(NVMe_drive))) break;
+            void *slot = reinterpret_cast<u8 *>(drives) + old_size;
+            NVMe_drive *drive = new (slot) NVMe_drive(i);
+            if (!increase_offsets(drive_count)) break;
+            offsets[drive_count] = (u64)drive - (u64)drives;
+            drive->init();
+            drive_count++;
+        }
+    }
 }
-
-
-
