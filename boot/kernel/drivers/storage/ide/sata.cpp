@@ -197,7 +197,7 @@ static bool discover_ahci(void) {
     // map the address to the MMIO region
     create_mapping(page_phys+BASE, page_phys, pages, 0x13, KernelPML4);
     flush_pages(page_phys+BASE, pages);
-
+    return true;
 }
 
 
@@ -341,6 +341,39 @@ static inline bool issue_reset(volatile ahci_port *port, TimerSource &timer) {
     return true;
 }
 
+static bool SATA_stop_engine(volatile ahci_port *port, TimerSource &timer) {
+     // 1. Stop command processing.
+    port->CMD &= ~CMD_ST;
+
+    // 2. Wait until command-list DMA engine stops.
+    bool command_stopped = false;
+
+    for (u32 elapsed = 0; elapsed < 1000; elapsed++) {
+        if (!(port->CMD & CMD_CR)) {
+            command_stopped = true;
+            break;
+        }
+
+        wait_ms(timer, 1);
+    }
+
+    if (!command_stopped)
+        return false;
+
+    // 3. Stop FIS reception.
+    port->CMD &= ~CMD_FRE;
+
+    // 4. Wait until FIS receive DMA engine stops.
+    for (u32 elapsed = 0; elapsed < 1000; elapsed++) {
+        if (!(port->CMD & CMD_FR))
+            return true;
+
+        wait_ms(timer, 1);
+    }
+
+    return false;
+}
+
 static bool SATA_start_engine(volatile ahci_port *port, TimerSource &timer) {
     // wait until command list engine is stopped
     for (u32 elapsed = 0; elapsed < 1000; elapsed++) { // 1000 ms timeout
@@ -437,7 +470,7 @@ static void ATA_identify_string(const u16 *identify, u32 first_word, u32 word_co
 
 
 static u64 ATA_identify_capacity(const u16 *id) {
-    if (!(id[0] & (1 << 9)))
+    if (!(id[49] & (1 << 9)))
         return 0;
 
     return (u32)id[60] | ((u32)id[61] << 16);
@@ -883,9 +916,21 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
 
     memset((void *)FIS.virtual_address, 0, 256);
 
+    if (!SATA_stop_engine(port_reg, timer)) {
+        printf("SATA: failed to stop engine\n");
+        return false;
+    }
 
     port_reg->FB = (u32)FIS.physical_address;
     port_reg->FBU = (u32)(FIS.physical_address >> 32);
+    
+    port_reg->CLB = (u32)CMD_LIST.physical_address;
+    port_reg->CLBU = (u32)(CMD_LIST.physical_address >> 32);
+
+    if (!SATA_start_engine(port_reg, timer)) {
+        printf("SATA: failed to start engine\n");
+        return false;
+    }
 
     u32 det = port_reg->SSTS & 0xf;
 
@@ -918,7 +963,7 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
                 return false;
             }
 
-            port->SERR = 0xFFFFFFFF;
+            port_reg->SERR = 0xFFFFFFFF;
 
             goto next;
 
@@ -930,6 +975,7 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
             goto next;
 
         case 4:
+            u32 sctl = port_reg->SCTL;
             if ((sctl & SCTL_DET_MASK) == SCTL_DET_OFF) {
                 // software disabled the SATA PHY.
                 u32 cmd = port_reg->CMD; // read the port's command register
@@ -981,7 +1027,7 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
 
     SigAgain:
 
-    u32 sig = port->SIG;
+    u32 sig = port_reg->SIG;
 
     if (sig == 0xFFFFFFFF) {
         // try reset
@@ -1022,6 +1068,10 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     
 }
 
+#define GHC_AE (1u << 31)
+#define GHC_IE (1u << 1)
+#define GHC_HR (1u << 0)
+
 bool controller_init(TimerSource &timer) {
     if (!discover_ahci())
         return false;
@@ -1035,7 +1085,7 @@ bool controller_init(TimerSource &timer) {
 
     ports = new port_descriptor[port_count];
 
-    cmd_slots = (u8)CAP_NCS(cap); // get number of command slots - 1
+    cmd_slots = (u8)CAP_NCS(cap) + 1; // get number of command slots - 1
     addr_64 = (cap & CAP_S64A);  // get whether 64-bit dma addresses are supported
 
     if (!ahci_take_ownership(timer, cap_regs)) {
@@ -1043,8 +1093,24 @@ bool controller_init(TimerSource &timer) {
         return false;
     }
 
+    cap_regs->GHC &= ~GHC_IE;
     cap_regs->GHC |= (1u << 31); // enable ahci mode
 
+    u32 implemented_ports = cap_regs->PI;
 
+    for (u32 i = 0; i < port_count; i++) {
+        if (!(implemented_ports & (1u << i)))
+            continue;
 
+        ports[i].connected = true;
+        if (!ahci_enumrate_port(i, timer)) {
+            printf("SATA: failed to initialize port %u\n", i);
+            continue;
+        }
+
+        printf("SATA: initialized port %u\n", i);
+        ports[i].port_number = i;
+    }
+
+    return true;
 }
