@@ -219,16 +219,15 @@ if [[ -n "$VARS_TEMPLATE" ]]; then
     )
 fi
 
-# Build a disposable FAT disk tree so firmware writes cannot alter the source
-# directory. It contains the standard x86-64 UEFI fallback boot path.
-mkdir -p "$TEMP_DIR/disk/EFI/boot" "$TEMP_DIR/disk/boot"
-cp -- "$BOOTLOADER" "$TEMP_DIR/disk/EFI/boot/BOOTX64.efi"
-cp -- "$ROOT_DIR/boot/kernel.elf" "$TEMP_DIR/disk/boot/kernel.elf"
+# Use the same MBR/FAT32 image as BIOS boot, including stage1 in sector zero
+# and the standard x86-64 UEFI fallback boot path.
+bash "$ROOT_DIR/bios_qemu.sh" --no-run --no-build \
+    --image "$TEMP_DIR/disk.img" --bootloader "$BOOTLOADER"
 
 QEMU_ARGS+=(
     -machine q35,pcspk-audiodev=spk
     -audiodev "$AUDIO_BACKEND,id=spk"
-    -drive "format=raw,media=disk,file=fat:rw:$TEMP_DIR/disk"
+    -drive "format=raw,media=disk,file=$TEMP_DIR/disk.img"
     -monitor none
     -serial none
     -debugcon stdio

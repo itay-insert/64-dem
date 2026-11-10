@@ -7,6 +7,7 @@ class disk_drive {
         char vendor[5];
         u8 disk_type;
         u8 disk_index;
+        bool initialized;
         virtual void read_sectors(u32 lba, u32 sector_count, void *buffer) = 0;
         virtual void write_sectors(u32 lba, u32 sector_count, void *buffer) = 0;
         virtual void init() = 0;
@@ -23,5 +24,6 @@ class storage {
         u64 *offsets;
         u8 drive_count;
         u64 drives_size;
+        disk_drive *find_boot_drive();
         storage();
 };

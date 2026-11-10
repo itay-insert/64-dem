@@ -296,6 +296,11 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
+    disk_drive *boot_drive = disks.find_boot_drive();
+    if (boot_drive != nullptr) {
+        printf("found boot drive in drive 0x%b:\n", boot_drive->disk_index);
+        printf("vendor: %s\n", boot_drive->vendor);
+    }
     
     u64 old_keyboard_irq = keyboard_irq_count;
     while (1) {

@@ -345,9 +345,12 @@ void nvme_discover(TimerSource &timer) {
 u32 nvme_namespace_count() { return namespace_count; }
 
 void NVMe_drive::init() {
-    vendor[0] = 'N'; vendor[1] = 'V'; vendor[2] = 'M'; vendor[3] = 'e'; vendor[4] = 0;
+    memcpy(vendor, "NVMe", sizeof(vendor));
     disk_type = 2;
     disk_index = (u8)namespace_index;
+    initialized = namespace_index < namespace_count &&
+                  namespaces[namespace_index].ctrl &&
+                  namespaces[namespace_index].ctrl->ready;
 }
 
 bool NVMe_drive::try_read_sectors(u32 lba, u32 sector_count, void *buffer) {

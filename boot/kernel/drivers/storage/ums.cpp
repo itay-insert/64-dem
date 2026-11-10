@@ -278,6 +278,7 @@ bool ums_init(usb_mass_storage *drive) {
     printf("USB handle: 0x%lx  vendor: %s\n", device_address, vendor);
     printf("Revision: %s  Block_size: %u  block_count: %u\n",
            revision, block_size, drive->block_count);
+    drive->initialized = true;
     return true;
 }
 
@@ -324,7 +325,9 @@ void ums_discover() {
 
 void UMS_drive::init() {
     drive = &drives[current_drive];
-    if (!ums_init(drive)) {
+    memcpy(vendor, "UMS ", sizeof("UMS "));
+    initialized = ums_init(drive);
+    if (!initialized) {
         printf("UMS: failed to initialize drive 0x%w\n", current_drive);
     }
     current_drive++;

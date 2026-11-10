@@ -8,14 +8,25 @@ IMAGE_SIZE_MIB="${BIOS_IMAGE_SIZE_MIB:-128}"
 PARTITION_START=2048
 SECTOR_SIZE=512
 RUN_QEMU=true
+BUILD=true
+BOOTLOADER=""
 
 usage() {
-    printf 'Usage: %s [--no-run] [--image FILE] [--size MIB] [-- qemu-options...]\n' "$0"
+    printf 'Usage: %s [--no-run] [--no-build] [--bootloader FILE] [--image FILE] [--size MIB] [-- qemu-options...]\n' "$0"
 }
 
 EXTRA_QEMU_ARGS=()
 while (($#)); do
     case "$1" in
+        --no-build)
+            BUILD=false
+            shift
+            ;;
+        --bootloader)
+            [[ $# -ge 2 ]] || { echo "error: --bootloader requires a path" >&2; exit 2; }
+            BOOTLOADER="$2"
+            shift 2
+            ;;
         --no-run)
             RUN_QEMU=false
             shift
@@ -47,6 +58,8 @@ while (($#)); do
     esac
 done
 
+# Distribution packages commonly install disk tools outside a user's PATH.
+export PATH="$PATH:/usr/sbin:/sbin"
 for tool in nasm sfdisk mkfs.fat mcopy truncate dd; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "error: required tool '$tool' was not found" >&2
@@ -70,8 +83,18 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "Building UEFI loader and kernel..."
-(cd "$ROOT_DIR" && bash ./make.sh)
+if [[ "$BUILD" == true ]]; then
+    echo "Building UEFI loader and kernel..."
+    (cd "$ROOT_DIR" && bash ./make.sh)
+fi
+
+for required_file in "$ROOT_DIR/EFI/boot/BOOTX64.efi" "$ROOT_DIR/boot/kernel.elf" "$ROOT_DIR/boot/stage2.bin"; do
+    [[ -r "$required_file" ]] || { echo "error: missing $required_file; run without --no-build first" >&2; exit 1; }
+done
+if [[ -n "$BOOTLOADER" && ! -r "$BOOTLOADER" ]]; then
+    echo "error: bootloader is not readable: $BOOTLOADER" >&2
+    exit 1
+fi
 
 echo "Assembling BIOS boot sector..."
 nasm -f bin "$ROOT_DIR/boot/bios/boot.asm" -o "$BUILD_DIR/boot.bin"
@@ -104,6 +127,9 @@ mkfs.fat -F 32 --offset "$PARTITION_START" -n 64DEM "$IMAGE" "$FAT_SIZE_KIB"
 
 echo "Copying boot/ and EFI/ into the FAT32 filesystem..."
 mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" ::/
+if [[ -n "$BOOTLOADER" ]]; then
+    mcopy -o -i "$IMAGE@@$PARTITION_OFFSET" "$BOOTLOADER" ::/EFI/boot/BOOTX64.efi
+fi
 
 echo "BIOS image ready: $IMAGE"
 

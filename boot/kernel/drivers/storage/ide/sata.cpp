@@ -1,12 +1,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "uint_definitions.h"
-#include "x86-64/memory/memory.h"
 #include "x86-64/paging.h"
 #include "drivers/display/vga.h"
 #include "drivers/pci/pci.h"
 #include "drivers/timers/timer.hpp"
 #include "x86-64/memory/kmalloc.h"
+#include "drivers/storage/ide/sata.hpp"
 
 #define CAP_NP 0x1f
 #define CAP_NCS(x) (((x) & 0x1fff) >> 8)
@@ -20,6 +20,15 @@
 
 #define ATA 0
 #define ATAPI 1
+
+// AHCI command-header flags.
+#define AHCI_CMD_A (1u << 5) // ATAPI command
+#define AHCI_CMD_W (1u << 6) // Host-to-device data transfer
+
+// ATA PACKET opcode and Features register bits.
+#define ATA_PACKET 0xA0
+#define ATAPI_DMA (1u << 0)
+#define ATAPI_DMADIR (1u << 2) // Device-to-host DMA direction
 
 extern u64 timeradd;
 
@@ -65,25 +74,6 @@ typedef struct {
     pci_address_t address;
     bool discovered;
 } ahci_descriptor;
-
-typedef struct {
-    u8 port_number;
-    u8 device_type;
-    bool connected;
-    bool device_present;
-    bool initialized;
-    u32 sector_size;
-    u64 capacity;
-    char serial[21];
-    char firmware[9];
-    char model[41]; 
-    u8 packet_size;
-    dma_ret Command_list;
-    dma_ret Command_Table;
-    dma_ret identify;
-    dma_ret FIS;
-    dma_ret data;
-} port_descriptor;
 
 
 typedef struct {
@@ -143,6 +133,8 @@ ahci_descriptor ahci = {0};
 u8 port_count = 0;
 u8 cmd_slots = 0;
 
+u8 current_port = 0;
+
 bool addr_64 = false;
 
 void ahci_find_callback(const PCI_ret *device, void *context) {
@@ -184,7 +176,11 @@ static bool discover_ahci(void) {
         return false;
 
     pci_bar_t bar = {0};
-    if (pci_read_bar(desc->address, 5, 0, &bar) != PCI_STATUS_SUCCESS)
+    // Probe the BAR size: without probing, pci_read_bar leaves size at zero
+    // and a page-aligned ABAR would result in a zero-page mapping.
+    if (pci_read_bar(desc->address, 5, 1, &bar) != PCI_STATUS_SUCCESS)
+        return false;
+    if (bar.type != PCI_BAR_MEMORY || !bar.address || !bar.size)
         return false;
 
     // read the address from BAR5
@@ -591,11 +587,11 @@ static bool ATA_transfer(
     volatile ahci_port *port_reg,
     u64 lba,
     u16 sector_count,
-    dma_ret *buffer,
+    void *data,
     bool write,
     TimerSource &timer
 ) {
-    if (!buffer || !sector_count)
+    if (!data || !sector_count)
         return false;
 
     if (!ports[port].initialized ||
@@ -618,12 +614,13 @@ static bool ATA_transfer(
     if (byte_count > ATA_MAX_TRANSFER)
         return false;
 
-    // Ensure the DMA allocation is large enough.
-    if (buffer->size < byte_count)
+    // A heap buffer can start within a page and span discontiguous frames.
+    // A single PRDT entry requires an exact, contiguous physical range.
+    dma_ret buffer = allocate_dma(byte_count);
+    if (buffer.status != 0)
         return false;
-
-    if (!buffer->physical_address)
-        return false;
+    if (write)
+        memcpy((void *)buffer.virtual_address, data, byte_count);
 
     dma_ret CMD_LIST = ports[port].Command_list;
     dma_ret CMD_TBL = ports[port].Command_Table;
@@ -680,7 +677,7 @@ static bool ATA_transfer(
     fis[13] = (u8)(sector_count >> 8);
 
     // Configure PRDT.
-    u64 buffer_phys = buffer->physical_address;
+    u64 buffer_phys = buffer.physical_address;
 
     cmd_table->PRDT[0].DBA = (u32)buffer_phys;
     cmd_table->PRDT[0].DBAU = (u32)(buffer_phys >> 32);
@@ -697,6 +694,7 @@ static bool ATA_transfer(
     // Submit command through slot 0.
     if (!ATA_issue_command(port_reg, 0, timer)) {
         printf("ATA: transfer failed on port %u\n", port);
+        free_dma(buffer.virtual_address);
         return false;
     }
 
@@ -707,34 +705,38 @@ static bool ATA_transfer(
         printf("ATA: incomplete transfer: %u / %u bytes\n",
             header->prdbc, (u32)byte_count);
 
+        free_dma(buffer.virtual_address);
         return false;
     }
 
+    if (!write)
+        memcpy(data, (void *)buffer.virtual_address, byte_count);
+    free_dma(buffer.virtual_address);
     return true;
 }
 
 static bool ATA_read_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
-    Timer timer = (Timer *)timeradd;
+    Timer *timer = (Timer *)timeradd;
     TimerSource &timer_source = *timer->Src;
 
-    if (!port || !buffer || sector_count == 0 || port->block_size == 0)
-        return;
+    if (!port || !buffer || sector_count == 0 || port->sector_size == 0)
+        return false;
 
     u64 byte_count = u64(sector_count) * 512;
     u64 byte_start = u64(lba) * 512;
-    u32 lba_remainder = byte_start % port->block_size;
+    u32 lba_remainder = byte_start % port->sector_size;
     u64 covered_bytes = lba_remainder + byte_count;
-    u64 blocks = covered_bytes / port->block_size
-        + (covered_bytes % port->block_size != 0);
-    u64 first_block = byte_start / port->block_size;
+    u64 blocks = covered_bytes / port->sector_size
+        + (covered_bytes % port->sector_size != 0);
+    u64 first_block = byte_start / port->sector_size;
     if (first_block > 0xFFFFFFFFULL ||
         blocks > 0x100000000ULL - first_block)
-        return;
+        return false;
     lba = static_cast<u32>(first_block);
 
-    void *temp = kmalloc(blocks * port->block_size);
+    void *temp = kmalloc(blocks * port->sector_size);
     if (!temp)
-        return;
+        return false;
 
     void *original_temp = temp;
     
@@ -746,63 +748,62 @@ static bool ATA_read_sectors(port_descriptor *port, u32 lba, u32 sector_count, v
     if (remainder != 0) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer_source);
         lba += remainder;
-        temp = (void *)((u8 *)temp + (remainder * drive->block_size));
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
     }
 
     for (u32 i = 0; i < iterations; i++) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, 0xFFFF, temp, false, timer_source);
         lba += 0xFFFF;
-        temp = (void *)((u8 *)temp + (0xFFFF * drive->block_size));
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
     }
 
     memcpy(buffer, static_cast<u8 *>(original_temp) + lba_remainder, byte_count);
     kfree(original_temp);
 
-   
-
+   return true;
 }
 
-static inline void temp_read(port_descriptor *port, u32 lba, u32 iterations, u32 remainder, void *temp, TimerSource &timer) {
+static inline void temp_read(port_descriptor *port, u32 lba, u32 iterations, u32 remainder, void *temp, TimerSource &timer, volatile ahci_port *port_reg) {
     if (remainder != 0) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer);
         lba += remainder;
-        temp = (void *)((u8 *)temp + (remainder * port->block_size));
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
     }
 
     for (u32 i = 0; i < iterations; i++) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, false, timer);
         lba += 0xFFFF;
-        temp = (void *)((u8 *)temp + (0xFFFF * port->block_size));
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
     }
 
 }
 
 
 static bool ATA_write_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
-    Timer timer = (Timer *)timeradd;
+    Timer *timer = (Timer *)timeradd;
     TimerSource &timer_source = *timer->Src;
 
     volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
 
-    if (!port || !buffer || sector_count == 0 || port->block_size == 0)
-        return;
+    if (!port || !buffer || sector_count == 0 || port->sector_size == 0)
+        return false;
 
 
     u64 byte_count = u64(sector_count) * 512;
     u64 byte_start = u64(lba) * 512;
-    u32 lba_remainder = byte_start % port->block_size;
+    u32 lba_remainder = byte_start % port->sector_size;
     u64 covered_bytes = lba_remainder + byte_count;
-    u64 blocks = covered_bytes / port->block_size
-        + (covered_bytes % port->block_size != 0);
-    u64 first_block = byte_start / port->block_size;
+    u64 blocks = covered_bytes / port->sector_size
+        + (covered_bytes % port->sector_size != 0);
+    u64 first_block = byte_start / port->sector_size;
     if (first_block > 0xFFFFFFFFULL ||
         blocks > 0x100000000ULL - first_block)
-        return;
+        return false;
     lba = static_cast<u32>(first_block);
 
-    void *temp = kmalloc(blocks * port->block_size);
+    void *temp = kmalloc(blocks * port->sector_size);
     if (!temp)
-        return;
+        return false;
     
     void *original_temp = temp;
     
@@ -810,13 +811,13 @@ static bool ATA_write_sectors(port_descriptor *port, u32 lba, u32 sector_count, 
     u32 remainder = blocks % 0xFFFF;
 
     u64 RemSize = 0;
-    u64 ata_size = blocks * port->block_size;
+    u64 ata_size = blocks * port->sector_size;
     u64 legacy_size = sector_count << 9;
     if (ata_size > legacy_size)
         RemSize = ata_size - legacy_size;
 
     if (RemSize) {
-        temp_read(drive, (u32)lba, iterations, remainder, temp, timer_source);
+        temp_read(port, (u32)lba, iterations, remainder, temp, timer_source, port_reg);
     }
 
     memcpy(static_cast<u8 *>(temp) + lba_remainder, buffer, byte_count);
@@ -824,16 +825,18 @@ static bool ATA_write_sectors(port_descriptor *port, u32 lba, u32 sector_count, 
     if (remainder != 0) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, remainder, temp, true, timer_source);
         lba += remainder;
-        temp = (void *)((u8 *)temp + (remainder * port->block_size));
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
     }
 
     for (u32 i = 0; i < iterations; i++) {
         ATA_transfer(port->port_number, port_reg, (u64)lba, 0xFFFF, temp, true, timer_source);
         lba += 0xFFFF;
-        temp = (void *)((u8 *)temp + (0xFFFF * port->block_size));
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
     }
 
     kfree(original_temp);
+
+    return true;
 }
 
 
@@ -1053,7 +1056,23 @@ static bool ATAPI_packet(u32 port, volatile ahci_port *port_reg, const u8 *cdb, 
     return ATA_issue_command(port_reg, 0, timer);
 }
 
-
+static bool ATAPI_SCSI(u32 port, volatile ahci_port *port_reg, const u8 *cdb, u32 cdb_length, void *buffer, u32 data_length, bool host_to_device, TimerSource &timer) {
+    if (!data_length)
+        return ATAPI_packet(port, port_reg, cdb, cdb_length, nullptr, 0, host_to_device, timer);
+    if (!buffer)
+        return false;
+    dma_ret dma = allocate_dma(data_length);
+    if (dma.status != 0)
+        return false;
+    if (host_to_device)
+        memcpy((void *)dma.virtual_address, buffer, data_length);
+    bool ok = ATAPI_packet(port, port_reg, cdb, cdb_length, &dma, data_length, host_to_device, timer);
+    asm volatile("mfence" ::: "memory");
+    if (ok && !host_to_device)
+        memcpy(buffer, (void *)dma.virtual_address, data_length);
+    free_dma(dma.virtual_address);
+    return ok;
+}
 
 static u32 read_be32(const u8 *p) {
     return ((u32)p[0] << 24) |
@@ -1141,6 +1160,9 @@ static bool ATAPI_init(u32 port, volatile ahci_port *port_reg, TimerSource &time
 
 static void ATAPI_read(port_descriptor *port, u32 lba, u16 sector_count, void *buffer) {
     volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
+    Timer *timer = (Timer *)timeradd;
+    TimerSource &timer_source = *timer->Src;
+
 
 
     u8 cdb[10] = {
@@ -1148,12 +1170,147 @@ static void ATAPI_read(port_descriptor *port, u32 lba, u16 sector_count, void *b
         0x00,
         (lba >> 24), (lba >> 16), (lba >> 8), lba, // LBA = 0
         0x00,
-        (sectors>>8), sectors,             
+        (sector_count>>8), sector_count,             
         0x00
     };
 
-    ATAPI_packet(port->port_number, port_reg, cdb, 10, )
+
+    ATAPI_SCSI(port->port_number, port_reg, cdb, 10, buffer, (sector_count*port->sector_size), false, timer_source);
 }
+
+
+static void ATAPI_write(port_descriptor *port, u32 lba, u16 sector_count, void *buffer) {
+    volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port->port_number);
+    Timer *timer = (Timer *)timeradd;
+    TimerSource &timer_source = *timer->Src;
+
+
+    u8 cdb[10] = {
+        0x2A, // WRITE(10)
+        0x00,
+        (lba >> 24), (lba >> 16), (lba >> 8), lba, // LBA = 0
+        0x00,
+        (sector_count>>8), sector_count,             
+        0x00
+    };
+
+    ATAPI_SCSI(port->port_number, port_reg, cdb, 10, buffer, (sector_count*port->sector_size), true, timer_source);
+}
+
+static inline void atapi_temp_read(port_descriptor *port, u32 lba, u32 iterations, u32 remainder, void *temp) {
+    if (remainder != 0) {
+        ATAPI_read(port, lba, remainder, temp);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATAPI_read(port, lba, 0xFFFF, temp);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
+    }
+
+}
+
+
+static void ATAPI_Read_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
+    if (!port || !buffer || sector_count == 0 || port->sector_size == 0)
+        return;
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % port->sector_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / port->sector_size
+        + (covered_bytes % port->sector_size != 0);
+    u64 first_block = byte_start / port->sector_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * port->sector_size);
+    if (!temp)
+        return;
+
+    void *original_temp = temp;
+    
+
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
+
+    if (remainder != 0) {
+        ATAPI_read(port, lba, remainder, temp);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATAPI_read(port, lba, 0xFFFF, temp);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
+    }
+
+    memcpy(buffer, static_cast<u8 *>(original_temp) + lba_remainder, byte_count);
+    kfree(original_temp);
+
+}
+
+
+static void ATAPI_Write_sectors(port_descriptor *port, u32 lba, u32 sector_count, void *buffer) {
+    if (!port || !buffer || sector_count == 0 || port->sector_size == 0)
+        return;
+
+
+    u64 byte_count = u64(sector_count) * 512;
+    u64 byte_start = u64(lba) * 512;
+    u32 lba_remainder = byte_start % port->sector_size;
+    u64 covered_bytes = lba_remainder + byte_count;
+    u64 blocks = covered_bytes / port->sector_size
+        + (covered_bytes % port->sector_size != 0);
+    u64 first_block = byte_start / port->sector_size;
+    if (first_block > 0xFFFFFFFFULL ||
+        blocks > 0x100000000ULL - first_block)
+        return;
+    lba = static_cast<u32>(first_block);
+
+    void *temp = kmalloc(blocks * port->sector_size);
+    if (!temp)
+        return;
+    
+    void *original_temp = temp;
+    
+    u32 iterations = blocks / 0xFFFF;
+    u32 remainder = blocks % 0xFFFF;
+
+    u64 RemSize = 0;
+    u64 ata_size = blocks * port->sector_size;
+    u64 legacy_size = sector_count << 9;
+    if (ata_size > legacy_size)
+        RemSize = ata_size - legacy_size;
+
+    if (RemSize) {
+        atapi_temp_read(port, (u32)lba, iterations, remainder, temp);
+    }
+
+    memcpy(static_cast<u8 *>(temp) + lba_remainder, buffer, byte_count);
+
+    if (remainder != 0) {
+        ATAPI_write(port, lba, remainder, temp);
+        lba += remainder;
+        temp = (void *)((u8 *)temp + (remainder * port->sector_size));
+    }
+
+    for (u32 i = 0; i < iterations; i++) {
+        ATAPI_write(port, lba, 0xFFFF, temp);
+        lba += 0xFFFF;
+        temp = (void *)((u8 *)temp + (0xFFFF * port->sector_size));
+    }
+
+    kfree(original_temp);
+}
+
+
 
 static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     volatile ahci_port *port_reg = (volatile ahci_port *)port_to_address(port);
@@ -1214,12 +1371,13 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
     u32 det = port_reg->SSTS & 0xf;
 
     switch (det) {
-        case 0:
+        case 0: {
             ports[port] = {0};
             ports[port].device_present = false;
             break;
+        }
 
-        case 1:
+        case 1: {
             u32 sctl = port_reg->SCTL;
             // assert COMRESET
             port_reg->SCTL = (sctl & ~0xFu) | 1u;
@@ -1245,26 +1403,29 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
             port_reg->SERR = 0xFFFFFFFF;
 
             goto next;
+        }
 
-        case 2:
+        case 2: {
             printf("SATA: incorrect det value for port 0x%b\n", port);
             return false;
+        }
 
-        case 3:
+        case 3: {
             goto next;
+        }
 
-        case 4:
+        case 4: {
             u32 sctl = port_reg->SCTL;
             if ((sctl & SCTL_DET_MASK) == SCTL_DET_OFF) {
                 // software disabled the SATA PHY.
                 u32 cmd = port_reg->CMD; // read the port's command register
                 
                 if (cmd & CMD_ST) {
-                    port->CMD = cmd & ~CMD_ST;
+                    port_reg->CMD = cmd & ~CMD_ST;
 
                     bool stopped = false;
                     for (u32 i = 0; i < 1000; i++) {// 1 second timeout
-                        if (!(port->CMD & CMD_CR)) {
+                        if (!(port_reg->CMD & CMD_CR)) {
                             stopped = true;
                             break;
                         }
@@ -1294,10 +1455,12 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
                 printf("SATA: offline condition disabled the SATA PHY\n");
                 return false;
             }
+        }
             
-        default:
+        default: {
             printf("SATA: incorrect det value for port 0x%b\n", port);
             return false;
+        }
     }
 
     next:
@@ -1318,30 +1481,35 @@ static bool ahci_enumrate_port(u32 port, TimerSource &timer) {
         return false;
     } else {
         switch (sig) {
-            case 0x00000101:
+            case 0x00000101: {
                 return ATA_identify(port, port_reg, timer);
+            }
             
-            
-            case 0xEB140101:
+            case 0xEB140101: {
                 // ATAPI device
                 dma_ret ATAPI_dma = allocate_dma(4096);
                 if (ATAPI_dma.status != 0)
                     return false;
                 ports[port].data = ATAPI_dma;
-                return ATAPI_init(port, port_reg, timer);
 
-            case 0xC33C0101:
+                return ATAPI_init(port, port_reg, timer);
+            }
+
+            case 0xC33C0101: {
                 return false;
+            }
 
                 
 
-            case 0x96690101:
+            case 0x96690101: {
                 return false;
+            }
 
-            default:
+            default: {
                 return false;
+            }
 
-                break;
+                
         }
     }
     
@@ -1392,4 +1560,35 @@ bool controller_init(TimerSource &timer) {
     }
 
     return true;
+}
+
+
+void SATA_drive::init() {
+    drive_port = &ports[current_port];
+    memcpy(vendor, "SATA", sizeof("SATA"));
+    initialized = drive_port->initialized;
+    current_port++;
+}
+
+
+
+void SATA_drive::read_sectors(u32 lba, u32 sector_count, void *buffer) {
+    if (drive_port->device_type == ATA)
+        ATA_read_sectors(drive_port, lba, sector_count, buffer);
+    else if (drive_port->device_type == ATAPI)
+        ATAPI_Read_sectors(drive_port, lba, sector_count, buffer);
+    else
+        printf("SATA: unknown device type\n");
+} 
+
+
+
+
+void SATA_drive::write_sectors(u32 lba, u32 sector_count, void *buffer) {
+    if (drive_port->device_type == ATA)
+        ATA_write_sectors(drive_port, lba, sector_count, buffer);
+    else if (drive_port->device_type == ATAPI)
+        ATAPI_Write_sectors(drive_port, lba, sector_count, buffer);
+    else
+        printf("SATA: unknown device type\n");
 }

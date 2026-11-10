@@ -3,6 +3,7 @@
 #include "drivers/storage/ide/ide.hpp"
 #include "drivers/pci/pci.h"
 #include "drivers/display/vga.h"
+#include "x86-64/memory/memory.h"
 
 extern u16 Primary;
 extern u16 Secondary;
@@ -83,10 +84,12 @@ static ata_drive Search_bitmap(void) {
 }
 
 void ATA_drive::init() {
+    memcpy(vendor, "ATA ", sizeof("ATA "));
     if (!ata_discovered) {
         if (pci_enumerate(ata_find_callback, nullptr) != PCI_STATUS_SUCCESS) {
             printf("ATA: no ide device found on pci\n");
             ata_end = true;
+            initialized = false;
             return;
         } 
     }
@@ -100,7 +103,10 @@ void ATA_drive::init() {
         if (probe != ATA_DEVICE_ATA && probe != ATA_DEVICE_ATAPI) {
             printf("ATA: unknown device or probe error\n");
             drive.found = false;
+            initialized = false;
             return;
+        } else {
+            initialized = true;
         }
     }
 

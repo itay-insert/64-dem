@@ -192,4 +192,5 @@ enable db 0
 dap:
 times 16 db 0
 
+sign db '64DM'
 times 440-($-$$) db 0
