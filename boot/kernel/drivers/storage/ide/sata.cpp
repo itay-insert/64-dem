@@ -1567,6 +1567,7 @@ void SATA_drive::init() {
     drive_port = &ports[current_port];
     memcpy(vendor, "SATA", sizeof("SATA"));
     initialized = drive_port->initialized;
+    sector_size = drive_port->sector_size;
     current_port++;
 }
 

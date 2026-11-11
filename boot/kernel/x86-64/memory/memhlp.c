@@ -77,6 +77,14 @@ char *strcpy(char *dest, const char *src) {
     return org;
 }
 
+int strcmp(char *a, char *b) {
+    while ((*a != '\0') && (*a == *b)) {
+        a++;
+        b++;
+    }
+
+    return (unsigned char)*a - (unsigned char)*b;
+}
 
 u8 check_byte(u8 byte, u8 bit, u8 dir) {
     if (dir == 1) {

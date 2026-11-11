@@ -75,6 +75,7 @@ find_admin_tool() {
 
 SFDISK="$(find_admin_tool sfdisk)"
 MKFS_FAT="$(find_admin_tool mkfs.fat)"
+FSCK_FAT="$(find_admin_tool fsck.fat)"
 WIPEFS="$(find_admin_tool wipefs)"
 
 TARGET="$(readlink -f -- "$TARGET")"
@@ -165,13 +166,26 @@ if [[ -z "$PARTITION" || ! -b "$PARTITION" ]]; then
 fi
 
 echo "Formatting $PARTITION as FAT32..."
-sudo "$MKFS_FAT" -F 32 -n 64DEM "$PARTITION"
+sudo "$MKFS_FAT" -F 32 -S 512 -n 64DEM "$PARTITION"
 
 echo "Installing the BIOS loader into the MBR..."
 sudo dd if="$BUILD_DIR/boot.bin" of="$TARGET" bs=1 count="$BOOT_SIZE" conv=notrunc,fsync status=none
 
 echo "Copying boot/ and EFI/ to the USB filesystem..."
 sudo mcopy -i "$PARTITION" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" ::/
+
+echo "Updating FAT32 FSInfo..."
+# fsck.fat recalculates the free-cluster count after the file copy. Exit status 1
+# means it corrected the filesystem; any other nonzero status is an error.
+if sudo "$FSCK_FAT" -a "$PARTITION"; then
+    :
+else
+    FSCK_STATUS=$?
+    ((FSCK_STATUS == 1)) || exit "$FSCK_STATUS"
+fi
+# mkfs.fat puts FSInfo in sector 1 and its backup in sector 7. mcopy and
+# fsck.fat update only the primary, so keep the backup in sync as well.
+sudo dd if="$PARTITION" of="$PARTITION" bs=512 skip=1 seek=7 count=1 conv=notrunc,fsync status=none
 sudo sync
 
 echo "Installation complete. $PARTITION uses the available USB capacity."

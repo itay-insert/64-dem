@@ -7,6 +7,7 @@ class disk_drive {
         char vendor[5];
         u8 disk_type;
         u8 disk_index;
+        u32 sector_size; // now disk_drive contains sector_size
         bool initialized;
         virtual void read_sectors(u32 lba, u32 sector_count, void *buffer) = 0;
         virtual void write_sectors(u32 lba, u32 sector_count, void *buffer) = 0;

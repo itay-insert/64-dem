@@ -84,6 +84,7 @@ storage::storage() {
         if (!increase_drives(sizeof(ATA_drive))) break;
         void *slot = reinterpret_cast<u8 *>(drives) + old_size;
         ATA_drive *drive = new (slot) ATA_drive{};
+        drive->sector_size = 512;
         drive->init();
         if (!drive->is_found())
             continue;

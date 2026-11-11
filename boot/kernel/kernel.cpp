@@ -28,6 +28,8 @@
 #ifdef NVME_QEMU_PROBE
 #include "../../tests/nvme_qemu_probe.hpp"
 #endif
+#include "filesystem/mbr.hpp"
+#include "filesystem/fs.hpp"
 
 #define RGB 0
 #define BGR 1
@@ -293,14 +295,27 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("Current timer tick is: %lx\n", timer.Src->read());
     printf("KernelStart = 0x%lx  KernelEntry = 0x%lx  KernelEnd = 0x%lx\nFramebuffer_base = 0x%lx  Local_APIC = 0x%lx  IO_APIC = 0x%lx\n",
          info64->kernel_start, info64->kernel_entry, info64->kernel_end, info64->framebuffer_base, APIC_base, IO_APIC);
-    printf("the clock:");
-    draw_cursor(LightGray);
-    printf("\n");
+    
     disk_drive *boot_drive = disks.find_boot_drive();
     if (boot_drive != nullptr) {
         printf("found boot drive in drive 0x%b:\n", boot_drive->disk_index);
         printf("vendor: %s\n", boot_drive->vendor);
     }
+
+    MBR boot_partition;
+    boot_partition.SetBootDrive(boot_drive);
+
+    BootFileSystem fat32;
+    fat32.drive = boot_partition.BootDrive;
+    u32 lba = boot_partition.DiscoverFileSystem();
+
+    fat32.fs_init(boot_drive, &boot_partition, lba, boot_partition.SizeInBytes);
+
+
+    printf("the clock:");
+    draw_cursor(LightGray);
+    printf("\n");
+
     
     u64 old_keyboard_irq = keyboard_irq_count;
     while (1) {
