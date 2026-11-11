@@ -3,6 +3,33 @@
 #include "filesystem/mbr.hpp"
 
 typedef struct {
+    char filename[11];
+    u8 attributes;
+    u8 ReservedNT;
+    u8 CreationTime;
+    u16 Time;
+    u16 Date;
+    u16 last_access;
+    u16 cluster_high;
+    u16 last_modify_time;
+    u16 last_modify_date;
+    u16 cluster_low;
+    u32 file_size;
+} __attribute__((packed)) FAT32_DIR;
+
+
+typedef struct {
+    u8 Sequence_number;
+    u16 first_part[5];
+    u8 attribute; // always equals 0x0F
+    u8 long_entry_type; // 0 for name entries
+    u8 checksum;
+    u16 second_part[6];
+    u16 Padding; // always 0
+    u16 final_part[2];
+} __attribute__((packed)) FAT32_LFN;
+
+typedef struct {
     u32 index;
     char *str;
 } Paths_table;
@@ -20,6 +47,7 @@ class BootFileSystem {
         Paths_table *table;
         u32 Path_count;
         bool increase_paths(u64 address, char *path);
+        int scan_dir(FAT32_DIR *dir, u32 sector_count);
 
     public:
         u64 SizeInBytes;

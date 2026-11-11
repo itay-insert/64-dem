@@ -311,6 +311,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     fat32.fs_init(boot_drive, &boot_partition, lba, boot_partition.SizeInBytes);
 
+    printf("OpenPath(): 0x%b\n", fat32.open_path("/BOOT/"));
 
     printf("the clock:");
     draw_cursor(LightGray);
