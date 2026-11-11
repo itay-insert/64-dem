@@ -226,8 +226,51 @@ static inline u8 count_path(const char *path) {
     return count;
 }
 
-static inline char dispatch_utf8(u16 utf) {
-    
+
+static bool utf16le_to_ascii(const void *src, size_t src_units,
+                             char *dst, size_t dst_capacity) {
+    if (dst == nullptr || dst_capacity == 0)
+        return false;
+
+    dst[0] = '\0';
+    if (src == nullptr)
+        return false;
+
+    const u8 *bytes = (const u8 *)src;
+    size_t written = 0;
+    for (size_t i = 0; i < src_units; ++i) {
+        u16 unit = (u16)bytes[i * 2] | ((u16)bytes[i * 2 + 1] << 8);
+        if (unit == 0 || unit == 0xFFFF)
+            break;
+
+        if (written == dst_capacity - 1)
+            return false;
+
+        if (unit >= 0xD800 && unit <= 0xDBFF && i + 1 < src_units) {
+            u16 next = (u16)bytes[(i + 1) * 2] |
+                       ((u16)bytes[(i + 1) * 2 + 1] << 8);
+            if (next >= 0xDC00 && next <= 0xDFFF)
+                ++i;
+        }
+
+        dst[written++] = unit <= 0x7F ? (char)unit : '?';
+        dst[written] = '\0';
+    }
+    return true;
+}
+
+static void collect_lfn(const FAT32_LFN *entry, u16 *name) {
+    unsigned ordinal = entry->Sequence_number & 0x1F;
+    unsigned base = (ordinal - 1) * 13;
+
+    for (unsigned i = 0; i < 5; ++i)
+        name[base + i] = entry->first_part[i];
+
+    for (unsigned i = 0; i < 6; ++i)
+        name[base + 5 + i] = entry->second_part[i];
+
+    for (unsigned i = 0; i < 2; ++i)
+        name[base + 11 + i] = entry->final_part[i];
 }
 
 
