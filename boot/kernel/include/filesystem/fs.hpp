@@ -81,6 +81,7 @@ class BootFileSystem {
         bool increase_files(Paths_table *table, char *filename, u32 cluster);
         int scan_dir(FAT32_DIR *dir);
         Search_ret search_path(char *path);
+        void allocate_clusters(file_cache *file);
 
     public:
         u64 SizeInBytes;
@@ -93,4 +94,8 @@ class BootFileSystem {
         void fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size);
         Path_ret open_path(const char *path);
         u64 open_file_by_path(const char *path, const char *filename);
+        u64 open_file_by_index(u32 index, const char *filename);
+        void close_file(u64 file_handle);
+        void close_path(u32 path_index);
+        void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
 };

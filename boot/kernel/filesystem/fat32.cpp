@@ -546,3 +546,171 @@ u64 BootFileSystem::open_file_by_path(const char *path, const char *filename) {
 
     return 0xFFFFFFF; // for failure
 }
+
+
+
+
+u64 BootFileSystem::open_file_by_index(u32 index, const char *filename) {
+    if (index >= Path_count)
+        return 0xFFFFFFFF;
+
+    u8 *cache = (u8 *)Paths[index];
+
+    for (u32 i = 0; i < table[index].file_count; i++) {
+        if (strcmp((char *)filename, table[index].open_files[i].name) == 0) {
+            u64 file_handle = ((u64)index << 32) | ((u64)i);
+            return file_handle;
+        }
+    }
+
+    u64 size = sizeof(FAT32_DIR);
+    while (*cache != 0x00) {
+        if (*cache == 0xE5) {
+            cache += size;
+            continue;
+        }
+
+        FAT32_DIR *dir = (FAT32_DIR *)((u64)cache);
+        u8 count = str_size(filename);
+        u8 cmp_count = 11;
+        char *name = nullptr;
+        char *file = nullptr;
+
+
+        if (dir->attributes == LFN) {
+            size += sizeof(FAT32_LFN);
+            FAT32_LFN *lfn = (FAT32_LFN *)((u64)cache + sizeof(FAT32_DIR));
+            u16 *utf_name = new u16[13];
+            collect_lfn(lfn, utf_name);
+            name = new char[14];
+            utf16le_to_ascii(utf_name, 13, name, 14);
+            delete[] utf_name;
+            cmp_count = 13;
+        } else {
+            name = new char[11];
+            for (u8 i = 0; i < 11; i++) 
+                name[i] = dir->filename[i];
+        }
+
+        file = new char[cmp_count];
+        for (u8 i = 0; i < count; i++)
+            file[i] = filename[i];
+
+        for (u8 i = count; i < cmp_count; i++)
+            file[i] = ' ';
+
+        if (memcmp(file, name, cmp_count) == 0) {
+            delete[] name;
+            delete[] file;
+            u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+            Paths_table *ptr = &table[index];
+            if (increase_files(ptr, (char *)filename, cluster)) {
+                u64 file_handle = ((u64)index << 32) | ((u64)ptr->file_count - 1);
+                return file_handle;
+            }
+        }
+
+    }
+
+    return 0xFFFFFFF; // for failure
+}
+
+static inline void remove_file_entry(Paths_table *table, u32 file_index) {
+    if (table->open_files == nullptr)
+        return;
+    
+    cache_descriptor *filecache = table->open_files[file_index].cache;
+    if (filecache != nullptr) {
+        delete[] filecache->cache;
+        delete[] filecache;
+    }
+
+    for (u32 i = file_index; i < table->file_count; i++) 
+        table->open_files[i] = table->open_files[i+1];
+
+    u64 old_size = table->file_count * sizeof(file_cache);
+    u64 new_size = old_size - sizeof(file_cache);
+
+
+    if (new_size == 0) 
+        kfree(table->open_files);
+    else {
+        file_cache *old_pointer = table->open_files;
+        table->open_files = (file_cache *)krealloc(table->open_files, old_size, new_size);
+        if (table->open_files == nullptr)
+            table->open_files = old_pointer;
+    }
+
+
+    table->file_count--;
+}
+
+
+void BootFileSystem::close_file(u64 file_handle) {
+    u32 path_index = (u32)(file_handle >> 32);
+    u32 file_index = (u32)(file_handle & 0xFFFFFFFF);
+
+    if (path_index >= Path_count || table == nullptr)
+        return;
+
+    if (file_index >= table[path_index].file_count || table[path_index].open_files == nullptr)
+        return;
+
+    remove_file_entry(&table[path_index], file_index);
+    
+}
+
+
+void BootFileSystem::close_path(u32 path_index) {
+    if (path_index >= Path_count || table == nullptr)
+        return;
+
+        // close all files on path
+   for (u32 i = (table[path_index].file_count - 1); i >= 0; i--) {
+        u64 file_handle = ((u64)path_index << 32) | (u64)i;
+        close_file(file_handle);
+   }
+
+   table[path_index] = {0};
+        // relocate paths entries
+   for (u32 i = path_index; i < Path_count; i++) 
+        table[i] = table[i+1];
+
+   u64 old_size = Path_count * sizeof(Paths_table);
+   u64 new_size = old_size - sizeof(Paths_table);
+
+   if (new_size == 0) 
+        kfree(table);
+    else {
+        Paths_table *old_pointer = table;
+        table = (Paths_table *)krealloc(table, old_size, new_size);
+        if (table == nullptr)
+            table = old_pointer;
+    }
+
+    Path_count--;
+
+}
+
+void BootFileSystem::allocate_clusters(file_cache *file) {
+
+}
+
+
+void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buffer) {
+    u32 path_index = (u32)(file_handle >> 32);
+    u32 file_index = (u32)file_handle;
+
+    if (path_index >= Path_count || table == nullptr)
+        return;
+
+    if (file_index >= table[Path_count].file_count || table[Path_count].open_files == nullptr)
+        return;
+
+    file_cache *file = &table[Path_count].open_files[file_index];
+
+    u32 clusters = (offset + size + (cluster_size - 1)) / cluster_size;
+    if (clusters > file->cluster_count) {
+
+    }
+}
