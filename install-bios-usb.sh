@@ -171,8 +171,8 @@ sudo "$MKFS_FAT" -F 32 -S 512 -n 64DEM "$PARTITION"
 echo "Installing the BIOS loader into the MBR..."
 sudo dd if="$BUILD_DIR/boot.bin" of="$TARGET" bs=1 count="$BOOT_SIZE" conv=notrunc,fsync status=none
 
-echo "Copying boot/ and EFI/ to the USB filesystem..."
-sudo mcopy -i "$PARTITION" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" ::/
+echo "Copying boot/, EFI/, and shell/ to the USB filesystem..."
+sudo mcopy -i "$PARTITION" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" "$ROOT_DIR/shell" ::/
 
 echo "Updating FAT32 FSInfo..."
 # fsck.fat recalculates the free-cluster count after the file copy. Exit status 1

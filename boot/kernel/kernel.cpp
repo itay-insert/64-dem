@@ -311,8 +311,24 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     fat32.fs_init(boot_drive, &boot_partition, lba, boot_partition.SizeInBytes);
 
-    printf("OpenPath(): 0x%b\n", fat32.open_path("/EFI/BOOT/").status);
+    Path_ret path = fat32.open_path("/SHELL/");
 
+    printf("OpenPath(): 0x%b\n", path.status);
+
+    if (path.status) {
+        u64 file_handle = fat32.open_file_by_index(path.index, "SIGN    BIN");
+        if (file_handle != 0xFFFFFFFF) {
+            char *sign = new char[2];
+            fat32.read_file(file_handle, 0, 2, sign);
+            for (int i = 0; i < 2; i++)
+                printf("%c", sign[i]);
+
+            delete[] sign;
+            printf("\n");
+        }
+
+
+    }
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");

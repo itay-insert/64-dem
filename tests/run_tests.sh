@@ -41,9 +41,15 @@ c++ -std=c++11 -Wall -Wextra -Werror -O1 -g \
 /tmp/64-dem-test-usb-periodic
 
 c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
-    -fsanitize=undefined $kernel_includes tests/test_usb_async.cpp \
+    -fno-builtin -fsanitize=undefined $kernel_includes tests/test_usb_async.cpp \
     boot/kernel/drivers/usb/usb_async.cpp -o /tmp/64-dem-test-usb-async
 /tmp/64-dem-test-usb-async
+
+c++ -std=c++11 -Wall -Wextra -Werror -Wno-narrowing -O1 -g -fno-rtti -fno-builtin \
+    -ffunction-sections -fdata-sections -Wl,--gc-sections \
+    $kernel_includes tests/test_ums_command.cpp \
+    boot/kernel/drivers/storage/ums.cpp -o /tmp/64-dem-test-ums-command
+/tmp/64-dem-test-ums-command
 
 cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     -fsanitize=undefined -ffreestanding \

@@ -125,8 +125,8 @@ dd if="$BUILD_DIR/boot.bin" of="$IMAGE" bs=1 count="$BOOT_SIZE" conv=notrunc sta
 echo "Formatting the partition as FAT32..."
 mkfs.fat -F 32 --offset "$PARTITION_START" -n 64DEM "$IMAGE" "$FAT_SIZE_KIB"
 
-echo "Copying boot/ and EFI/ into the FAT32 filesystem..."
-mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" ::/
+echo "Copying boot/, EFI/, and shell/ into the FAT32 filesystem..."
+mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" "$ROOT_DIR/shell" ::/
 if [[ -n "$BOOTLOADER" ]]; then
     mcopy -o -i "$IMAGE@@$PARTITION_OFFSET" "$BOOTLOADER" ::/EFI/boot/BOOTX64.efi
 fi

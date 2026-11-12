@@ -79,7 +79,7 @@ class BootFileSystem {
         u32 Path_count;
         Path_ret increase_paths(u64 address, char *path);
         bool increase_files(Paths_table *table, char *filename, u32 cluster);
-        int scan_dir(FAT32_DIR *dir);
+        int scan_dir(u32 cluster);
         Search_ret search_path(char *path);
         void allocate_clusters(file_cache *file, u32 cluster_count);
 

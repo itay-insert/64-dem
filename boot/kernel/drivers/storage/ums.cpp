@@ -120,12 +120,67 @@ bool ums_prepare_data_buffer(
     return true;
 }
 
+static u32 ums_packet_size(const usb_mass_storage *drive, u32 handle, bool in) {
+    if (!drive || !drive->controller || !drive->controller->ports ||
+        drive->controller->ports_count <= 0)
+        return 0;
+
+    u32 port_index = (handle >> 16) & 0xFF;
+    u32 interface_index = (handle >> 8) & 0xFF;
+    u32 endpoint_index = handle & 0xFF;
+    if (port_index >= (u32)drive->controller->ports_count)
+        return 0;
+
+    const usb_port_descriptor &port = drive->controller->ports[port_index];
+    if (!port.device || !port.device->interfaces ||
+        interface_index >= port.device->usb_interface_count)
+        return 0;
+
+    const usb_interface &interface = port.device->interfaces[interface_index];
+    if (!interface.endpoints || endpoint_index >= interface.endpoint_count)
+        return 0;
+
+    const usb_endpoint &endpoint = interface.endpoints[endpoint_index];
+    if (endpoint.transfer_type != 2 || !endpoint.max_packet_size ||
+        ((endpoint.address & IN) != 0) != in)
+        return 0;
+    return endpoint.max_packet_size;
+}
+
+static bool ums_transfer_packets(usb_controller *controller, u32 handle, u8 *buffer,
+                                 u32 length, u32 packet_size, TimerSource &timer,
+                                 u32 timeout, bool allow_short, u32 &transferred) {
+    transferred = 0;
+    while (transferred < length) {
+        u32 chunk = length - transferred;
+        if (chunk > packet_size)
+            chunk = packet_size;
+
+        usb_transfer_result result = controller->usb_transfer(
+            handle, buffer + transferred, chunk, timer, timeout);
+        if (result.status_code != TRANSFER_SUCCESS || result.actual_length > chunk)
+            return false;
+        if (result.actual_length != chunk && !allow_short)
+            return false;
+
+        transferred += result.actual_length;
+        if (result.actual_length < chunk)
+            break;
+    }
+    return true;
+}
+
 
 u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data, u32 data_length, bool device_to_host, u32 timeout) {
     msc_cbw cbw = {};
     msc_csw csw = {};
-    
+
+    if (!drive || !drive->controller || !timeradd)
+        return 1;
+
     Timer *timer = (Timer *)timeradd;
+    if (!timer->Src)
+        return 1;
     TimerSource &timer_source = *timer->Src;
 
     if (!ums_prepare_data_buffer(data, data_length))
@@ -134,54 +189,40 @@ u8 ums_command(usb_mass_storage *drive, const u8 *cdb, u8 cdb_length, void *data
     if (!ums_prepare_cbw(cbw, *drive, cdb, cdb_length, data_length, device_to_host))
         return 1;
 
+    u32 out_packet_size = ums_packet_size(drive, drive->endpoint_out_addr, false);
+    u32 in_packet_size = ums_packet_size(drive, drive->endpoint_in_addr, true);
+    if (!out_packet_size || !in_packet_size)
+        return 1;
+
     ums_prepare_csw(csw);
 
-    usb_transfer_result result = drive->controller->usb_transfer(drive->endpoint_out_addr, &cbw, sizeof(cbw), timer_source, timeout);
-
-    if (result.status_code != TRANSFER_SUCCESS || result.actual_length != sizeof(cbw))
+    u32 transferred = 0;
+    if (!ums_transfer_packets(drive->controller, drive->endpoint_out_addr,
+                              (u8 *)&cbw, sizeof(cbw), out_packet_size,
+                              timer_source, timeout, false, transferred))
         return 1;
 
-
-    
+    u32 data_transferred = 0;
     if (data_length > 0) {
-        u32 endpoint = device_to_host
-            ? drive->endpoint_in_addr
-            : drive->endpoint_out_addr;
-
-        result = drive->controller->usb_transfer(
-            endpoint,
-            data,
-            data_length,
-            timer_source,
-            timeout
-        );
-
-        if (result.status_code != TRANSFER_SUCCESS)
+        u32 endpoint = device_to_host ? drive->endpoint_in_addr : drive->endpoint_out_addr;
+        u32 packet_size = device_to_host ? in_packet_size : out_packet_size;
+        if (!ums_transfer_packets(drive->controller, endpoint, (u8 *)data,
+                                  data_length, packet_size, timer_source, timeout,
+                                  device_to_host, data_transferred))
             return 1;
-
-        // Save result.actual_length for residue validation.
     }
 
-    result = drive->controller->usb_transfer(
-        drive->endpoint_in_addr,
-        &csw,
-        sizeof(csw),
-        timer_source,
-        timeout
-    );
-
-    if (result.status_code != TRANSFER_SUCCESS ||
-        result.actual_length != sizeof(csw))
+    if (!ums_transfer_packets(drive->controller, drive->endpoint_in_addr,
+                              (u8 *)&csw, sizeof(csw), in_packet_size,
+                              timer_source, timeout, false, transferred))
         return 1;
-        
+
     if (!ums_validate_csw(csw, cbw))
         return 1;
 
-    if (csw.status == 0)
-        return 0;
-    else 
+    if (csw.status != 0 || csw.residue != 0 || data_transferred != data_length)
         return 1;
-
+    return 0;
 }
 
 
@@ -313,7 +354,7 @@ void ums_discover() {
         drives[i] = {};
         drives[i].controller = result.interfaces[i].controller;
         u32 port_index = (result.interfaces[i].port_index << 16);
-        u32 interface_index = i << 8;
+        u32 interface_index = (u32)result.interfaces[i].interface_index << 8;
         u32 endpoint_in = result.interfaces[i].endpoint_bulk_in;
         u32 endpoint_out = result.interfaces[i].endpoint_bulk_out;
         drives[i].endpoint_in_addr = port_index | interface_index | endpoint_in;

@@ -331,8 +331,7 @@ static void collect_lfn(const FAT32_LFN *entry, u16 *name) {
 
 #define FAT32_EOC 0x0FFFFFFF
 
-int BootFileSystem::scan_dir(FAT32_DIR *dir) {
-    u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+int BootFileSystem::scan_dir(u32 cluster) {
     int count = 0;
 
     while (cluster != 0x0FFFFFFF) {
@@ -347,6 +346,7 @@ int BootFileSystem::scan_dir(FAT32_DIR *dir) {
 Path_ret BootFileSystem::open_path(const char *path) {
     Path_ret ret = {0};
 
+    u32 backup_cluster = 0;
     char path_name[14];
     u32 cluster = RootCluster;
     cluster = load_clusters(cluster, 1, dir_place);
@@ -355,7 +355,7 @@ Path_ret BootFileSystem::open_path(const char *path) {
     u8 *dir_data = dir_place;
     bool started = true;
 
-    FAT32_DIR *dir = nullptr;
+    FAT32_DIR *dir = (FAT32_DIR *)((u64)dir_data);
     bool matched = true;
 
     while (path[1] != '\0') {
@@ -433,6 +433,7 @@ Path_ret BootFileSystem::open_path(const char *path) {
         }
 
         cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+        backup_cluster = cluster;
         cluster = load_clusters(cluster, 1, dir_place);
         dir_data = dir_place;
         delete[] name;
@@ -440,11 +441,11 @@ Path_ret BootFileSystem::open_path(const char *path) {
         matched = true;
     }
 
-    int count = scan_dir(dir);
+    int count = scan_dir(backup_cluster);
     size = cluster_size * count;
     u8 *path_cache = new u8[size];
-    cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
-    load_clusters(cluster, 1, dir_place);
+    cluster = backup_cluster;
+    load_clusters(cluster, count, path_cache);
     ret = increase_paths((u64)path_cache, (char *)path);
     if (!ret.status) 
         delete[] path_cache;
@@ -542,6 +543,7 @@ u64 BootFileSystem::open_file_by_path(const char *path, const char *filename) {
             }
         }
 
+        cache += size;
     }
 
     return 0xFFFFFFF; // for failure
@@ -610,9 +612,11 @@ u64 BootFileSystem::open_file_by_index(u32 index, const char *filename) {
             }
         }
 
+        cache += size;
+
     }
 
-    return 0xFFFFFFF; // for failure
+    return 0xFFFFFFFF; // for failure
 }
 
 static inline void remove_file_entry(Paths_table *table, u32 file_index) {
@@ -699,8 +703,9 @@ void BootFileSystem::allocate_clusters(file_cache *file, u32 cluster_count) {
         filecache->cluster_index = cluster_count;
         file->cluster_count = cluster_count;
         u64 size = cluster_count * cluster_size;
-        filecache->cache = new u8[cluster_count];
+        filecache->cache = new u8[size];
         file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, filecache->cache);
+        file->cache = filecache;
         return;
     }
 
@@ -712,6 +717,7 @@ void BootFileSystem::allocate_clusters(file_cache *file, u32 cluster_count) {
     u64 new_size = file->cluster_count * cluster_size;
 
     filecache->cache = (u8 *)krealloc(filecache->cache, old_size, new_size);
+    file->cache = filecache;
     if (filecache->cache == nullptr)
         return;
     file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, (void *)(filecache->cache + cluster_off));
@@ -725,15 +731,15 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
     if (path_index >= Path_count || table == nullptr)
         return;
 
-    if (file_index >= table[Path_count].file_count || table[Path_count].open_files == nullptr)
+    if (file_index >= table[path_index].file_count || table[path_index].open_files == nullptr)
         return;
 
-    file_cache *file = &table[Path_count].open_files[file_index];
+    file_cache *file = &table[path_index].open_files[file_index];
 
     u32 clusters = (offset + size + (cluster_size - 1)) / cluster_size;
     if (clusters > file->cluster_count) 
         allocate_clusters(file, (clusters - file->cluster_count));
     
-
+    memcpy(buffer, (void *)(file->cache->cache+offset), size);
     
 }
