@@ -175,15 +175,17 @@ u32 BootFileSystem::find_next_cluster(u32 cluster) {
 
 
 u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
+    u32 sector_count = (cluster_size + 511) >> 9;
     u32 sectors = ((cluster_size * count) + 511) >> 9;
     u8 *cache = new u8[sectors<<9];
+    for (u32 i = 0; i < count; i++) {
+        u32 lba = Cluster_To_LBA(cluster);
 
-    u32 lba = Cluster_To_LBA(cluster);
+       drive->read_sectors(lba, sector_count, cache);
+       cache += cluster_size;
+       cluster = find_next_cluster(cluster);
+    }
 
-    drive->read_sectors(lba, sectors, cache);
-
-    for (u32 i = 0; i < count; i++) 
-        cluster = find_next_cluster(cluster);
 
     memcpy(buffer, cache, cluster_size*count);
     delete[] cache;
