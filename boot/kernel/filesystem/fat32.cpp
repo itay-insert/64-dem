@@ -70,6 +70,7 @@ u32 BootFileSystem::LBA_to_Cluster(u32 lba) {
     return cluster; 
 }
 
+u8 *dir_place = nullptr;
 
 
 void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size) {
@@ -145,15 +146,49 @@ void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u
     SizeFree = ((u64)free_clusters * (u64)cluster_size);
 
     SizeUsed = SizeInBytes - SizeFree;
+    fat_lba = Partition_lba + reserved_sectors;
+    dir_place = new u8[cluster_size];
 
     root_lba = Cluster_To_LBA(root_cluster);
+    RootCluster = root_cluster;
+
     delete[] sector;
     printf("boot drive 0x%b:         \n", drive->disk_index);
     printf("Filesystem: FAT32, Capacity: %lu MB, Free Space: %lu MB, Used Space: %lu MB\n", (SizeInBytes / 0x100000), (SizeFree / 0x100000), (SizeUsed / 0x100000));
 
 }
 
+u32 BootFileSystem::find_next_cluster(u32 cluster) {
+    u32 offset = cluster * 4;
+    u32 sector = offset >> 9; // divide by 512
+    u32 entry_offset = offset % 512;
 
+    u8 buffer[512];
+
+    drive->read_sectors(fat_lba + sector, 1, buffer);
+
+    u32 next = *(u32 *)(buffer + entry_offset);
+
+    return (next & 0x0FFFFFFF);
+}
+
+
+
+u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
+    u32 sectors = ((cluster_size * count) + 511) >> 9;
+    u8 *cache = new u8[sectors<<9];
+
+    u32 lba = Cluster_To_LBA(cluster);
+
+    drive->read_sectors(lba, sectors, cache);
+
+    for (u32 i = 0; i < count; i++) 
+        cluster = find_next_cluster(cluster);
+
+    memcpy(buffer, cache, cluster_size*count);
+    delete[] cache;
+    return cluster;
+}
 
 
 Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
@@ -199,9 +234,6 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
     return ret;
 }
 
-
-
-u8 dir_place[4096] = {0};
 
 static inline u8 count_path(const char *path) {
     u8 count = 0;
@@ -261,53 +293,15 @@ static void collect_lfn(const FAT32_LFN *entry, u16 *name) {
 }
 
 
-int BootFileSystem::scan_dir(FAT32_DIR *dir, u32 sector_count) {
-    u8 *buffer = new u8[4096];
-    u8 *buffer_org = buffer;
+#define FAT32_EOC 0x0FFFFFFF
+
+int BootFileSystem::scan_dir(FAT32_DIR *dir) {
     u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
-    u32 dir_lba = Cluster_To_LBA(cluster);
+    int count = 0;
 
-    drive->read_sectors(dir_lba, sector_count, buffer);
-
-    int count = 1;
-    u64 size = sizeof(FAT32_DIR);
-
-
-    bool started = true;
-
-    while (*buffer != 0) {
-
-        start_scan:
-
-        if (started) {
-            started = false;
-            goto skip_inc;
-        }
-
-
-        if (((u64)buffer + size) >= ((u64)buffer_org + 4096)) {
-            dir_lba += sector_count;
-            drive->read_sectors(dir_lba, sector_count, buffer_org);
-            buffer = buffer_org;
-            size = sizeof(FAT32_DIR);
-            count++;
-        } else {
-            buffer += size;
-            size = sizeof(FAT32_DIR);
-        }
-
-        skip_inc:
-
-        if (*buffer == 0xE5) // deleted entry
-            goto start_scan;
-
-        if (*buffer == 0)
-            break;
-
-        FAT32_DIR *dir = (FAT32_DIR *)((u64)buffer);
-        if (dir->attributes == LFN)
-            size += sizeof(FAT32_LFN);
-
+    while (cluster != 0x0FFFFFFF) {
+        count++;
+        cluster = find_next_cluster(cluster);
     }
 
     return count;
@@ -318,9 +312,8 @@ Path_ret BootFileSystem::open_path(const char *path) {
     Path_ret ret = {0};
 
     char path_name[14];
-    u32 sector_count = 4096 >> 9;
-    u32 lba = root_lba;
-    drive->read_sectors(lba, sector_count, dir_place);
+    u32 cluster = RootCluster;
+    cluster = load_clusters(cluster, 1, dir_place);
 
     u64 size = sizeof(FAT32_DIR);
     u8 *dir_data = dir_place;
@@ -338,9 +331,8 @@ Path_ret BootFileSystem::open_path(const char *path) {
             goto skip_add;
         }
          
-        if (((u64)dir_data + size) >= ((u64)dir_place + 4096)) {
-            lba += sector_count;
-            drive->read_sectors(lba, sector_count, dir_place);
+        if (((u64)dir_data + size) >= ((u64)dir_place + cluster_size)) {
+            cluster = load_clusters(cluster, 1, dir_place);
             dir_data = dir_place;
             size = sizeof(FAT32_DIR);
         } else {
@@ -404,21 +396,19 @@ Path_ret BootFileSystem::open_path(const char *path) {
             continue;
         }
 
-        u32 clus = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
-        lba = Cluster_To_LBA(clus);
-        drive->read_sectors(lba, sector_count, dir_place);
+        cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+        cluster = load_clusters(cluster, 1, dir_place);
         dir_data = dir_place;
         delete[] name;
         path += count;
         matched = true;
     }
 
-    int count = scan_dir(dir, sector_count);
-    size = 4096 * count;
+    int count = scan_dir(dir);
+    size = cluster_size * count;
     u8 *path_cache = new u8[size];
-    u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
-    u32 dir_lba = Cluster_To_LBA(cluster);
-    drive->read_sectors(dir_lba, sector_count*count, path_cache);
+    cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+    load_clusters(cluster, 1, dir_place);
     ret = increase_paths((u64)path_cache, (char *)path);
     if (!ret.status) 
         delete[] path_cache;
@@ -439,7 +429,7 @@ u8 *BootFileSystem::search_path(char *path) {
 
 }
 
-bool BootFileSystem::open_file_by_path(const char *path, const char *filename, u32 size, void *buffer) {
+bool BootFileSystem::open_file_by_path(const char *path, const char *filename, u32 Size, void *buffer) {
     bool try_again = true;
     again:
     

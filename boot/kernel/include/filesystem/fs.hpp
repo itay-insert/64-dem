@@ -52,13 +52,17 @@ class BootFileSystem {
         u8 NumOfFATS = 0;
         u16 RootEntries = 0;
         u32 cluster_size = 0;
+        u32 fat_lba = 0;
+        u32 RootCluster = 0;
         u32 Cluster_To_LBA(u32 cluster);
         u32 LBA_to_Cluster(u32 lba);
+        u32 find_next_cluster(u32 cluster);
+        u32 load_clusters(u32 cluster, u32 count, void *buffer);
         u64 *Paths;
         Paths_table *table;
         u32 Path_count;
         Path_ret increase_paths(u64 address, char *path);
-        int scan_dir(FAT32_DIR *dir, u32 sector_count);
+        int scan_dir(FAT32_DIR *dir);
         u8 *search_path(char *path);
 
     public:
