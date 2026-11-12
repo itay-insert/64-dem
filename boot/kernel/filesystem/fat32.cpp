@@ -178,6 +178,7 @@ u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
     u32 sector_count = (cluster_size + 511) >> 9;
     u32 sectors = ((cluster_size * count) + 511) >> 9;
     u8 *cache = new u8[sectors<<9];
+    u8 *cache_org = cache;
     for (u32 i = 0; i < count; i++) {
         u32 lba = Cluster_To_LBA(cluster);
 
@@ -187,8 +188,8 @@ u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
     }
 
 
-    memcpy(buffer, cache, cluster_size*count);
-    delete[] cache;
+    memcpy(buffer, cache_org, cluster_size*count);
+    delete[] cache_org;
     return cluster;
 }
 
