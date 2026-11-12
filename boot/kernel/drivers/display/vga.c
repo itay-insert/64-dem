@@ -513,3 +513,13 @@ void cursor_Setpos(int coulmn, int row) {
 	cursor.row = pos / cols;
 }
 
+
+u8 str_size(const char *str) {
+    u8 count = 0;
+    while (*str != '\0') {
+        str++;
+        count++;
+    }
+
+    return count;
+}

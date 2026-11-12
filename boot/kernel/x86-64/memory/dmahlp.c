@@ -15,7 +15,7 @@ dma_entry *find_header(dma_entry *entry) {
 u64 find_descriptorBase(u64 Base) {
     while (1) {
         dma_descriptor *ptr = (dma_descriptor *)Base;
-        if (memcmp(ptr->sign, "DMA_POOL", 8) == 0) 
+        if ((memcmp(ptr->sign, "DMA_POOL", 8) == 0) && ((Base & 0xFFF) == (0x1000 - sizeof(dma_descriptor)))) 
             return Base;
         Base++;
     }

@@ -18,9 +18,6 @@ ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_c
 
     u16 io = drive->channel->io_base;
 
-    if (!ata_wait_not_busy(io))
-        return ATA_ADDRESSING_INVALID;
-
     if (drive->supports_lba28 &&
         lba < (1ULL << 28) &&
         sector_count <= (1ULL << 28) - lba) {
@@ -57,6 +54,7 @@ ata_addressing_mode_t ata_configure_lba(ata_drive_t *drive, u64 lba, u8 sector_c
     outb(io + ATA_REG_LBA_LOW, (u8)lba);
     outb(io + ATA_REG_LBA_MID, (u8)(lba >> 8));
     outb(io + ATA_REG_LBA_HIGH, (u8)(lba >> 16));
+
 
     return ATA_ADDRESSING_LBA48;
 }

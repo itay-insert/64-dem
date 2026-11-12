@@ -86,7 +86,8 @@ static ata_drive Search_bitmap(void) {
 void ATA_drive::init() {
     memcpy(vendor, "ATA ", sizeof("ATA "));
     if (!ata_discovered) {
-        if (pci_enumerate(ata_find_callback, nullptr) != PCI_STATUS_SUCCESS) {
+        pci_enumerate(ata_find_callback, nullptr);
+        if (!ata_discovered) {
             printf("ATA: no ide device found on pci\n");
             ata_end = true;
             initialized = false;

@@ -45,6 +45,7 @@ typedef struct {
 text_data printf(const char *str, ...);
 void move_cursor(int amt);
 void cursor_Setpos(int coulmn, int row);
+u8 str_size(const char *str);
 
 KERNEL_EXTERN_C_END
 

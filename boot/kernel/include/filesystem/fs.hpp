@@ -29,10 +29,21 @@ typedef struct {
     u16 final_part[2];
 } __attribute__((packed)) FAT32_LFN;
 
+
+typedef struct {
+
+} cache_descriptor;
+
 typedef struct {
     u32 index;
     char *str;
 } Paths_table;
+
+typedef struct {
+    bool status;
+    u32 index;
+} Path_ret;
+
 
 class BootFileSystem {
     private:
@@ -46,8 +57,9 @@ class BootFileSystem {
         u64 *Paths;
         Paths_table *table;
         u32 Path_count;
-        bool increase_paths(u64 address, char *path);
+        Path_ret increase_paths(u64 address, char *path);
         int scan_dir(FAT32_DIR *dir, u32 sector_count);
+        u8 *search_path(char *path);
 
     public:
         u64 SizeInBytes;
@@ -58,5 +70,6 @@ class BootFileSystem {
         disk_drive *drive;
         BootPartition *Partition;
         void fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size);
-        bool open_path(const char *path);
+        Path_ret open_path(const char *path);
+        bool open_file_by_path(const char *path, const char *filename, u32 size, void *buffer);
 };
