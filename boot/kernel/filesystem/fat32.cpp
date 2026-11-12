@@ -203,6 +203,8 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
         Path_count = 1;
         ret.index = 0;
         ret.status = true;
+        table[0].file_count = 0;
+        table[0].open_files = nullptr;
         return ret;
     }
 
@@ -227,11 +229,42 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
     Paths[Path_count] = address;
     table[Path_count].index = Path_count;
     table[Path_count].str = path;
+    table[Path_count].open_files = nullptr;
+    table[Path_count].file_count = 0;
     ret.index = Path_count;
 
     Path_count++;
     ret.status = true;
     return ret;
+}
+
+
+
+bool BootFileSystem::increase_files(Paths_table *table, char *filename, u32 cluster) {
+    if (table == nullptr || filename == nullptr)
+        return false;
+
+    if (table->open_files == nullptr || table->file_count == 0) {
+        table->open_files = new file_cache[1];
+        table->open_files->cluster_count = 0;
+        table->open_files->cache = nullptr;
+        table->open_files->starting_cluster = cluster;
+        table->open_files->name = filename;
+        table->file_count = 1;
+        return true;
+    }
+
+    u64 files_size = table->file_count * sizeof(file_cache);
+    u64 new_size = files_size + sizeof(file_cache);
+    table->open_files = (file_cache *)krealloc(table->open_files, files_size, new_size);
+    if (table->open_files == nullptr)
+        return false;
+
+    table->open_files[table->file_count].cache = nullptr;
+    table->open_files[table->file_count].cluster_count = 0;
+    table->open_files[table->file_count].name = filename;
+    table->open_files[table->file_count].starting_cluster = cluster;
+    return true;
 }
 
 
@@ -416,31 +449,46 @@ Path_ret BootFileSystem::open_path(const char *path) {
 }
 
 
-u8 *BootFileSystem::search_path(char *path) {
+Search_ret BootFileSystem::search_path(char *path) {
+    Search_ret ret = {0};
+
     for (u32 i = 0; i < Path_count; i++) {
         char *str = table[i].str;
         if (strcmp(str, path) == 0) {
             u8 *cache = (u8 *)Paths[i];
-            return cache;
+            ret.index = i;
+            ret.cache = cache;
+            return ret;
         }
     }
 
-    return nullptr;
-
+    ret.cache = nullptr;
+    return ret;
 }
 
-bool BootFileSystem::open_file_by_path(const char *path, const char *filename, u32 Size, void *buffer) {
+
+
+u64 BootFileSystem::open_file_by_path(const char *path, const char *filename) {
     bool try_again = true;
     again:
     
-    u8 *cache = search_path((char *)path);
+    Search_ret ret = search_path((char *)path);
+    u8 *cache = ret.cache;
     if (cache == nullptr) {
         if (try_again) {
             try_again = false;
             Path_ret ret = open_path(path);
             if (!ret.status)
-                return false;
+                return 0xFFFFFFFF;
             goto again;
+        }
+    } else if (try_again) {
+        for (u32 i = 0; i < table[ret.index].file_count; i++) {
+            file_cache *file = &table[ret.index].open_files[i];
+            if (strcmp((char *)filename, file->name) == 0) {
+                u64 file_handle = ((u64)ret.index << 32) | (u64)i;
+                return file_handle;
+            }
         }
     }
 
@@ -473,7 +521,25 @@ bool BootFileSystem::open_file_by_path(const char *path, const char *filename, u
                 name[i] = dir->filename[i];
         }
 
-        
+        file = new char[cmp_count];
+        for (u8 i = 0; i < count; i++)
+            file[i] = filename[i];
+
+        for (u8 i = count; i < cmp_count; i++)
+            file[i] = ' ';
+
+        if (memcmp(file, name, cmp_count) == 0) {
+            delete[] name;
+            delete[] file;
+            u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
+            Paths_table *ptr = &table[ret.index];
+            if (increase_files(ptr, (char *)filename, cluster)) {
+                u64 file_handle = ((u64)ret.index << 32) | ((u64)ptr->file_count - 1);
+                return file_handle;
+            }
+        }
 
     }
+
+    return 0xFFFFFFF; // for failure
 }

@@ -31,13 +31,29 @@ typedef struct {
 
 
 typedef struct {
-
+    u8 *cache;
+    int cluster_index;
 } cache_descriptor;
+
+typedef struct {
+    u32 starting_cluster;
+    cache_descriptor *cache;
+    int cluster_count;
+    char *name;
+} file_cache;
+
 
 typedef struct {
     u32 index;
     char *str;
+    file_cache *open_files;
+    int file_count;
 } Paths_table;
+
+typedef struct {
+    u8 *cache;
+    u32 index;
+} Search_ret;
 
 typedef struct {
     bool status;
@@ -62,8 +78,9 @@ class BootFileSystem {
         Paths_table *table;
         u32 Path_count;
         Path_ret increase_paths(u64 address, char *path);
+        bool increase_files(Paths_table *table, char *filename, u32 cluster);
         int scan_dir(FAT32_DIR *dir);
-        u8 *search_path(char *path);
+        Search_ret search_path(char *path);
 
     public:
         u64 SizeInBytes;
@@ -75,5 +92,5 @@ class BootFileSystem {
         BootPartition *Partition;
         void fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size);
         Path_ret open_path(const char *path);
-        bool open_file_by_path(const char *path, const char *filename, u32 size, void *buffer);
+        u64 open_file_by_path(const char *path, const char *filename);
 };
