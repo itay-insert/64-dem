@@ -692,8 +692,29 @@ void BootFileSystem::close_path(u32 path_index) {
 
 }
 
-void BootFileSystem::allocate_clusters(file_cache *file) {
+void BootFileSystem::allocate_clusters(file_cache *file, u32 cluster_count) {
+    cache_descriptor *filecache = file->cache;
+    if (filecache == nullptr || file->cluster_count == 0) {
+        filecache = new cache_descriptor[1];
+        filecache->cluster_index = cluster_count;
+        file->cluster_count = cluster_count;
+        u64 size = cluster_count * cluster_size;
+        filecache->cache = new u8[cluster_count];
+        file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, filecache->cache);
+        return;
+    }
 
+
+    u64 cluster_off = filecache->cluster_index * cluster_size;
+    filecache->cluster_index += cluster_count;
+    u64 old_size = file->cluster_count * cluster_size;
+    file->cluster_count += cluster_count;
+    u64 new_size = file->cluster_count * cluster_size;
+
+    filecache->cache = (u8 *)krealloc(filecache->cache, old_size, new_size);
+    if (filecache->cache == nullptr)
+        return;
+    file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, (void *)(filecache->cache + cluster_off));
 }
 
 
@@ -710,7 +731,9 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
     file_cache *file = &table[Path_count].open_files[file_index];
 
     u32 clusters = (offset + size + (cluster_size - 1)) / cluster_size;
-    if (clusters > file->cluster_count) {
+    if (clusters > file->cluster_count) 
+        allocate_clusters(file, (clusters - file->cluster_count));
+    
 
-    }
+    
 }
