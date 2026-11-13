@@ -6,6 +6,7 @@
 
 KERNEL_EXTERN_C_BEGIN
 /* Signed offsets from exception_stub_table, not link-time pointers. */
+u64 get_syscall(void);
 extern const intptr_t exception_stub_table[32];
 extern const intptr_t spurious_stub;
 extern const intptr_t timer_stub;

@@ -60,7 +60,7 @@ void setup_gdt(void) {
         .base_high = 0
     };
 
-    // user code
+    // user code 0x18
     gdt_ptr[3] = (gdt_entry){
         .limit_low = 0,
         .base_low = 0,
@@ -70,7 +70,7 @@ void setup_gdt(void) {
         .base_high = 0
     };
 
-    // user data
+    // user data 0x20
     gdt_ptr[4] = (gdt_entry){
         .limit_low = 0,
         .base_low = 0,
@@ -84,6 +84,7 @@ void setup_gdt(void) {
 
     u64 tss_addr = (u64)&tss;
 
+    // tss 0x28
     gdt_tss[0] = (tss_descriptor){
         .limit_low = sizeof(struct tss64) - 1,
         .base_low = (u16)(tss_addr & 0xffff),

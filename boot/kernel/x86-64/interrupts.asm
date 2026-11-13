@@ -8,8 +8,25 @@ global spurious_stub
 global isr_eoi
 global exception_stub_table
 global timer_stub
+global get_syscall
+
+extern syscall_handler
 
 section .text
+
+get_syscall:
+lea rax, [rel syscall_entry]
+ret
+
+syscall_entry:
+push rcx ; preserve syscall return state
+push r11
+
+call syscall_handler
+
+pop r11
+pop rcx
+sysretq
 
 isr_timer:
 push rax
