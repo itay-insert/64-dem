@@ -7,7 +7,7 @@
 #include "x86-64/memory/va_alloc_internal.h"
 #include "x86-64/memory/va_alloc.h"
 
-#define USER_SPACE 0x40000000
+#define USER_SPACE 0x200000000000
 #define USER_END 0x7FFFFFFFFFFF
 
 extern u64 Kernel_end;
