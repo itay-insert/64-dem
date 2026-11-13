@@ -332,7 +332,6 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     printf("the clock:");
     draw_cursor(LightGray);
     printf("\n");
-
     
     u64 old_keyboard_irq = keyboard_irq_count;
     while (1) {

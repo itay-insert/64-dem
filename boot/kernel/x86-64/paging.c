@@ -335,6 +335,8 @@ typedef struct {
 
 u64 *KernelPML4 = 0;
 
+#define IA32_PAT 0x277
+
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
     qemu_debug_print("[paging] CPUID check complete\n");
@@ -377,7 +379,14 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     create_mapping(BASE+0xE0000, 0xE0000, 32, 0x03, KernelPML4);
     qemu_debug_print("[paging] mapped bios legacy area\n");
 
-    create_mapping(fb_virtual, ps.info64->framebuffer_base, (((ps.info32->vertical_resolution*ps.info32->pixels_per_scanline*4)+4095)>>12), 0x13, KernelPML4);
+    u64 pat = read_msr(IA32_PAT);
+
+    pat &= ~(0xFFULL << 32);
+    pat |= (0x01ULL << 32);
+
+    write_msr(IA32_PAT, pat);
+
+    create_mapping(fb_virtual, ps.info64->framebuffer_base, (((ps.info32->vertical_resolution*ps.info32->pixels_per_scanline*4)+4095)>>12), 0x83, KernelPML4);
     qemu_debug_print("[paging] framebuffer mapped\n");
     ps.info64->framebuffer_base = fb_virtual;
 
