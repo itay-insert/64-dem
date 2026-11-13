@@ -20,6 +20,7 @@ nasm -f elf64 kernel/entry.asm -o entry.o
 nasm -f elf64 kernel/x86-64/lowlevel.asm -o lowlevel.o
 nasm -f elf64 kernel/x86-64/cpuid.asm -o cpuid.o
 nasm -f elf64 kernel/x86-64/interrupts.asm -o interrupts.o
+nasm -f elf64 kernel/x86-64/sys.asm -o sys.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone $NVME_PROBE_FLAG \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/kernel.cpp -o kernel.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/drivers/display/font.c -o font.o
@@ -109,6 +110,8 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/filesystem/elf.cpp -o elf.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/syscall.c -o syscall.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/x86-64/scheduler.cpp -o scheduler.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o
@@ -121,3 +124,15 @@ chmod +x build.sh
 ./build.sh
 
 cd ..
+
+cd shell
+
+cd hello
+chmod +x build.sh
+
+./build.sh
+
+cd ..
+
+cd ..
+

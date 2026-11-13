@@ -25,6 +25,9 @@
 #include "drivers/usb/usb.hpp"
 #include "drivers/storage/storage.hpp"
 #include "x86-64/tsc.h"
+#include "x86-64/scheduler.hpp"
+#include "x86-64/syscall.h"
+#include "x86-64/memory/kmalloc.h"
 #ifdef NVME_QEMU_PROBE
 #include "../../tests/nvme_qemu_probe.hpp"
 #endif
@@ -51,9 +54,12 @@ u64 acpiadd = 0;
 
 u64 usb_addr = 0;
 
+u64 kernel_stack = 0;
+
 extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
+
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
@@ -79,6 +85,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     qemu_debug_hex_u64((u64)info32->pixels_per_scanline);
     qemu_debug_print("\n");
 
+    kernel_stack = stack;
+     
     tss_init();
     setup_gdt();
 
@@ -143,6 +151,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     }
 
     setup_execptions();
+
+    syscall_init();
 
     disable_pic();
 
@@ -328,6 +338,17 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
         }
 
 
+    }
+
+    fat32.close_path(path.index);
+
+    path = fat32.open_path("/SHELL/HELLO/");
+
+    if (path.status) {
+        u64 file_handle = fat32.open_file_by_index(path.index, "HELLO   ELF");
+        if (file_handle != 0xFFFFFFFF) {
+            StartProccess(file_handle, &fat32);
+        }
     }
     printf("the clock:");
     draw_cursor(LightGray);

@@ -60,8 +60,8 @@ void setup_gdt(void) {
         .base_high = 0
     };
 
-    // user code 0x18
-    gdt_ptr[3] = (gdt_entry){
+    // user code 0x20: SYSRET requires user data immediately before code.
+    gdt_ptr[4] = (gdt_entry){
         .limit_low = 0,
         .base_low = 0,
         .base_mid = 0,
@@ -70,8 +70,8 @@ void setup_gdt(void) {
         .base_high = 0
     };
 
-    // user data 0x20
-    gdt_ptr[4] = (gdt_entry){
+    // user data 0x18
+    gdt_ptr[3] = (gdt_entry){
         .limit_low = 0,
         .base_low = 0,
         .base_mid = 0,
@@ -101,6 +101,7 @@ void setup_gdt(void) {
         .base = (u64)gdt
     };
 
+    tss_init();
     load_gdt((u64)&gdtr);
 
 }

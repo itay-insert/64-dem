@@ -523,3 +523,26 @@ u8 str_size(const char *str) {
 
     return count;
 }
+
+
+void kprintf(const char *str) {
+	
+    const char *p_str = str;
+    while (*p_str != '\0') {
+        if (*p_str == '\n') {
+            qemu_debug_putc('\n');
+            cursor.coulmn = 0;
+            cursor.row++;
+			if (cursor.row >= (ver_res >> 4)) {
+        		cursor.row = (ver_res >> 4) - 1;
+    		}
+		} else {
+            draw_char((char)*p_str, cursor.coulmn, cursor.row);
+            text_data td = {0};
+            cursor_inc(td);
+        }
+		p_str++;
+    }
+
+    present();
+}

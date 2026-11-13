@@ -12,3 +12,5 @@ void *realloc(void *alloc, u64 old_size, u64 new_size);
 
 
 KERNEL_EXTERN_C_END
+
+#endif

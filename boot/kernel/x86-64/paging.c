@@ -166,6 +166,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
         if (PML4[pml4_index] == 0) {
             PML4[pml4_index] = alloc_pages(1) | (attributes & 0x07); // alloc pages zero intiallizes
         }
+        if (attributes & 0x04)
+            PML4[pml4_index] |= 0x04;
         u64 *PDPT = (u64 *)((PML4[pml4_index] >> 12) << 12);
         if (gb_enable == 0 && GbPageSupport == 1 && gb_count > 0) {
             if ((gb_count + pdpt_index) >= 512) {
@@ -175,6 +177,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                 if ((PDPT[pdpt_index+i] & 0x80) == 0 && (PDPT[pdpt_index+i] & 1) == 1) {
                     free_pdpt(&PDPT[pdpt_index+i]);
                 }
+                if (attributes & 0x04)
+                    PDPT[pdpt_index+i] |= 0x04;
                 PDPT[pdpt_index+i] = physical_address | (attributes | 0x80);
                 physical_address += 0x40000000;
                 virtual_address += 0x40000000;
@@ -184,6 +188,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
             if (PDPT[pdpt_index] == 0 || (PDPT[pdpt_index] & 0x80) != 0) {
                 PDPT[pdpt_index] = alloc_pages(1) | (attributes & 0x07);
             }
+            if (attributes & 0x04)
+                PDPT[pdpt_index] |= 0x04;
             u64 *PD = (u64 *)((PDPT[pdpt_index] >> 12) << 12);
             if (mb_enable == 0 && mb_count > 0) {
                 if ((mb_count + pd_index) >= 512) {
@@ -193,6 +199,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                     if ((PD[pd_index+i] & 0x80) == 0 && (PD[pd_index+i] & 1) == 1) {
                         free_pages(((PD[pd_index+i] >> 12) << 12), 1);
                     }
+                    if (attributes & 0x04)
+                        PD[pd_index+i] |= 0x04;
                     PD[pd_index+i] = physical_address | (attributes | 0x80);
                     physical_address += 0x200000;
                     virtual_address += 0x200000;
@@ -202,6 +210,8 @@ void create_mapping(u64 virtual_address, u64 physical_address, u64 pages, u16 at
                 if (PD[pd_index] == 0 || (PD[pd_index] & 0x80) != 0) {
                     PD[pd_index] = alloc_pages(1) | (attributes & 0x07);
                 }
+                if (attributes & 0x04)
+                    PD[pd_index] |= 0x04;
                 u64 *PT = (u64 *)((PD[pd_index] >> 12) << 12);
                 if ((kb_count + pt_index) >= 512) {
                     kb_count = 512 - pt_index;

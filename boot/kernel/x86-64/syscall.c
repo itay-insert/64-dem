@@ -1,9 +1,8 @@
 #include <stddef.h>
 #include <stdbool.h>
-#include <stdarg.h>
 #include "uint_definitions.h"
 #include "x86-64/lowlevel.h"
-#include "x86-64/interrupts.h"
+#include "x86-64/sys.h"
 #include "drivers/display/vga.h"
 
 #define IA32_EFER 0xC0000080
@@ -13,8 +12,8 @@
 
 #define KNL_CS 0x08
 #define KNL_DATA  0x10
-#define USR_CS 0x18
-#define USR_DATA 0x20
+#define USR_CS 0x20
+#define USR_DATA 0x18
 #define TSS 0x28
 
 
@@ -32,15 +31,5 @@ void syscall_init(void) {
 }
 
 
-u64 syscall_handler(u64 syscall_number, ...) {
-    va_list args;
 
-    va_start(args, syscall_number);
-
-    const char *format = va_arg(args, const char *);
-    printf(format, args);
-
-    va_end(args);
-    return 0;
-}
 

@@ -670,8 +670,8 @@ void BootFileSystem::close_path(u32 path_index) {
         return;
 
         // close all files on path
-   for (u32 i = (table[path_index].file_count - 1); i >= 0; i--) {
-        u64 file_handle = ((u64)path_index << 32) | (u64)i;
+   for (u32 i = table[path_index].file_count; i > 0; --i) {
+        u64 file_handle = ((u64)path_index << 32) | (u64)(i - 1);
         close_file(file_handle);
    }
 
