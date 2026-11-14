@@ -112,6 +112,10 @@ g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/syscall.c -o syscall.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/x86-64/scheduler.cpp -o scheduler.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/usb/usb_background.cpp -o usb_background.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/timers/lapic.cpp -o lapic_timer.o
 ld -T kernel/link.ld -o kernel.elf *.o
 
 rm *.o
@@ -127,12 +131,10 @@ cd ..
 
 cd shell
 
-cd hello
 chmod +x build.sh
 
 ./build.sh
 
 cd ..
 
-cd ..
 

@@ -5,5 +5,5 @@ section .text.start
 
 _start:
 call main
-halt:
-    jmp halt
+mov rax, 4
+syscall

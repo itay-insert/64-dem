@@ -155,7 +155,7 @@ if [[ -z "$BOOTLOADER" ]]; then
     BOOTLOADER="$ROOT_DIR/EFI/boot/BOOTX64.efi"
 fi
 
-for required_file in "$BOOTLOADER" "$ROOT_DIR/boot/kernel.elf"; do
+for required_file in "$BOOTLOADER" "$ROOT_DIR/boot/kernel.elf" "$ROOT_DIR/shell/hello/hello.elf"; do
     if [[ ! -r "$required_file" ]]; then
         echo "error: missing $required_file; run without --no-build first." >&2
         exit 1

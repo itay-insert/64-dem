@@ -11,6 +11,8 @@ class keyboard {
 class GlobalKeyboard {
     public:
         keyboard *keyboards[2] = {};
+        int former_scancode = 0;
+        int former_ascii = 0;
         int scancode_top = 0;
         int ascii_top = 0;
         char buffer[256] = {};

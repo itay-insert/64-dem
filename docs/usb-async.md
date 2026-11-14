@@ -125,7 +125,17 @@ References: [Linux USB host API](https://docs.kernel.org/driver-api/usb/usb.html
 `usb_register_interrupt(handle, length, callback, context)` installs one recurring
 interrupt-IN subscription per controller. Registration validates the discovered
 endpoint and accepts reports up to 64 bytes and no larger than its packet size.
-Call `GlobalUSB::service_interrupts(timer)` regularly from the foreground loop.
+`HIDK::init()` automatically starts `GlobalUSB::start_background_service(timer)`.
+The kernel independently calibrates and starts a roughly 1 kHz LAPIC timer,
+verifies that its interrupt counter advances, and services USB while interrupted code
+is in user mode or at the kernel's explicit `interrupt_idle()` safe point. No
+foreground service call is needed before entering a user program. This also
+advances polling-only controllers and schedule transitions without completion IRQs.
+The worker skips arbitrary kernel execution to avoid reentering USB, allocator,
+and console operations. Long kernel operations still need foreground servicing;
+blocking bulk waits already provide it. The boot-CPU USB and timer objects must
+remain alive. The timer entry preserves x87/SSE state; AVX state is not enabled
+or managed by this kernel path.
 The first service submits a read; later calls collect it, invoke the callback,
 and rearm on success. An occupied subscription endpoint or unavailable request slot is retried later.
 Callbacks receive a terminal result and controller-owned data valid only during
@@ -136,7 +146,8 @@ service calls are ignored; callbacks may unregister themselves.
 cancellation. Keep servicing until `usb_interrupt_registered()` is false before
 reusing/destroying controller state. The callback context can be released after
 unregister returns, provided no foreground callback is executing. These APIs are
-single-foreground-context APIs, not thread-safe or IRQ-safe registration methods.
+boot-CPU APIs, not thread-safe registration methods. Background callbacks must
+not sleep; registration and teardown must run in kernel context.
 
 `HIDK::init()` selects boot protocol, registers the keyboard callback, and starts
 its first read. Boot reports become PC Set 1 make/break bytes in the inherited
@@ -144,9 +155,9 @@ its first read. Boot reports become PC Set 1 make/break bytes in the inherited
 circular write buffers using the existing counters. Consumers must track their
 own progress; old bytes are overwritten. Typematic repetition, hotplug discovery,
 and automatic recovery after a terminal controller error are not implemented.
-The current kernel discovers devices at startup. Service subscriptions regularly
-from the foreground loop; blocking bulk waits also service the same controller's
-subscription.
+The current kernel discovers devices at startup. The idle loop uses
+`interrupt_idle()` so background servicing is safe while it waits for input;
+blocking bulk waits also service the same controller's subscription.
 
 ## Controller IRQ setup
 
@@ -176,8 +187,8 @@ status, routes OHCI DoneHead to each request's retirement watch, drains the
 xHCI event ring, services subscriptions, and reenables interrupt delivery. Fatal
 controller errors leave interrupts masked and mark the controller for recovery.
 UHCI TDs and EHCI qTDs now request completion interrupts; OHCI and xHCI already did.
-Continue calling foreground service regularly: schedule/retirement state machines
-and timeout accounting need progress even when no hardware interrupt arrives.
+The background timer advances schedule/retirement state machines and timeout
+accounting even when no hardware interrupt arrives, at the safe points above.
 Blocking control/command waits retain polling so an IRQ arriving during boot work
 cannot deadlock a caller waiting for foreground dispatch.
 

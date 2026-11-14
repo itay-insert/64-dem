@@ -225,13 +225,17 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     AcpiPM acpi;
     acpiadd = reinterpret_cast<u64>(&acpi);
 
-    ioapic_route_keyboard((u8)(ioapic_read(0x20) >> 24));
+    ioapic_route_keyboard((u8)(lapic_read(0x20) >> 24));
 
     pci_init();
     pci_detect_devices();
 
     Timer timer;
     timeradd = reinterpret_cast<u64>(&timer);
+    if (!timer.Src || !lapic_timer_start(*timer.Src)) {
+        printf("LAPIC timer: calibration failed\n");
+        for (;;) __asm__ volatile("cli; hlt");
+    }
 
     GlobalUSB USB;
     usb_addr = (u64)&USB;
@@ -256,6 +260,14 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     enable_interrupts();
     printf("interrupts enabled!\n");
+    const u64 initial_ticks = get_ticks();
+    wait_ms(*timer.Src, 20);
+    const u64 elapsed_ticks = get_ticks() - initial_ticks;
+    if (!elapsed_ticks) {
+        printf("LAPIC timer: no interrupts received\n");
+        for (;;) __asm__ volatile("cli; hlt");
+    }
+    printf("LAPIC timer: ticking (%lu ticks during 20 ms check)\n", elapsed_ticks);
 
     if (info64->device_path != 1) {
         PCI_PATH_RET boot_path =
@@ -342,10 +354,10 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
 
     fat32.close_path(path.index);
 
-    path = fat32.open_path("/SHELL/HELLO/");
+    path = fat32.open_path("/SHELL/");
 
     if (path.status) {
-        u64 file_handle = fat32.open_file_by_index(path.index, "HELLO   ELF");
+        u64 file_handle = fat32.open_file_by_index(path.index, "MEM     ELF");
         if (file_handle != 0xFFFFFFFF) {
             StartProccess(file_handle, &fat32);
         }
@@ -354,17 +366,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     draw_cursor(LightGray);
     printf("\n");
     
-    u64 old_keyboard_irq = keyboard_irq_count;
-    while (1) {
-        USB.service_interrupts(*timer.Src);
-        if (keyboard_irq_count != old_keyboard_irq) {
-            old_keyboard_irq = keyboard_irq_count;
-            text_data td = printf("Current keyboard irq: %lu\n", keyboard_irq_count);
-            if (globalkeyboard)
-                td = printf("%s", globalkeyboard->ascii);
-            cursor_Setpos(td.coulmn, td.row-1);
-        }
-    }    
+    clock();
     
     
 }

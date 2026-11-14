@@ -2,6 +2,9 @@
 #include "x86-64/ports.h"
 #include "drivers/display/vga.h"
 #include "uint_definitions.h"
+#include "x86-64/lowlevel.h"
+
+extern void interrupt_idle(void);
 
 #define Seconds 0x00
 #define Minutes 0x02
@@ -12,6 +15,7 @@
 #define StatusA 0x0a
 #define StatusB 0x0b
 
+extern u64 get_ticks(void);
 
 u8 rtc_read(u8 rtc_reg) {
     outb(0x70, rtc_reg | 0x80);  // write which register to read from
@@ -79,10 +83,16 @@ void clock(void) {
     while (1) {
         rt = get_dateAndTime();
         if (rt.sec != old_sec) {
-            td = printf("%b/%b/20%b    %b:%b:%b", rt.day, rt.month, rt.year, rt.hour, rt.min, rt.sec);
+            td = printf("%b/%b/20%b    %b:%b:%b   timer_ticks: %lu", rt.day, rt.month, rt.year, rt.hour, rt.min, rt.sec, get_ticks());
             cursor_Setpos(td.coulmn, td.row);
             old_sec = rt.sec;
         }
+        // Use the USB worker's safe idle point when its periodic timer runs.
+        // Without that timer, keep polling RTC so the clock still advances.
+        if (!(lapic_read(0x320) & (1u << 16)) && lapic_read(0x380))
+            interrupt_idle();
+        else
+            __asm__ volatile("pause");
     }
 }
 

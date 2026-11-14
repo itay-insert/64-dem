@@ -5,10 +5,32 @@
 #include "filesystem/elf.hpp"
 #include "x86-64/sys.h"
 #include "x86-64/efi_memory_types.h"
+#include "x86-64/memory/kmalloc.h"
 
 extern int GbPageSupport;
 
-Proccess pid;
+Proccess *pid = nullptr;
+int active_proccesses = 0;
+
+int last_pid = 0;
+
+Proccess *increase_proccesses() {
+    if (pid == nullptr || active_proccesses == 0) {
+        pid = new Proccess[1];
+        active_proccesses = 1;
+        pid[0] = {0};
+        pid[0].PID = last_pid;
+        last_pid++;
+        return &pid[0];
+    }
+
+    u64 old_size = active_proccesses * sizeof(Proccess);
+    u64 new_size = old_size + sizeof(Proccess);
+    pid = (Proccess *)krealloc(pid, old_size, new_size);
+    active_proccesses++;
+    return &pid[active_proccesses-1];
+}
+
 
 PAGING_LOOKUP_DESCRIPTOR *Pages = nullptr;
 
@@ -81,24 +103,25 @@ void construct_mapping(Proccess *proc, u64 size, u64 physical_address) {
 
 void StartProccess(u64 file_handle, BootFileSystem *fat32) {
 
+    Proccess *new_pid = increase_proccesses();
     u64 size = elf_calculate_size(file_handle, fat32);
 
     size = (size + 0x41000);
 
-    pid.rsp = 0x40000000 + size;
+    new_pid->rsp = 0x40000000 + size;
 
-    pid.PID = 0;
-    pid.file_handle = file_handle;
-    pid.buffer = malloc(size, true);
+    new_pid->file_handle = file_handle;
+    new_pid->buffer = malloc(size, true);
 
-    EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)((u8 *)pid.buffer - sizeof(EFI_MEMORY_DESCRIPTOR));
+    EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)((u8 *)new_pid->buffer - sizeof(EFI_MEMORY_DESCRIPTOR));
     u64 physical_address = desc->PhysicalStart;
-    construct_mapping(&pid, size, physical_address);
+    construct_mapping(new_pid, size, physical_address);
 
-    memset(pid.buffer, 0, size);
+    memset(new_pid->buffer, 0, size);
 
-    load_elf_64(file_handle, fat32, pid.buffer);
+    load_elf_64(file_handle, fat32, new_pid->buffer);
 
-    enter_userspace(pid.rsp);
+    enter_userspace(new_pid->rsp);
     
 }
+

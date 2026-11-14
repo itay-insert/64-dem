@@ -12,8 +12,8 @@
 
 #define KNL_CS 0x08
 #define KNL_DATA  0x10
-#define USR_CS 0x20
-#define USR_DATA 0x18
+#define USR_CS 0x23
+#define USR_DATA 0x1B
 #define TSS 0x28
 
 

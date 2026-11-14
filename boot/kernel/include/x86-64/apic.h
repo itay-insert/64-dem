@@ -11,6 +11,12 @@ u32 ioapic_read_register(u32 offset);
 void ioapic_write_register(u32 offset, u32 value);
 void APIC_init(void);
 void ioapic_route_keyboard(u8 destination_apic_id);
+u64 get_ticks(void);
 KERNEL_EXTERN_C_END
+
+#ifdef __cplusplus
+class TimerSource;
+bool lapic_timer_start(TimerSource &timer);
+#endif
 
 #endif

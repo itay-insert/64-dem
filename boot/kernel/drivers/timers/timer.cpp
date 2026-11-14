@@ -8,7 +8,7 @@
 #include "drivers/timers/pm.hpp"
 #include "drivers/timers/hpet.hpp"
 
-
+extern u64 timeradd;
 
 void SimpleTimer::Timer_init(PM_ret desc, const char *name, const char *sign) {
     u64 addr = desc.io_base;
@@ -74,3 +74,10 @@ void wait_ms(TimerSource& timer, u64 ms) {
     }
 }
 
+
+extern "C" void sleep_ms(u64 ms) {
+    Timer *timer = (Timer *)timeradd;
+    TimerSource *source = timer->Src;
+
+    wait_ms(*source, ms);
+}

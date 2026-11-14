@@ -263,7 +263,8 @@ struct usb_async_request {
     bool event_received = false;
 };
 
-// Called only by usb_service_interrupts() in foreground context. Data is valid
+// Called by the USB service worker (foreground, user-mode timer tick, or idle).
+// Callbacks must not sleep. Data is valid
 // only during the callback. One subscription per controller (subscription limit).
 using usb_interrupt_callback = void (*)(void *, const usb_transfer_result &, const u8 *);
 
@@ -431,6 +432,8 @@ class GlobalUSB {
         // Returns only active interfaces with both bulk directions; free interfaces with kfree().
         usb_interface_return find_interface(u8 class_code, u8 subclass, bool usepr, u8 protocol);
         void service_interrupts(TimerSource &timer);
+        // Boot CPU only. Call after enumeration; USB/timer must outlive the worker.
+        bool start_background_service(TimerSource &timer);
         
 };
 

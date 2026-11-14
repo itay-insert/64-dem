@@ -757,3 +757,14 @@ void *realloc(void *alloc, u64 old_size, u64 new_size) {
     return new_alloc;
 }
 
+
+
+void *memory_services(bool free_mem, u64 arg) {
+    if (free_mem) {
+        void *ptr = (void *)arg;
+        free(ptr, false);
+        return NULL;
+    }
+
+    return malloc(arg, false);
+}

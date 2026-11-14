@@ -7,6 +7,12 @@ cd "$project_root"
 
 kernel_includes="-Iboot/kernel/include"
 
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti \
+    -fno-builtin -fsanitize=undefined $kernel_includes tests/test_usb_background.cpp \
+    boot/kernel/drivers/usb/usb_background.cpp boot/kernel/drivers/timers/lapic.cpp \
+    -o /tmp/64-dem-test-usb-background
+/tmp/64-dem-test-usb-background
+
 c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fsanitize=undefined \
     $kernel_includes tests/test_usb_keyboard_selection.cpp \
     -o /tmp/64-dem-test-usb-keyboard-selection

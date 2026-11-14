@@ -88,7 +88,7 @@ if [[ "$BUILD" == true ]]; then
     (cd "$ROOT_DIR" && bash ./make.sh)
 fi
 
-for required_file in "$ROOT_DIR/EFI/boot/BOOTX64.efi" "$ROOT_DIR/boot/kernel.elf" "$ROOT_DIR/boot/stage2.bin"; do
+for required_file in "$ROOT_DIR/EFI/boot/BOOTX64.efi" "$ROOT_DIR/boot/kernel.elf" "$ROOT_DIR/boot/stage2.bin" "$ROOT_DIR/shell/hello/hello.elf"; do
     [[ -r "$required_file" ]] || { echo "error: missing $required_file; run without --no-build first" >&2; exit 1; }
 done
 if [[ -n "$BOOTLOADER" && ! -r "$BOOTLOADER" ]]; then

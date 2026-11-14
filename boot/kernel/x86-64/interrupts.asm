@@ -9,6 +9,11 @@ global isr_eoi
 global exception_stub_table
 global timer_stub
 
+extern former_ss
+extern former_cs
+extern former_rflags
+extern former_rsp
+extern former_rip
 
 isr_timer:
 push rax
@@ -26,10 +31,17 @@ push r12
 push r13
 push r14
 push r15
+cld
 
 mov rbp, rsp
 and rsp, -16
+; The USB worker may use x87/SSE. Preserve the interrupted state as well as GPRs.
+sub rsp, 512
+fxsave64 [rsp]
+mov rdi, [rbp + 128] ; interrupted CS
+mov rsi, [rbp + 120] ; interrupted RIP
 call timer_handler
+fxrstor64 [rsp]
 mov rsp, rbp
 
 pop r15
@@ -51,6 +63,15 @@ iretq
 
 isr_spurious:
 iretq
+
+; Timer work is safe when interrupted at this explicit kernel idle point.
+global interrupt_idle
+global interrupt_idle_resume
+interrupt_idle:
+    sti
+    hlt
+interrupt_idle_resume:
+    ret
 
 isr_eoi:
     push rax
@@ -131,6 +152,7 @@ common_exception:
     push r15
 
 
+    cld
     ; 15 saved registers occupy 120 bytes above the normalized frame.
     mov rdi, [rsp + 120]       ; vector
     mov rsi, [rsp + 128]       ; error code
@@ -138,7 +160,6 @@ common_exception:
     mov rcx, [rsp + 144]       ; saved CS
     mov r8,  [rsp + 152]       ; saved RFLAGS
     mov r9, cr2                ; meaningful for #PF, harmless otherwise
-
     
     and rsp, -16
 
@@ -222,6 +243,8 @@ isr_keyboard:
     push r14
     push r15
 
+    cld
+
     ; Preserve the saved-register stack position.
     ; Align RSP for the System V AMD64 C calling convention.
     mov rbp, rsp
@@ -249,6 +272,28 @@ isr_keyboard:
     pop rbx
     pop rax
 
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push r8
+    mov rdi, [rsp + 40] ; rip 
+    mov rsi, [rsp + 48] ; cs
+    mov rdx, [rsp + 56] ; rflags
+    mov rcx, [rsp + 64] ; rsp
+    mov r8, [rsp + 72] ; ss
+
+    mov qword [rel former_ss], r8
+    mov qword [rel former_cs], rsi
+    mov qword [rel former_rflags], rdx
+    mov qword [rel former_rsp], rcx
+    mov qword [rel former_rip], rdi
+
+    pop r8
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
     iretq
 
 section .rodata

@@ -68,7 +68,8 @@ void HIDK::init() {
         printf("USB keyboard: subscribed; %s; waiting for reports\n",
             controller->usb_irq_ready() ? "MSI/MSI-X configured" : "polling");
         vendor[0] = 'U'; vendor[1] = 'S'; vendor[2] = 'B'; vendor[3] = 0;
-        controller->usb_service_interrupts(*timer->Src);
+        if (!usb->start_background_service(*timer->Src))
+            init_error("background USB timer unavailable");
     }
 }
 
