@@ -194,7 +194,7 @@ u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
 }
 
 
-Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
+Path_ret BootFileSystem::increase_paths(u64 address, char *path, u32 cluster_count) {
     Path_ret ret = {0};
 
     if (Paths == nullptr || Path_count == 0) {
@@ -208,6 +208,7 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
         ret.status = true;
         table[0].file_count = 0;
         table[0].open_files = nullptr;
+        table[0].cluster_count = cluster_count;
         return ret;
     }
 
@@ -234,6 +235,7 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path) {
     table[Path_count].str = path;
     table[Path_count].open_files = nullptr;
     table[Path_count].file_count = 0;
+    table[Path_count].cluster_count = cluster_count;
     ret.index = Path_count;
 
     Path_count++;
@@ -340,6 +342,22 @@ int BootFileSystem::scan_dir(u32 cluster) {
     }
 
     return count;
+}
+
+
+u32 BootFileSystem::return_last_cluster(u32 cluster, int count) {
+    u32 cluster_org = cluster;
+    for (int i = 0; i < count; i++) 
+        cluster = find_next_cluster(cluster);
+ 
+    if (cluster == 0x0FFFFFFF) {
+        cluster = cluster_org;
+        for (int i = 0; i < (count-1); i++)
+            cluster = find_next_cluster(cluster);
+        return cluster;
+    }
+
+    return cluster;
 }
 
 
@@ -783,7 +801,57 @@ void BootFileSystem::fat32_unlink(u32 cluster) {
 }
 
 
-void BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
+static inline u64 next_entry_offset(u64 address, u64 size) {
+    u8 *Path_cache = (u8 *)address;
+    u64 inc = sizeof(FAT32_DIR);
+
+    while (*Path_cache != 0x00) {
+        if (*Path_cache == 0xE5) {
+            Path_cache += inc;
+            continue;
+        }
+
+
+        FAT32_DIR *dir = (FAT32_DIR *)Path_cache;
+
+        if (dir->attributes == LFN) {
+            inc += sizeof(FAT32_LFN);
+            Path_cache += inc;
+            inc = sizeof(FAT32_DIR);
+            continue;
+        }
+
+    }
+
+    return (u64)(((u64)Path_cache + size) - address);
+}
+
+
+
+bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
     u8 count = str_size(entry_name);
-    
+    u64 size = sizeof(FAT32_DIR);
+    bool LFN = false;    
+
+    if (count > 11 && count <= 13) {
+        size += sizeof(FAT32_LFN);
+        LFN = true;
+    } else if (count > 13) {
+        printf("FAT32: %s: name too big\n", entry_name);
+        return false;
+    }
+
+    if (path_index > Path_count) {
+        printf("FAT32: cannot find Path 0x%ux\n", path_index);
+        return false;
+    }
+
+    Paths_table *Path = &table[path_index];
+
+    u32 cluster_count = Path->cluster_count;
+
+    u64 cache_addr = Paths[path_index];
+    u64 offset = next_entry_offset(cache_addr, size);
+
+
 }
