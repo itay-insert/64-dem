@@ -180,6 +180,25 @@ void draw_16color(int x, int y, int color_index) {
     }
 }
 
+
+void draw_16color_phys(int x, int y, int color_index) {
+    if (x < 0 || x >= hor_res || y < 0 || y >= ver_res)
+        return;
+    u32 *vga = (u32 *)fb_phys;
+    int addr = (y * p_scanln) + x;
+    u32 color = vga16_color[color_index];
+    if (addr < size) {
+		if (p_format == BGR) {
+			u32 BgrColor = (color & MaskBlue) << 16;
+			BgrColor += color & MaskGreen;
+			BgrColor += (color & MaskRed) >> 16;
+			vga[addr] = BgrColor; 
+		} else if (p_format == RGB) {
+			vga[addr] = color;
+		}
+    }
+}
+
 int global_textcolor = LightGray;
 
 void Set_GlobalTextColor(int color_index) {
@@ -223,7 +242,7 @@ void draw_cursor(int color_index) {
 
     for (int i = 14; i < 16; i++) {
         for (int j = 0; j < 8; j++) {
-            draw_16color(x + j, y + i, color_index);
+            draw_16color_phys(x + j, y + i, color_index);
         }
     }
 }

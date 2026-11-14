@@ -1,4 +1,5 @@
 #include "uint_definitions.h"
+#include <stdbool.h>
 #include "drivers/display/vga.h"
 #include "x86-64/apic.h"
 #include "x86-64/lowlevel.h"
@@ -45,10 +46,28 @@ static volatile u64 timer_ticks = 0;
 
 extern void usb_background_tick(u64 cs, u64 rip);
 
+volatile u64 cursor_ticks = 0;
+
+bool blink = false;
+
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
+    cursor_ticks++;
+
+    if (cursor_ticks == 500) {
+        cursor_ticks = 0;
+        if (!blink) {
+            draw_cursor(LightGray);
+            blink = true;
+        } else if (blink) {
+            draw_cursor(Black);
+            blink = false;
+        }
+    }
 
     usb_background_tick(cs, rip);
+
+
 
 	lapic_write(0xB0, 0);
 }
