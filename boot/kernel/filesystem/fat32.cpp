@@ -743,3 +743,47 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
     memcpy(buffer, (void *)(file->cache->cache+offset), size);
     
 }
+
+
+void BootFileSystem::fat32_link(u32 current, u32 next) {
+    u32 offset = current * 4;
+    u32 sector = offset >> 9; // divide by 512
+    u32 entry_offset = offset % 512;
+
+    u8 buffer[512];
+
+    drive->read_sectors(fat_lba + sector, 1, buffer);
+
+    u32 old_value = *(u32 *)(buffer + entry_offset);
+
+    u32 new_value = (old_value & 0xF0000000) | (next & 0x0FFFFFFF);
+
+    *(u32 *)(buffer + entry_offset) = new_value;
+
+    drive->write_sectors(fat_lba + sector, 1, buffer);
+} 
+
+
+void BootFileSystem::fat32_unlink(u32 cluster) {
+    u32 offset = cluster * 4;
+    u32 sector = offset >> 9; // divide by 512
+    u32 entry_offset = offset % 512;
+
+    u8 buffer[512];
+
+    drive->read_sectors(fat_lba + sector, 1, buffer);
+
+    u32 old_value = *(u32 *)(buffer + entry_offset);
+
+    u32 new_value = (old_value & 0xF0000000) | 0x0FFFFFFF; // eoi
+
+    *(u32 *)(buffer + entry_offset) = new_value;
+
+    drive->write_sectors(fat_lba + sector, 1, buffer);
+}
+
+
+void BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
+    u8 count = str_size(entry_name);
+    
+}

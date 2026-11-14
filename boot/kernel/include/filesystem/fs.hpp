@@ -82,6 +82,9 @@ class BootFileSystem {
         int scan_dir(u32 cluster);
         Search_ret search_path(char *path);
         void allocate_clusters(file_cache *file, u32 cluster_count);
+        void fat32_link(u32 current, u32 next);
+        void fat32_unlink(u32 cluster);
+        void fat32_make_entry(u32 path_index, const char *entry_name);
 
     public:
         u64 SizeInBytes;
