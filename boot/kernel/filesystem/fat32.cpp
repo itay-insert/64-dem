@@ -2,6 +2,7 @@
 #include "drivers/display/vga.h"
 #include "x86-64/memory/memory_helpers.h"
 #include "x86-64/memory/kmalloc.h"
+#include "drivers/timers/rtc.h"
 
 // Disk layout: partition boot sector, reserved sectors (including FSInfo), FAT copies,
 // then data clusters. This implementation reads and writes 512-byte sectors.
@@ -1076,7 +1077,8 @@ void BootFileSystem::clusters_alloc(u32 count, u32 cluster_link) { // Append up 
 
         if (cluster != 0) // If no free entry was found, stop; clusters already appended remain allocated.
             return; // Return without rolling back earlier iterations or terminating the current tail.
-
+        
+        
         fat32_link(cluster_link, index); // Link the current tail to the selected free cluster in memory and on disk.
         cluster_link = index; // Advance the tail so the next allocation is appended after this cluster.
     } // Finish this allocation iteration.
@@ -1084,6 +1086,22 @@ void BootFileSystem::clusters_alloc(u32 count, u32 cluster_link) { // Append up 
     fat32_unlink(cluster_link); // Mark the tail as end of chain; fat32_unlink currently assumes it has a successor.
 } // Finish extending the chain.
 
+u32 BootFileSystem::find_free_cluster(void) {
+    u32 cluster = 0;
+    u32 index = 0;
+
+     for (u32 j = 2; j < (clusters + 2); j++) { // Scan data-cluster records, skipping reserved cluster numbers 0 and 1.
+            cluster = cluster_map[j].fat_value; // Read the candidate's cached FAT value; zero means free.
+            index = j; // Remember the index corresponding to that FAT value.
+            if (cluster == 0) // Check whether this candidate is available for allocation.
+                break; // Stop searching at the first free cluster.
+        } // Finish the free-cluster search.
+
+        if (cluster != 0) // If no free entry was found, stop; clusters already appended remain allocated.
+            return 0; // Return without rolling back earlier iterations or terminating the current tail.
+        
+        return index;
+}
 
 // Free count entries while preserving forward links until the final iteration.
 void BootFileSystem::clusters_dealloc(u32 count, u32 cluster_link) { // Free count clusters beginning at cluster_link by following cached forward indices.
@@ -1095,6 +1113,30 @@ void BootFileSystem::clusters_dealloc(u32 count, u32 cluster_link) { // Free cou
     } // Finish this deallocation iteration.
     
 } // Finish freeing the requested portion of the chain.
+
+
+static inline u8 rtc_to_num(u8 n) {
+    n = n - ((n >> 4) * 6);
+    return n;
+}
+
+bool BootFileSystem::set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir) {
+    dir->attributes = lfn ? LFN : 0;
+    u8 min = rtc_to_num(rtc_read(0x02));
+    u8 hour = rtc_to_num(rtc_read(0x04));
+    u8 day = rtc_to_num(rtc_read(0x07));
+    u8 month = rtc_to_num(rtc_read(0x08));
+    u8 year = rtc_to_num(rtc_read(0x09));
+
+    dir->Time = (hour << 11) + (min << 5);
+    dir->Date = (year << 9) + (month << 5) + (day & 0x1F);
+
+    u32 cluster = find_free_cluster();
+    dir->file_size = cluster_size;
+    dir->cluster_low = (u16)cluster;
+    dir->cluster_high = (u16)(cluster >> 16);
+    
+}
 
 // Entry creation is unfinished: reserve cache space for a short entry and,
 // for 12-13 characters, one LFN entry. Entry encoding and disk writes are absent.

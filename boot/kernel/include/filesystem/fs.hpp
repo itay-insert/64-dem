@@ -105,7 +105,9 @@ class BootFileSystem {
         void fat32_link(u32 current, u32 next);
         void fat32_free(u32 cluster, bool dont);
         void clusters_alloc(u32 count, u32 cluster_link);
+        u32 find_free_cluster(void);
         void clusters_dealloc(u32 count, u32 cluster_link);
+        boot set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
 
     public:
