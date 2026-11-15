@@ -194,7 +194,7 @@ u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
 }
 
 
-Path_ret BootFileSystem::increase_paths(u64 address, char *path, u32 cluster_count) {
+Path_ret BootFileSystem::increase_paths(u64 address, char *path, int cluster_count, u32 starting_cluster) {
     Path_ret ret = {0};
 
     if (Paths == nullptr || Path_count == 0) {
@@ -209,6 +209,7 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path, u32 cluster_cou
         table[0].file_count = 0;
         table[0].open_files = nullptr;
         table[0].cluster_count = cluster_count;
+        table[0].starting_cluster = starting_cluster;
         return ret;
     }
 
@@ -236,6 +237,7 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path, u32 cluster_cou
     table[Path_count].open_files = nullptr;
     table[Path_count].file_count = 0;
     table[Path_count].cluster_count = cluster_count;
+    table[Path_count].starting_cluster = starting_cluster;
     ret.index = Path_count;
 
     Path_count++;
@@ -270,6 +272,23 @@ bool BootFileSystem::increase_files(Paths_table *table, char *filename, u32 clus
     table->open_files[table->file_count].name = filename;
     table->open_files[table->file_count].starting_cluster = cluster;
     return true;
+}
+
+
+
+u64 BootFileSystem::resize_cache(u64 address, u64 old_count, u64 new_count) {
+    if (Paths == nullptr || table == nullptr || old_count == 0 || new_count == 0)
+        return 1;
+
+    u64 old_size = old_count * cluster_size;
+    u64 new_size = new_count * cluster_size;
+    u8 *cache = (u8 *)address;
+    cache = (u8 *)krealloc(cache, old_size, new_size);
+    if (cache == nullptr)
+        return 1;
+
+
+    return (u64)cache;
 }
 
 
@@ -464,7 +483,7 @@ Path_ret BootFileSystem::open_path(const char *path) {
     u8 *path_cache = new u8[size];
     cluster = backup_cluster;
     load_clusters(cluster, count, path_cache);
-    ret = increase_paths((u64)path_cache, (char *)path);
+    ret = increase_paths((u64)path_cache, (char *)path, count, backup_cluster);
     if (!ret.status) 
         delete[] path_cache;
     return ret;
@@ -831,11 +850,11 @@ static inline u64 next_entry_offset(u64 address, u64 size) {
 bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
     u8 count = str_size(entry_name);
     u64 size = sizeof(FAT32_DIR);
-    bool LFN = false;    
+    bool lfn = false;    
 
     if (count > 11 && count <= 13) {
         size += sizeof(FAT32_LFN);
-        LFN = true;
+        lfn = true;
     } else if (count > 13) {
         printf("FAT32: %s: name too big\n", entry_name);
         return false;
@@ -852,6 +871,18 @@ bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
 
     u64 cache_addr = Paths[path_index];
     u64 offset = next_entry_offset(cache_addr, size);
+    int old_cluster_count = Path->cluster_count;
+    int new_cluster_count = (offset + (cluster_size - 1)) / cluster_size;
+    if (new_cluster_count > old_cluster_count) {
+        cache_addr = resize_cache(cache_addr, old_cluster_count, new_cluster_count);
+        if (cache_addr == 1)
+            return false;
 
+        Paths[path_index] = cache_addr;
+    }
+
+    u8 *cache = (u8 *)cache_addr;
+    FAT32_DIR *new_dir = (FAT32_DIR *)(cache + (offset - size));
+    
 
 }

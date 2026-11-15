@@ -48,7 +48,8 @@ typedef struct {
     char *str;
     file_cache *open_files;
     int file_count;
-    u32 cluster_count;
+    int cluster_count;
+    u32 starting_cluster;
 } Paths_table;
 
 typedef struct {
@@ -78,8 +79,10 @@ class BootFileSystem {
         u64 *Paths;
         Paths_table *table;
         u32 Path_count;
-        Path_ret increase_paths(u64 address, char *path, u32 cluster_count);
+        void fat32_set_entry(FAT32_DIR *dir, bool lfn, const char *name);
+        Path_ret increase_paths(u64 address, char *path, u32 cluster_count, u32 starting_cluster);
         bool increase_files(Paths_table *table, char *filename, u32 cluster);
+        u64 resize_cache(u64 address, u64 old_count, u64 new_count);
         int scan_dir(u32 cluster);
         u32 return_last_cluster(u32 cluster, int count);
         Search_ret search_path(char *path);
