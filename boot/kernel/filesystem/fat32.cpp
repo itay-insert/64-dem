@@ -835,8 +835,7 @@ void BootFileSystem::close_path(u32 path_index) { // Close cached files, write d
         close_file(file_handle); // Release this file through the normal file-close routine.
    } // End this block.
 
-   write_clusters(table[path_index].starting_cluster, table[path_index].cluster_count, (void *)Paths[Path_count]); // Write the directory chain; Paths[Path_count] currently indexes past the active path array.
-
+   write_clusters(table[path_index].starting_cluster, table[path_index].cluster_count, (void *)Paths[path_index]); // Write the directory chain; 
    table[path_index] = {0}; // Clear metadata for the path being removed.
    kfree((void *)Paths[path_index]); // Release this directory's in-memory cache.
         // relocate paths entries
@@ -1169,7 +1168,7 @@ void BootFileSystem::set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir)
 bool BootFileSystem::update_parent_dir(const char *path_name, const char *dir, u32 new_size) {
     Path_ret path = open_path(path_name); // Open/cache the parent directory before searching its entries.
     if (!path.status) // Stop if opening the parent failed.
-        return; // TODO: return false here because this function returns bool.
+        return false; 
 
     u8 *cache = (u8 *)Paths[path.index]; // Begin scanning the cached parent directory.
     u64 size = sizeof(FAT32_DIR); // Reserve one base directory record.
@@ -1310,7 +1309,7 @@ bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
     par[new_count] = '\0'; // Terminate the prefix within the allocated buffer.
     
     memcpy(par, table[path_index].str, new_count); // Copy the parent prefix without its separating slash.
-    if (!update_parent_dir(par, (const char *)((u64)table[path_index].str + (new_count+1)))) {
+    if (!update_parent_dir(par, (const char *)((u64)table[path_index].str + (new_count+1)), (new_count*cluster_size))) {
         delete[] par; // Release the temporary parent string after an update failure.
         return false;
     }

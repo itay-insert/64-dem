@@ -357,7 +357,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     path = fat32.open_path("/SHELL/");
 
     if (path.status) {
-        u64 file_handle = fat32.open_file_by_index(path.index, "MEM     ELF");
+        u64 file_handle = fat32.open_file_by_index(path.index, "CMD     ELF");
         if (file_handle != 0xFFFFFFFF) {
             StartProccess(file_handle, &fat32);
         }

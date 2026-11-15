@@ -553,7 +553,9 @@ void kprintf(const char *str) {
             cursor.coulmn = 0;
             cursor.row++;
 			if (cursor.row >= (ver_res >> 4)) {
-        		cursor.row = (ver_res >> 4) - 1;
+                text_data td = {0};
+                scroll(td);
+                cursor.row = (ver_res >> 4) - 1;
     		}
 		} else {
             draw_char((char)*p_str, cursor.coulmn, cursor.row);

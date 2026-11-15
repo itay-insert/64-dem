@@ -74,13 +74,14 @@ cmp rax, 4 ; sys_exit
 jne skip_sysexit
 call clock
 skip_sysexit:
-exit:
 
 cmp rax, 5 ; sleep_ms
 jne skip_sleep
 call sleep_ms
 jmp exit
 skip_sleep:
+
+exit:
 
 pop r11
 pop rcx

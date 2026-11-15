@@ -108,7 +108,8 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32) {
 
     size = (size + 0x41000);
 
-    new_pid->rsp = 0x40000000 + size;
+    // _start calls main, so its initial stack must be 16-byte aligned.
+    new_pid->rsp = (0x40000000ULL + size) & ~0xFULL;
 
     new_pid->file_handle = file_handle;
     new_pid->buffer = malloc(size, true);

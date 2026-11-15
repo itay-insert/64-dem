@@ -63,6 +63,7 @@ extern "C" u8 read_key(bool ascii, bool wait) {
                 interrupt_idle();
             goto ascii_again;
         }
+        return 0;
     } else if (!ascii) {
         scancode_again:
 
@@ -75,5 +76,6 @@ extern "C" u8 read_key(bool ascii, bool wait) {
                 interrupt_idle();
             goto scancode_again;
         }
+        return 0;
     }
 }

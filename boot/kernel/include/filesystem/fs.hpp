@@ -94,7 +94,7 @@ class BootFileSystem {
         u32 clusters;
         void scan_fat(void);
         void fat32_set_entry(FAT32_DIR *dir, bool lfn, const char *name);
-        Path_ret increase_paths(u64 address, char *path, u32 cluster_count, u32 starting_cluster);
+        Path_ret increase_paths(u64 address, char *path, int cluster_count, u32 starting_cluster);
         bool increase_files(Paths_table *table, char *filename, u32 cluster);
         u64 resize_cache(u64 address, u64 old_count, u64 new_count);
         int scan_dir(u32 cluster);
@@ -108,7 +108,7 @@ class BootFileSystem {
         u32 find_free_cluster(void);
         void clusters_dealloc(u32 count, u32 cluster_link);
         void set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
-        bool update_parent_dir(const char *path_name, const char *dir);
+        bool update_parent_dir(const char *path_name, const char *dir, u32 new_size);
 
     public:
         u64 SizeInBytes;
