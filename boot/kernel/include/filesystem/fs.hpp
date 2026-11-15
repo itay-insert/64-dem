@@ -107,8 +107,8 @@ class BootFileSystem {
         void clusters_alloc(u32 count, u32 cluster_link);
         u32 find_free_cluster(void);
         void clusters_dealloc(u32 count, u32 cluster_link);
-        boot set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
-        bool fat32_make_entry(u32 path_index, const char *entry_name);
+        void set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
+        bool update_parent_dir(const char *path_name, const char *dir);
 
     public:
         u64 SizeInBytes;
@@ -126,4 +126,5 @@ class BootFileSystem {
         void close_path(u32 path_index);
         void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
         void write_file(u64 file_handle, u64 offset, u32 size, void *buffer);
+        bool fat32_make_entry(u32 path_index, const char *entry_name);
 };

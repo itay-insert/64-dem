@@ -685,6 +685,7 @@ u64 BootFileSystem::open_file_by_path(const char *path, const char *filename) {
         for (u8 i = count; i < cmp_count; i++)
             file[i] = ' ';
 
+        // Compare fixed-width names after padding the requested component.
         if (memcmp(file, name, cmp_count) == 0) {
             delete[] name;
             delete[] file;
@@ -755,6 +756,7 @@ u64 BootFileSystem::open_file_by_index(u32 index, const char *filename) {
         for (u8 i = count; i < cmp_count; i++)
             file[i] = ' ';
 
+        // Compare fixed-width names after padding the requested component.
         if (memcmp(file, name, cmp_count) == 0) {
             delete[] name;
             delete[] file;
@@ -1038,27 +1040,29 @@ void BootFileSystem::fat32_free(u32 cluster, bool dont) { // Free one FAT entry;
 // Intended to find the directory terminator and return the space needed through
 // the new entry. Ordinary live entries currently lack an advance in this loop.
 static inline u64 next_entry_offset(u64 address, u64 size) {
-    u8 *Path_cache = (u8 *)address;
-    u64 inc = sizeof(FAT32_DIR);
+    u8 *Path_cache = (u8 *)address; // Treat the cached directory address as a byte cursor.
+    u64 inc = sizeof(FAT32_DIR); // Start with the size of one ordinary directory record.
 
-    while (*Path_cache != 0x00) {
-        if (*Path_cache == 0xE5) {
-            Path_cache += inc;
+    while (*Path_cache != 0x00) { // Stop at the first end-of-directory marker; cache bounds are not checked.
+        if (*Path_cache == 0xE5) { // Deleted records are skipped rather than reused.
+            Path_cache += inc; // Skip the combined record and fragment.
             continue;
         }
 
 
-        FAT32_DIR *dir = (FAT32_DIR *)Path_cache;
+        FAT32_DIR *dir = (FAT32_DIR *)Path_cache; // Inspect the current record attributes.
 
         if (dir->attributes == LFN) {
-            inc += sizeof(FAT32_LFN);
-            Path_cache += inc;
-            inc = sizeof(FAT32_DIR);
+            inc += sizeof(FAT32_LFN); // Include the adjacent long-name fragment used by this layout.
+            Path_cache += inc; // Skip the combined record and fragment.
+            inc = sizeof(FAT32_DIR); // Restore the ordinary record stride.
             continue;
         }
 
     }
 
+    // Return the end offset, not the insertion offset; callers subtract size.
+    // This excludes space for the replacement 0x00 directory terminator.
     return (u64)(((u64)Path_cache + size) - address);
 }
 
@@ -1086,9 +1090,11 @@ void BootFileSystem::clusters_alloc(u32 count, u32 cluster_link) { // Append up 
     fat32_unlink(cluster_link); // Mark the tail as end of chain; fat32_unlink currently assumes it has a successor.
 } // Finish extending the chain.
 
+// Return a free data-cluster index, or zero when none is found. This only
+// searches the cached FAT: the caller still needs to reserve the chosen entry.
 u32 BootFileSystem::find_free_cluster(void) {
-    u32 cluster = 0;
-    u32 index = 0;
+    u32 cluster = 0; // Hold the last inspected FAT value; an empty scan leaves it zero.
+    u32 index = 0; // Zero is the failure result if the scan never runs.
 
      for (u32 j = 2; j < (clusters + 2); j++) { // Scan data-cluster records, skipping reserved cluster numbers 0 and 1.
             cluster = cluster_map[j].fat_value; // Read the candidate's cached FAT value; zero means free.
@@ -1097,10 +1103,10 @@ u32 BootFileSystem::find_free_cluster(void) {
                 break; // Stop searching at the first free cluster.
         } // Finish the free-cluster search.
 
-        if (cluster != 0) // If no free entry was found, stop; clusters already appended remain allocated.
-            return 0; // Return without rolling back earlier iterations or terminating the current tail.
+        if (cluster != 0) // No free entry was found; this search leaves the FAT unchanged.
+            return 0; // Report exhaustion; this search has not changed the FAT.
         
-        return index;
+        return index; // Return the candidate without marking it allocated.
 }
 
 // Free count entries while preserving forward links until the final iteration.
@@ -1115,70 +1121,201 @@ void BootFileSystem::clusters_dealloc(u32 count, u32 cluster_link) { // Free cou
 } // Finish freeing the requested portion of the chain.
 
 
+// Decode packed BCD from the RTC; assumes the RTC is operating in BCD mode.
 static inline u8 rtc_to_num(u8 n) {
-    n = n - ((n >> 4) * 6);
-    return n;
+    n = n - ((n >> 4) * 6); // Subtract six per upper-nibble digit to convert BCD to binary.
+    return n; // Return the decoded RTC field.
 }
 
-bool BootFileSystem::set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir) {
-    dir->attributes = lfn ? LFN : 0;
-    u8 min = rtc_to_num(rtc_read(0x02));
-    u8 hour = rtc_to_num(rtc_read(0x04));
-    u8 day = rtc_to_num(rtc_read(0x07));
-    u8 month = rtc_to_num(rtc_read(0x08));
-    u8 year = rtc_to_num(rtc_read(0x09));
+// Fill the cached record and optionally one adjacent long-name fragment.
+// TODO: complete FAT32 LFN metadata/order and reserve the selected data cluster.
+void BootFileSystem::set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir) {
+    dir->attributes = lfn ? LFN : 0; // Currently puts the LFN attribute on the base record too.
+    u8 min = rtc_to_num(rtc_read(0x02)); // Read minutes from the RTC and decode BCD.
+    u8 hour = rtc_to_num(rtc_read(0x04)); // Read hours; assumes 24-hour RTC mode.
+    u8 day = rtc_to_num(rtc_read(0x07)); // Read the day of the month.
+    u8 month = rtc_to_num(rtc_read(0x08)); // Read the month number.
+    u8 year = rtc_to_num(rtc_read(0x09)); // Read the two-digit year without a century adjustment.
 
+    // FAT packs hours/minutes into time and a year offset from 1980 into date.
+    // TODO: translate the RTC two-digit year to that epoch; seconds stay zero.
     dir->Time = (hour << 11) + (min << 5);
     dir->Date = (year << 9) + (month << 5) + (day & 0x1F);
 
+    // This lookup does not allocate the cluster or handle the zero failure value.
     u32 cluster = find_free_cluster();
-    dir->file_size = cluster_size;
-    dir->cluster_low = (u16)cluster;
-    dir->cluster_high = (u16)(cluster >> 16);
-    
+    dir->file_size = cluster_size; // Initialize the recorded size to one cluster.
+    dir->cluster_low = (u16)cluster; // Store the low half of the starting cluster index.
+    dir->cluster_high = (u16)(cluster >> 16); // Store the high half of the starting cluster index.
+
+    if (lfn) {
+        FAT32_LFN *ext = (FAT32_LFN *)((u64)dir + sizeof(FAT32_DIR)); // Use the fragment immediately after the base record.
+        u16 name[13] = {0}; // Stage up to thirteen UTF-16 code units, initially zero.
+        // TODO: the converter capacity is in bytes, and its result is unchecked.
+        ascii_to_utf16le(entry_name, name, 13);
+        memcpy(ext->first_part, name, 10); // Copy the first five UTF-16 code units.
+        memcpy(ext->second_part, (void *)((u8 *)name + 10), 12); // Copy the next six UTF-16 code units.
+        memcpy(ext->final_part, (void *)((u8 *)name + 22), 4); // Copy the final two UTF-16 code units.
+        return; // TODO: return false here because this function returns bool.
+    }
+
+    // Assumes the source supplies all 11 bytes of a padded short name.
+    memcpy(dir->filename, entry_name, 11);
 }
 
-// Entry creation is unfinished: reserve cache space for a short entry and,
-// for 12-13 characters, one LFN entry. Entry encoding and disk writes are absent.
+
+// Find the child directory record in its parent cache, refresh its modification
+// timestamp/size, then close the parent through the normal writeback path.
+bool BootFileSystem::update_parent_dir(const char *path_name, const char *dir, u32 new_size) {
+    Path_ret path = open_path(path_name); // Open/cache the parent directory before searching its entries.
+    if (!path.status) // Stop if opening the parent failed.
+        return; // TODO: return false here because this function returns bool.
+
+    u8 *cache = (u8 *)Paths[path.index]; // Begin scanning the cached parent directory.
+    u64 size = sizeof(FAT32_DIR); // Reserve one base directory record.
+    
+
+    while (*cache != 0) { // Scan until the directory terminator.
+        if (*cache == 0xE5) { // Skip deleted records.
+            cache += size;
+            continue;
+        }
+
+        FAT32_DIR *dir32 = (FAT32_DIR *)((u64)cache); // Interpret this position as a directory record.
+        u8 count = str_size(dir); // Measure the requested child component.
+        u8 cmp_count = 11; // Compare all eleven bytes for short names.
+        char *name = nullptr; // Own the decoded candidate name for this iteration.
+        char *file = nullptr; // Own the padded requested name for comparison.
+
+
+        if (dir32->attributes == LFN) {
+            size += sizeof(FAT32_LFN); // Include a fragment; TODO: reset this stride for each candidate.
+            FAT32_LFN *lfn = (FAT32_LFN *)((u64)cache + sizeof(FAT32_DIR)); // Read the adjacent long-name fragment.
+            u16 *utf_name = new u16[13]; // Allocate space for one fragment; collect_lfn requires a valid ordinal.
+            collect_lfn(lfn, utf_name); // Reassemble the fragment into UTF-16 code units.
+            name = new char[14]; // Allow thirteen ASCII characters plus a terminator.
+            utf16le_to_ascii(utf_name, 13, name, 14); // Decode the candidate; the conversion result is not checked.
+            delete[] utf_name; // Release the temporary UTF-16 buffer.
+            cmp_count = 13; // Compare the full supported long-name width.
+        } else {
+            name = new char[11]; // Keep the short name as a fixed-width byte sequence.
+            for (u8 i = 0; i < 11; i++) 
+                name[i] = dir32->filename[i];
+        }
+
+        file = new char[cmp_count]; // Allocate the comparison buffer; count must fit this width.
+        for (u8 i = 0; i < count; i++)
+            file[i] = dir[i]; // Copy the requested name bytes.
+
+        for (u8 i = count; i < cmp_count; i++)
+            file[i] = ' '; // Pad the remaining comparison bytes with spaces.
+
+        // Compare fixed-width names after padding the requested component.
+        if (memcmp(file, name, cmp_count) == 0) {
+            delete[] name; // Release the decoded candidate after finding a match.
+            delete[] file; // Release the padded comparison buffer.
+            u8 min = rtc_to_num(rtc_read(0x02));
+            u8 hour = rtc_to_num(rtc_read(0x04));
+            u8 day = rtc_to_num(rtc_read(0x07));
+            u8 month = rtc_to_num(rtc_read(0x08));
+            u8 year = rtc_to_num(rtc_read(0x09));
+
+            dir32->last_modify_time = (hour << 11) + (min << 5);
+            dir32->last_modify_date = (year << 9) + (month << 5) + (day & 0x1F);
+            dir32->file_size = new_size; // Record the caller-supplied directory size in bytes.
+
+            close_path(path.index); // Close the parent cache through its writeback path.
+            return true; // Report that the matching parent entry was updated.
+        }
+
+        cache += size; // Advance to the next candidate; TODO: free name/file on a miss.
+
+    }
+
+    close_path(path.index); // Release the parent path even when the child was not found.
+    return false; // Report that no matching child entry was found.
+}
+
+// Locate the separator before the final component, assuming a trailing slash.
+// The input must contain that separator; this backward scan has no bounds check.
+static inline int extract_place(const char *str) {
+    int i = 0; // Start at the beginning of the cached path string.
+    while (str[i] != '\0') 
+        i++; // Find the terminating null byte.
+
+    i -= 2; // Step back over the terminator and expected trailing slash.
+    while (str[i] != '/') // Search backward for the parent/component separator.
+        i--; // Move toward the parent prefix.
+
+    return i; // Return the separator index, also the parent prefix length.
+}
+
+// Append a cached directory record, growing the directory chain if necessary,
+// then update its record in the parent. Names of 12-13 characters use one LFN.
+// TODO: finish validation, FAT32 record encoding, and directory writeback.
 bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
-    u8 count = str_size(entry_name);
-    u64 size = sizeof(FAT32_DIR);
-    bool lfn = false;    
+    u8 count = str_size(entry_name); // Measure the name; this currently narrows the length to eight bits.
+    u64 size = sizeof(FAT32_DIR); // Reserve one base directory record.
+    bool lfn = false;     // Default to the short-name path.
 
     if (count > 11 && count <= 13) {
-        size += sizeof(FAT32_LFN);
-        lfn = true;
+        size += sizeof(FAT32_LFN); // Reserve one additional fragment for a 12-13 character name.
+        lfn = true; // Select long-name encoding in set_entry.
     } else if (count > 13) {
         printf("FAT32: %s: name too big\n", entry_name);
         return false;
     }
 
-    if (path_index > Path_count) {
+    // TODO: Path_count is also outside the active array; reject equality too.
+    if (path_index >= Path_count) {
         printf("FAT32: cannot find Path 0x%ux\n", path_index);
         return false;
     }
 
-    Paths_table *Path = &table[path_index];
+    Paths_table *Path = &table[path_index]; // Access the directory metadata corresponding to this cache.
 
-    u32 cluster_count = Path->cluster_count;
+    u32 cluster_count = Path->cluster_count; // Snapshot the cached cluster count; currently unused.
 
-    u64 cache_addr = Paths[path_index];
+    u64 cache_addr = Paths[path_index]; // Retrieve the current directory buffer address.
+    // offset points just past the new record(s); insertion starts at offset-size.
     u64 offset = next_entry_offset(cache_addr, size);
-    int old_cluster_count = Path->cluster_count;
-    int new_cluster_count = (offset + (cluster_size - 1)) / cluster_size;
+    int old_cluster_count = Path->cluster_count; // Keep the current allocation size for resizing.
+    int new_cluster_count = (offset + (cluster_size - 1)) / cluster_size; // Round the required end offset up to whole clusters.
+    // Grow the cache and disk chain together, then publish the new cache address.
+    // TODO: include the terminator byte and roll back if either allocation fails.
     if (new_cluster_count > old_cluster_count) {
-        int diff = new_cluster_count - old_cluster_count;
-        cache_addr = resize_cache(cache_addr, old_cluster_count, new_cluster_count);
-        u32 last_cluster = return_last_cluster(Path->starting_cluster, Path->cluster_count);
-        clusters_alloc(diff, last_cluster);
-        if (cache_addr == 1)
+        int diff = new_cluster_count - old_cluster_count; // Compute how many clusters to append.
+        cache_addr = resize_cache(cache_addr, old_cluster_count, new_cluster_count); // Resize the memory buffer; failure is encoded as address 1.
+        u32 last_cluster = return_last_cluster(Path->starting_cluster, Path->cluster_count); // Locate the existing disk-chain tail.
+        clusters_alloc(diff, last_cluster); // Append disk clusters; this runs before the cache failure check.
+        if (cache_addr == 1) // Detect the resize helper failure sentinel.
             return false;
 
-        Paths[path_index] = cache_addr;
+        Paths[path_index] = cache_addr; // Publish the possibly relocated directory buffer.
+        Path->cluster_count = new_cluster_count; // Record the expanded cache length in clusters.
     }
 
-    u8 *cache = (u8 *)cache_addr;
-    FAT32_DIR *new_dir = (FAT32_DIR *)(cache + (offset - size));
-    
+    u8 *cache = (u8 *)cache_addr; // Use byte addressing within the final buffer.
+    FAT32_DIR *new_dir = (FAT32_DIR *)(cache + (offset - size)); // Locate the start of the reserved record space.
+    set_entry(entry_name, lfn, new_dir); // Populate the cached record and optional long-name fragment.
 
+    *(u8 *)(cache + offset) = 0x00; // no more entries
+
+    // Split the cached path into its parent prefix and final directory name.
+    // TODO: pass the updated directory size as the third argument below;
+    // update_parent_dir currently has a different signature in the header.
+    int new_count = extract_place(table[path_index].str); // Find the parent prefix length before the final component.
+    char *par = new char[new_count+1]; // Allocate the parent prefix plus its null terminator.
+    // The prefix length excludes the separator and leaves room for a null byte.
+    par[new_count] = '\0'; // Terminate the prefix within the allocated buffer.
+    
+    memcpy(par, table[path_index].str, new_count); // Copy the parent prefix without its separating slash.
+    if (!update_parent_dir(par, (const char *)((u64)table[path_index].str + (new_count+1)))) {
+        delete[] par; // Release the temporary parent string after an update failure.
+        return false;
+    }
+
+    delete[] par; // Release the temporary parent string after a successful update.
+    
+    return true; // Report completion; the new directory cache is not closed here.
 }

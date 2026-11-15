@@ -77,6 +77,31 @@ char *strcpy(char *dest, const char *src) {
     return org;
 }
 
+int ascii_to_utf16le(const char *src, void *dst, size_t dst_capacity) {
+    if (dst == NULL || dst_capacity < 2)
+        return 0;
+
+    u8 *bytes = (u8 *)dst;
+    bytes[0] = 0;
+    bytes[1] = 0;
+    if (src == NULL)
+        return 0;
+
+    size_t written = 0;
+    while (*src != '\0') {
+        u8 ch = (u8)*src;
+        if (ch > 0x7F || dst_capacity - written < 4)
+            return 0;
+
+        bytes[written++] = ch;
+        bytes[written++] = 0;
+        bytes[written] = 0;
+        bytes[written + 1] = 0;
+        ++src;
+    }
+    return 1;
+}
+
 int strcmp(char *a, char *b) {
     while ((*a != '\0') && (*a == *b)) {
         a++;
