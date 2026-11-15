@@ -86,6 +86,7 @@ class BootFileSystem {
         u32 LBA_to_Cluster(u32 lba);
         u32 find_next_cluster(u32 cluster);
         u32 load_clusters(u32 cluster, u32 count, void *buffer);
+        u32 write_clusters(u32 cluster, u32 count, void *buffer);
         u64 *Paths;
         Paths_table *table;
         u32 Path_count;
@@ -102,6 +103,9 @@ class BootFileSystem {
         void allocate_clusters(file_cache *file, u32 cluster_count);
         void fat32_unlink(u32 cluster);
         void fat32_link(u32 current, u32 next);
+        void fat32_free(u32 cluster, bool dont);
+        void clusters_alloc(u32 count, u32 cluster_link);
+        void clusters_dealloc(u32 count, u32 cluster_link);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
 
     public:
@@ -119,4 +123,5 @@ class BootFileSystem {
         void close_file(u64 file_handle);
         void close_path(u32 path_index);
         void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
+        void write_file(u64 file_handle, u64 offset, u32 size, void *buffer);
 };
