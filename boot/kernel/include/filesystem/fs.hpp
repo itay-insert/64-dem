@@ -62,6 +62,16 @@ typedef struct {
     u32 index;
 } Path_ret;
 
+typedef struct FAT32_cluster FAT32_cluster;
+
+struct FAT32_cluster {
+    FAT32_cluster *previous_cluster;
+    u32 previous_cluster_index;
+    u32 fat_value;
+    FAT32_cluster *next_cluster;
+    u32 next_cluster_index;
+};
+
 
 class BootFileSystem {
     private:
@@ -79,6 +89,9 @@ class BootFileSystem {
         u64 *Paths;
         Paths_table *table;
         u32 Path_count;
+        FAT32_cluster *cluster_map;
+        u32 clusters;
+        void scan_fat(void);
         void fat32_set_entry(FAT32_DIR *dir, bool lfn, const char *name);
         Path_ret increase_paths(u64 address, char *path, u32 cluster_count, u32 starting_cluster);
         bool increase_files(Paths_table *table, char *filename, u32 cluster);
@@ -87,8 +100,8 @@ class BootFileSystem {
         u32 return_last_cluster(u32 cluster, int count);
         Search_ret search_path(char *path);
         void allocate_clusters(file_cache *file, u32 cluster_count);
-        void fat32_link(u32 current, u32 next);
         void fat32_unlink(u32 cluster);
+        void fat32_link(u32 current, u32 next);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
 
     public:

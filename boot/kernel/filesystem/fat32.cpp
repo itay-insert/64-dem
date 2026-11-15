@@ -73,6 +73,64 @@ u32 BootFileSystem::LBA_to_Cluster(u32 lba) {
 u8 *dir_place = nullptr;
 
 
+
+
+u32 BootFileSystem::find_next_cluster(u32 cluster) {
+    u32 offset = cluster * 4;
+    u32 sector = offset >> 9; // divide by 512
+    u32 entry_offset = offset % 512;
+
+    u8 buffer[512];
+
+    drive->read_sectors(fat_lba + sector, 1, buffer);
+
+    u32 next = *(u32 *)(buffer + entry_offset);
+
+    return (next & 0x0FFFFFFF);
+}
+
+
+void BootFileSystem::scan_fat(void) {
+    cluster_map = new FAT32_cluster[clusters+2];
+    bool *handles = new bool[clusters+2];
+    memset(handles, 0, clusters+2);
+    for (u32 i = 2; i < (clusters + 2); i++) {
+       
+        if (handles[i])
+            continue;
+
+
+        u32 fat_value = find_next_cluster(i);
+        cluster_map[i].fat_value = fat_value;
+        cluster_map[i].next_cluster = nullptr;
+        cluster_map[i].next_cluster_index = 0;
+        cluster_map[i].previous_cluster = nullptr;
+        cluster_map[i].previous_cluster_index = 0;
+
+        if (fat_value == 0 || fat_value == 0x0FFFFFF7 || 
+            (fat_value >= 0x0FFFFFF8 && fat_value <= 0x0FFFFFFF)) 
+                continue;
+        else {
+            u32 former_fat = i;
+            while (fat_value != 0 && fat_value != 0x0FFFFFF7 &&
+            !(fat_value >= 0x0FFFFFF8 && fat_value <= 0x0FFFFFFF)) {
+                cluster_map[former_fat].next_cluster = &cluster_map[fat_value];
+                cluster_map[former_fat].next_cluster_index = fat_value;
+                cluster_map[fat_value].previous_cluster = &cluster_map[former_fat];
+                cluster_map[fat_value].previous_cluster_index = former_fat;
+                former_fat = fat_value;
+                fat_value = find_next_cluster(fat_value);
+                cluster_map[former_fat].fat_value = fat_value;
+                cluster_map[former_fat].next_cluster = nullptr;
+                cluster_map[former_fat].next_cluster_index = 0;
+                handles[former_fat] = true;
+            }
+        }
+
+        handles[i] = true;
+    }
+}
+
 void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size) {
     if (boot_drive == nullptr || lba == 0 || size == 0) {
         printf("BOOT_DRIVE : FAT32: no boot partition found\n");
@@ -81,6 +139,9 @@ void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u
 
     Paths = nullptr;
     Path_count = 0;
+
+    cluster_map = nullptr;
+    clusters = 0;
 
     SizeInBytes = size;
     Partition_lba = lba;
@@ -110,6 +171,8 @@ void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u
     NumOfFATS = br->NumOfFATS;
     SectorsPerCluster = br->SectorsPerCluster;
     RootEntries = br->RootEntries;
+
+    clusters = (br->SectorsPerFAT * 512) >> 2; // divide by 4
 
     u32 fs_info_lba = lba + fs_info_sector;
     memset(sector, 0, 512);
@@ -153,24 +216,13 @@ void BootFileSystem::fs_init(disk_drive *boot_drive, BootPartition *partition, u
     RootCluster = root_cluster;
 
     delete[] sector;
+    scan_fat();
     printf("boot drive 0x%b:         \n", drive->disk_index);
     printf("Filesystem: FAT32, Capacity: %lu MB, Free Space: %lu MB, Used Space: %lu MB\n", (SizeInBytes / 0x100000), (SizeFree / 0x100000), (SizeUsed / 0x100000));
 
 }
 
-u32 BootFileSystem::find_next_cluster(u32 cluster) {
-    u32 offset = cluster * 4;
-    u32 sector = offset >> 9; // divide by 512
-    u32 entry_offset = offset % 512;
 
-    u8 buffer[512];
-
-    drive->read_sectors(fat_lba + sector, 1, buffer);
-
-    u32 next = *(u32 *)(buffer + entry_offset);
-
-    return (next & 0x0FFFFFFF);
-}
 
 
 
@@ -781,6 +833,27 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
     
 }
 
+void BootFileSystem::fat32_unlink(u32 cluster) {
+    u32 offset = cluster * 4;
+    u32 sector = offset >> 9; // divide by 512
+    u32 entry_offset = offset % 512;
+
+    u8 buffer[512];
+
+    drive->read_sectors(fat_lba + sector, 1, buffer);
+
+    u32 old_value = *(u32 *)(buffer + entry_offset);
+
+    u32 new_value = (old_value & 0xF0000000) | 0x0FFFFFFF; // eoi
+    cluster_map[cluster].fat_value = new_value;
+    cluster_map[cluster].next_cluster_index = 0;
+    cluster_map[cluster].next_cluster = nullptr;
+
+    *(u32 *)(buffer + entry_offset) = new_value;
+
+    drive->write_sectors(fat_lba + sector, 1, buffer);
+}
+
 
 void BootFileSystem::fat32_link(u32 current, u32 next) {
     u32 offset = current * 4;
@@ -794,30 +867,22 @@ void BootFileSystem::fat32_link(u32 current, u32 next) {
     u32 old_value = *(u32 *)(buffer + entry_offset);
 
     u32 new_value = (old_value & 0xF0000000) | (next & 0x0FFFFFFF);
+    if (cluster_map[next].previous_cluster != nullptr)
+        fat32_unlink(cluster_map[next].previous_cluster_index);
 
+    cluster_map[next].previous_cluster_index = current;
+    cluster_map[next].previous_cluster = &cluster_map[current];
+
+    cluster_map[current].fat_value = new_value;
+    cluster_map[current].next_cluster_index = next;
+    cluster_map[current].next_cluster = &cluster_map[next];
+    
     *(u32 *)(buffer + entry_offset) = new_value;
 
     drive->write_sectors(fat_lba + sector, 1, buffer);
 } 
 
 
-void BootFileSystem::fat32_unlink(u32 cluster) {
-    u32 offset = cluster * 4;
-    u32 sector = offset >> 9; // divide by 512
-    u32 entry_offset = offset % 512;
-
-    u8 buffer[512];
-
-    drive->read_sectors(fat_lba + sector, 1, buffer);
-
-    u32 old_value = *(u32 *)(buffer + entry_offset);
-
-    u32 new_value = (old_value & 0xF0000000) | 0x0FFFFFFF; // eoi
-
-    *(u32 *)(buffer + entry_offset) = new_value;
-
-    drive->write_sectors(fat_lba + sector, 1, buffer);
-}
 
 
 static inline u64 next_entry_offset(u64 address, u64 size) {
