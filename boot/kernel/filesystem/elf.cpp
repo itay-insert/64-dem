@@ -90,7 +90,7 @@ void load_elf_64(u64 file_handle, BootFileSystem *fat32, void *buff) {
 
     for (u16 i = 0; i < e_phnum; i++) {
         if (segment->p_type == PT_LOAD) {
-            u64 offset = segment->p_vaddr - 0x40000000;
+            u64 offset = segment->p_vaddr - 0x40000028;
             memset(buff+offset, 0, segment->p_memsz);
             fat32->read_file(file_handle, segment->p_offset, (u32)segment->p_filesz, (void *)buff+offset);
         }

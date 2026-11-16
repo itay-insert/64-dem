@@ -8,6 +8,11 @@ global malloc
 global free
 global realloc
 global sleep_ms
+global get_dateAndTime
+global print_mem
+global acpi
+global ls
+global backspace
 
 kprintf:
     xor rax, rax ; kprintf
@@ -41,5 +46,31 @@ realloc:
 
 sleep_ms:
     mov rax, 5
+    syscall
+    ret
+
+get_dateAndTime:
+    mov rax, 6
+    syscall
+    ret
+
+
+print_mem:
+    mov rax, 7
+    syscall
+    ret
+
+acpi:
+    mov rax, 8
+    syscall
+    ret
+
+ls:
+    mov rax, 9
+    syscall
+    ret
+
+backspace:
+    mov rax, 10
     syscall
     ret

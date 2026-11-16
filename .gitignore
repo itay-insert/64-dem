@@ -4,3 +4,4 @@ BOOTX64.asm
 bios-disk.img
 clocscr.sh
 report.txt
+cmd.asm

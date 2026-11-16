@@ -301,6 +301,17 @@ static inline text_data cursor_inc(text_data td) {
     return td;
 }
 
+
+static inline void cursor_dec(void) {
+	cursor.coulmn--;
+	if (cursor.coulmn < 0) {
+        cursor.coulmn = (p_scanln >> 3);
+		cursor.row--;
+    }
+
+}
+
+
 text_data print_unsigned(unsigned int x, text_data td)
 {
     char buffer[10];   // enough for a 32-bit unsigned int
@@ -566,4 +577,14 @@ void kprintf(const char *str) {
     }
 
     present();
+}
+
+
+
+void backspace(void) {
+    draw_cursor(Black);
+    cursor_dec();
+    printf(" ");
+    cursor_dec();
+    draw_cursor(LightGray);
 }

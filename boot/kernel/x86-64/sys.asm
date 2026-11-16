@@ -9,6 +9,11 @@ extern kprintf
 extern read_key
 extern memory_services
 extern realloc
+extern get_dateAndTime
+extern print_physical_memory_stats
+extern acpi_services
+extern ls
+extern backspace
 
 extern clock
 
@@ -80,6 +85,40 @@ jne skip_sleep
 call sleep_ms
 jmp exit
 skip_sleep:
+
+cmp rax, 6 ; get date and time
+jne skip_date
+call get_dateAndTime
+jmp exit
+skip_date:
+
+
+cmp rax, 7 ; print memory status
+jne skip_mem
+call print_physical_memory_stats
+jmp exit
+skip_mem:
+
+cmp rax, 8 ; acpi
+jne skip_acpi
+call acpi_services
+jmp exit
+skip_acpi:
+
+
+cmp rax, 9 ; ls
+jne skip_ls
+call ls
+jmp exit
+skip_ls:
+
+
+cmp rax, 10
+jne skip_backspace  ; backspace
+call backspace
+jmp exit
+skip_backspace:
+
 
 exit:
 

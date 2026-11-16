@@ -39,7 +39,7 @@ u64 current_user_rsp = 0;
 static u64 count_mapping(u64 size, u64 physical_address) {
     u64 count = 0;
     u64 virtual_address = 0x40000000; // user start
-    u64 pages = (size + 511) >> 12;
+    u64 pages = (size + 4095) >> 12;
     Pages = new PAGING_LOOKUP_DESCRIPTOR[pages];
     u64 virtual_end = virtual_address + (pages<<12);
     while (virtual_address < virtual_end) {

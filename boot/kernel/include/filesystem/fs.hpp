@@ -37,6 +37,7 @@ typedef struct {
 
 typedef struct {
     u32 starting_cluster;
+    u32 last_cluster;
     cache_descriptor *cache;
     int cluster_count;
     char *name;
@@ -127,4 +128,5 @@ class BootFileSystem {
         void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
         void write_file(u64 file_handle, u64 offset, u32 size, void *buffer);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
+        void list_path(u32 index);
 };

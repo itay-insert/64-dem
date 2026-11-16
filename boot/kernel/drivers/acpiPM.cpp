@@ -5,6 +5,7 @@
 #include "drivers/display/vga.h"
 #include "drivers/acpiPM.hpp"
 
+extern u64 acpiadd;
 
 
 static inline bool is_s5(const char *name) {
@@ -172,4 +173,16 @@ void AcpiPM::AcpiShutDown() {
         outw(regs.pm1b_control, SLP_TYP(regs.pm1b_type) | SLP_EN);
     }
 
+}
+
+
+extern "C" void acpi_services(bool shutdown) {
+    AcpiPM *acpi = (AcpiPM *)acpiadd;
+    if (shutdown) {
+        acpi->AcpiShutDown();
+        while (1);
+    } else {
+        acpi->AcpiReset();
+        while (1);
+    }
 }

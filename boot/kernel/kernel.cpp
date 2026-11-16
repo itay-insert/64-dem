@@ -60,6 +60,8 @@ extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
 
+BootFileSystem *fat32_fs = nullptr;
+
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
@@ -328,6 +330,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     boot_partition.SetBootDrive(boot_drive);
 
     BootFileSystem fat32;
+    fat32_fs = &fat32;
     fat32.drive = boot_partition.BootDrive;
     u32 lba = boot_partition.DiscoverFileSystem();
 

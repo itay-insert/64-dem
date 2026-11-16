@@ -1,15 +1,15 @@
 ENTRY(_start)
 
 SECTIONS {
-    . = 0x40000000;
+    . = 0x40000028;
 
-    .text ALIGN (4K) : {
+    .text ALIGN (1) : SUBALIGN(1) {
         _start = .;
         *(.text.start)
         *(.text*)
     }
 
-    .rodata ALIGN (4K) : {
+    .rodata ALIGN (1) : SUBALIGN(1) {
         *(.rodata*)
     }
 
@@ -27,11 +27,11 @@ SECTIONS {
         __fini_array_end = .;
     }
 
-    .data ALIGN (4K) : {
+    .data ALIGN (1) : SUBALIGN(1) {
         *(.data*)
     }
 
-    .bss ALIGN (4K) : {
+    .bss ALIGN (1) : SUBALIGN(1) {
         *(COMMON*)
         *(.bss*)
     }

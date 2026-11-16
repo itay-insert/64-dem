@@ -8,6 +8,9 @@
 // then data clusters. This implementation reads and writes 512-byte sectors.
 #define LFN 0x0F
 
+
+extern BootFileSystem *fat32_fs;
+
 // Packed boot records mirror on-disk byte offsets; padding must not be inserted.
 typedef struct {
     u8 Padding0; // the first 3 bytes disassemble to JMP short 3C NOP
@@ -366,6 +369,7 @@ bool BootFileSystem::increase_files(Paths_table *table, char *filename, u32 clus
     table->open_files[table->file_count].cluster_count = 0;
     table->open_files[table->file_count].name = filename;
     table->open_files[table->file_count].starting_cluster = cluster;
+    table->open_files[table->file_count].last_cluster = cluster;
     return true;
 }
 
@@ -459,7 +463,7 @@ static void collect_lfn(const FAT32_LFN *entry, u16 *name) {
 int BootFileSystem::scan_dir(u32 cluster) {
     int count = 0;
 
-    while (cluster != 0x0FFFFFFF) {
+    while (cluster < 0x0FFFFFF8) {
         count++;
         cluster = find_next_cluster(cluster);
     }
@@ -491,7 +495,7 @@ u32 BootFileSystem::return_last_cluster(u32 cluster, int count) {
 Path_ret BootFileSystem::open_path(const char *path) { // Resolve directory components from the root and register a directory cache.
     Path_ret ret = {0}; // Initialize the result with failure status until a cache is registered.
 
-    u32 backup_cluster = 0; // Remember the first cluster of the most recently matched directory.
+    u32 backup_cluster = RootCluster; // Remember the first cluster of the most recently matched directory.
     char path_name[14]; // Temporary component buffer; the copy below currently has no length guard.
     u32 cluster = RootCluster; // Begin traversal at the root directory.
     cluster = load_clusters(cluster, 1, dir_place); // Read one directory cluster; retain the next FAT link as the traversal cursor.
@@ -783,7 +787,8 @@ static inline void remove_file_entry(Paths_table *table, u32 file_index) {
     
     cache_descriptor *filecache = table->open_files[file_index].cache;
     if (filecache != nullptr) {
-        delete[] filecache->cache;
+        if (filecache->cache != nullptr)
+            delete[] filecache->cache;
         delete[] filecache;
     }
 
@@ -819,6 +824,13 @@ void BootFileSystem::close_file(u64 file_handle) {
     if (file_index >= table[path_index].file_count || table[path_index].open_files == nullptr)
         return;
 
+    cache_descriptor *filecache = table->open_files[file_index].cache;
+    if (filecache != nullptr && filecache->cache != nullptr) {
+        write_clusters(table[path_index].open_files[file_index].starting_cluster, table[path_index].open_files[file_index].cluster_count, filecache->cache);
+        if (!update_parent_dir(table[path_index].str, table[path_index].open_files[file_index].name, table[path_index].open_files[file_index].cluster_count * cluster_size)) {
+            printf("FAT32: updating the file pointed by file handle 0x%lx failed\n", file_handle);
+        }
+    }
     remove_file_entry(&table[path_index], file_index);
     
 }
@@ -883,8 +895,8 @@ void BootFileSystem::allocate_clusters(file_cache *file, u32 cluster_count) { //
         u64 size = cluster_count * cluster_size; // Convert the requested cluster count to a buffer size in bytes.
         filecache->cache = new u8[size]; // Allocate the initial data buffer.
         if (find_next_cluster(file->starting_cluster) == 0x0FFFFFFF) // Check whether the cursor cluster points to the exact EOC marker used here.
-            clusters_alloc(cluster_count, file->starting_cluster); // Append cluster_count disk clusters after that cursor when the condition holds.
-        file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, filecache->cache); // Load the requested chain segment and advance starting_cluster to the FAT entry after it.
+            clusters_alloc(cluster_count, file->last_cluster); // Append cluster_count disk clusters after that cursor when the condition holds.
+        file->last_cluster = load_clusters(file->starting_cluster, cluster_count, filecache->cache); // Load the requested chain segment and advance starting_cluster to the FAT entry after it.
         file->cache = filecache; // Attach the initialized descriptor to the file record.
         return; // Finish the initial-cache branch.
     } // End initial-cache setup.
@@ -901,9 +913,9 @@ void BootFileSystem::allocate_clusters(file_cache *file, u32 cluster_count) { //
     if (filecache->cache == nullptr) // Check whether buffer resizing failed.
         return; // Stop on failure; the counts above have already been increased.
      
-    if (find_next_cluster(file->starting_cluster) == 0x0FFFFFFF) // Check whether the next-read cursor points to a cluster whose FAT entry is exactly EOC.
-        clusters_alloc(cluster_count, file->starting_cluster); // Extend the disk chain from that cursor by the requested number of clusters.
-    file->starting_cluster = load_clusters(file->starting_cluster, cluster_count, (void *)(filecache->cache + cluster_off)); // Load additional clusters into the appended buffer region and advance the next-read cursor.
+    if (find_next_cluster(file->last_cluster) == 0x0FFFFFFF) // Check whether the next-read cursor points to a cluster whose FAT entry is exactly EOC.
+        clusters_alloc(cluster_count, file->last_cluster); // Extend the disk chain from that cursor by the requested number of clusters.
+    file->last_cluster = load_clusters(file->last_cluster, cluster_count, (void *)(filecache->cache + cluster_off)); // Load additional clusters into the appended buffer region and advance the next-read cursor.
 } // Finish growing and filling the file cache.
 
 
@@ -1317,4 +1329,153 @@ bool BootFileSystem::fat32_make_entry(u32 path_index, const char *entry_name) {
     delete[] par; // Release the temporary parent string after a successful update.
     
     return true; // Report completion; the new directory cache is not closed here.
+}
+
+
+
+char *convert_str_to_fat32(char *str) {
+    int size = str_size(str);
+    if (size > 13)
+        return nullptr;
+
+    int dest_size = 11;
+    if (size > 11)
+        dest_size = 13;
+
+    char *dst = new char[dest_size+1];
+    memset(dst, ' ', dest_size);
+    dst[dest_size] = '\0';
+
+    int count = 0;
+    while (str[count] != '\0') {
+        if (count > 0 && str[count] == '.') {
+            memcpy(dst, str, count);
+            memcpy(dst + (dest_size-3), &str[count+1], 3);
+            return dst;        
+        }
+        count++;
+    }
+
+    memcpy(dst, str, count);
+    return dst;
+}
+
+
+
+char *convert_fat32_to_str(char *fat32) {
+    int size = str_size(fat32);
+    if (size > 13)
+        return nullptr;
+
+    bool file = false;
+    bool not_file = false;
+    int count = 0;
+
+    while (fat32[count] != '\0') {
+        if (fat32[count] == ' ' && count > 0 && !not_file) {
+            int secc = 0;
+            int off = count;
+            while (fat32[off] == ' ' && fat32[off] != '\0')
+                off++;
+
+            while (fat32[off] != '\0') {
+                off++;
+                secc++;
+            }
+
+            if (secc == 3) {
+                file = true;
+                break;
+            } else
+                not_file = true;
+        }
+
+        count++;
+    }
+
+
+    char *str = nullptr;
+
+    if (file) {
+        str = new char[count+5];
+        memcpy(str, fat32, count);
+        str[count] = '.';
+        str[count+1] = fat32[size-3];
+        str[count+2] = fat32[size-2];
+        str[count+3] = fat32[size-1];
+        str[count+4] = '\0';
+        return str;
+    }
+
+
+    str = new char[count+2];
+    memcpy(str, fat32, count);
+    str[count] = '/';
+    str[count+1] = '\0';
+    return str;
+}
+
+
+
+void BootFileSystem::list_path(u32 index) {
+    if (index >= Path_count)
+        return;
+
+    u8 *cache = (u8 *)Paths[index];
+
+    u64 size = sizeof(FAT32_DIR);
+    while (*cache != 0x00) {
+        if (*cache == 0xE5) {
+            cache += size;
+            continue;
+        }
+
+        FAT32_DIR *dir = (FAT32_DIR *)((u64)cache);
+        char *name = nullptr;
+
+
+        if (dir->attributes == LFN) {
+            size += sizeof(FAT32_LFN);
+            FAT32_LFN *lfn = (FAT32_LFN *)((u64)cache + sizeof(FAT32_DIR));
+            u16 *utf_name = new u16[13];
+            collect_lfn(lfn, utf_name);
+            name = new char[14];
+            utf16le_to_ascii(utf_name, 13, name, 14);
+            delete[] utf_name;
+            size = sizeof(FAT32_DIR);
+        } else {
+            name = new char[12];
+            for (u8 i = 0; i < 11; i++) 
+                name[i] = dir->filename[i];
+            name[11] = '\0';
+        }
+
+
+        cache += size;
+
+        char *new_name = convert_fat32_to_str(name);
+        printf("%s  ", new_name);
+
+        delete[] new_name;
+        delete[] name;
+    }
+
+    return; // for failure
+}
+
+
+
+extern "C" void ls(char *path) {
+    if (fat32_fs == nullptr)
+        return;
+
+    Path_ret ret = fat32_fs->open_path(path);
+    if (!ret.status) {
+        printf("FAT32: failed to open path %s\n", path);
+        return;
+    }
+
+    fat32_fs->list_path(ret.index);
+
+    fat32_fs->close_path(ret.index);
 }
