@@ -101,14 +101,15 @@ class BootFileSystem {
         int scan_dir(u32 cluster);
         u32 return_last_cluster(u32 cluster, int count);
         Search_ret search_path(char *path);
-        void allocate_clusters(file_cache *file, u32 cluster_count);
+        void allocate_clusters(file_cache *file, u32 cluster_count, bool alloc);
         void fat32_unlink(u32 cluster);
         void fat32_link(u32 current, u32 next);
         void fat32_free(u32 cluster, bool dont);
+        void mark_as_eoc(u32 cluster);
         void clusters_alloc(u32 count, u32 cluster_link);
         u32 find_free_cluster(void);
         void clusters_dealloc(u32 count, u32 cluster_link);
-        void set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
+        bool set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
         bool update_parent_dir(const char *path_name, const char *dir, u32 new_size);
 
     public:
@@ -130,3 +131,8 @@ class BootFileSystem {
         bool fat32_make_entry(u32 path_index, const char *entry_name);
         void list_path(u32 index);
 };
+
+
+char *convert_str_to_fat32(const char *str);
+char *convert_fat32_to_str(const char *fat32);
+char *convert_fat32_to_str(char *fat32);
