@@ -153,7 +153,19 @@ int fs_open(char *path, int flags, unsigned mode) {
 
     
     u32 path_index = (u32)(pid->file_handle >> 32);
+    char *path_str = fat32_fs->return_str(path_index);
 
-    char *new_path = fs_join_path()
-    // TODO: make return_str function in fat32
+    char *new_path = fs_join_path(path_str, parent);
+
+    u64 file_handle = fat32_fs->open_file_by_path(new_path, filename);
+    if (increase_file_ids(pid, file_handle, flags))
+        return (int)(pid->file_count-1);
+    else
+        return -1;
+}
+
+
+
+i64 fs_read(int fd, void *buffer, u64 count) {
+    
 }

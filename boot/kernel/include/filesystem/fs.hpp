@@ -130,6 +130,7 @@ class BootFileSystem {
         void write_file(u64 file_handle, u64 offset, u32 size, void *buffer);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
         void list_path(u32 index);
+        char *return_str(u32 path_index);
 };
 
 

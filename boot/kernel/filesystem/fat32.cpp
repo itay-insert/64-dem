@@ -1553,3 +1553,9 @@ extern "C" void ls(char *path) {
 
     fat32_fs->close_path(ret.index);
 }
+
+
+char *BootFileSystem::return_str(u32 path_index) {
+    char *str = table[path_index].str;
+    return str;
+}
