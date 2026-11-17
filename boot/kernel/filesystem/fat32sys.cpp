@@ -155,4 +155,5 @@ int fs_open(char *path, int flags, unsigned mode) {
     u32 path_index = (u32)(pid->file_handle >> 32);
 
     char *new_path = fs_join_path()
+    // TODO: make return_str function in fat32
 }
