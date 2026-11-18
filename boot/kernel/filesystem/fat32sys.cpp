@@ -8,7 +8,10 @@
 #include "x86-64/scheduler.hpp"
 
 extern Proccess *pid;
+extern int current_proccess;
 extern BootFileSystem *fat32_fs;
+
+extern void StartProccess(u64 file_handle, BootFileSystem *fat32);
 
 char *fs_join_path(const char *parent, const char *son) {
     if (!parent || !son || parent[0] != '/' || son[0] == '\0')
@@ -112,6 +115,7 @@ bool increase_file_ids(Proccess *proc, u64 file_handle, int flags) {
         proc->files->file_offset = 0;
         proc->files->pid = proc->PID;
         proc->files->flags = flags;
+        proc->files->file_size = fat32_fs->get_filesize(file_handle);
         proc->file_count = 1;
         return true;
     }
@@ -126,13 +130,33 @@ bool increase_file_ids(Proccess *proc, u64 file_handle, int flags) {
     proc->files[proc->file_count].file_offset = 0;
     proc->files[proc->file_count].flags = flags;
     proc->files[proc->file_count].pid = proc->PID;
+    proc->files[proc->file_count].file_size = fat32_fs->get_filesize(file_handle);
     proc->file_count++;
     return true;
 }
 
+void destroy_id(Proccess *proc, int fd) {
+    if (proc->files == nullptr || proc->file_count == 0)
+        return;
+
+    proc->files[fd] = {0};
+    for (int i = fd; i < proc->file_count; i++) 
+        proc->files[i] = proc->files[i+1];
+
+    u64 old_size = proc->file_count * sizeof(file_id);
+    u64 new_size = old_size - sizeof(file_id);
+
+    if (new_size == 0) 
+        kfree(proc->files);
+    else 
+        proc->files = (file_id *)krealloc(proc->files, old_size, new_size);
+
+    proc->file_count--;
+}
 
 
-int fs_open(char *path, int flags, unsigned mode) {
+
+extern "C" int fs_open(char *path, int flags, unsigned mode) {
     char *filename = new char[13];
     char *parent = new char[13];
 
@@ -143,29 +167,126 @@ int fs_open(char *path, int flags, unsigned mode) {
     }
 
     if (parent[1] == '\0') {
-        u32 path_index = (u32)(pid->file_handle >> 32);
+        u32 path_index = (u32)(pid[current_proccess].file_handle >> 32);
         u64 file_handle = fat32_fs->open_file_by_index(path_index, filename);
-`       if (increase_file_ids(pid, file_handle, flags)) 
-            return (int)(pid->file_count-1);
+        if (increase_file_ids(&pid[current_proccess], file_handle, flags)) 
+            return (int)(pid[current_proccess].file_count-1);
         else 
             return -1;
     }
 
     
-    u32 path_index = (u32)(pid->file_handle >> 32);
+    u32 path_index = (u32)(pid[current_proccess].file_handle >> 32);
     char *path_str = fat32_fs->return_str(path_index);
 
     char *new_path = fs_join_path(path_str, parent);
 
     u64 file_handle = fat32_fs->open_file_by_path(new_path, filename);
-    if (increase_file_ids(pid, file_handle, flags))
-        return (int)(pid->file_count-1);
+    if (increase_file_ids(&pid[current_proccess], file_handle, flags))
+        return (int)(pid[current_proccess].file_count-1);
     else
         return -1;
 }
 
 
 
-i64 fs_read(int fd, void *buffer, u64 count) {
+extern "C" i64 fs_read(int fd, void *buffer, u64 count) {
+    file_id *id = &pid[current_proccess].files[fd];
+
+    if (count == 0)
+        return (i64)count;
+
+    fat32_fs->read_file(id->file_handle, id->file_offset, (u32)count, buffer);
+
+    return (i64)count;
+}
+
+
+extern "C" i64 fs_write(int fd, const void *buffer, u64 count) {
+    file_id *id = &pid[current_proccess].files[fd];
+
+    if (count == 0)
+        return (i64)count;
+
+    fat32_fs->write_file(id->file_handle, id->file_offset, (u32)count, buffer);
+
+    return (i64)count;
+}
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+
+extern "C" i64 fs_seek(int fd, i64 offset, int whence) {
+    file_id *id = &pid[current_proccess].files[fd];
+
+    const char *str = "FS_SEEK: file_handle: 0x%lx offset too big!\n";
+
+    switch (whence) {
+        case SEEK_SET: {
+            if (offset >= id->file_size) {
+                printf(str, id->file_handle);
+                return (i64)id->file_offset;
+            }
+
+            id->file_offset = (u64)offset;
+            return (i64)id->file_offset;
+        }
+
+
+        case SEEK_CUR: {
+            if ((id->file_offset + offset) >= id->file_size) {
+                printf(str, id->file_handle);
+                return (i64)id->file_offset;
+            }
+
+            id->file_offset += (u64)offset;
+            return (i64)id->file_offset;
+        }
+
+
+        case SEEK_END: {
+            if ((id->file_size - (u64)(-offset)) >= id->file_size) {
+                printf(str, id->file_handle);
+                return (i64)id->file_offset;
+            }
+
+            id->file_offset = (id->file_size - (u64)(-offset));
+            return (i64)id->file_offset;
+        }
+
+
+        default: {
+            printf("FS_SEEK: unknown whence\n");
+            return (i64)id->file_offset;
+        }
+    }
     
 }
+
+
+
+
+
+extern "C" int fs_close(int fd) {
+    file_id *id = &pid[current_proccess].files[fd];
+
+
+    fat32_fs->close_file(id->file_handle);
+    destroy_id(&pid[current_proccess], fd);
+    return 0;
+}
+
+extern u64 former_user_rsp;
+extern u64 current_user_rsp;
+
+extern "C" void fs_start(int fd) {
+    file_id *id = &pid[current_proccess].files[fd];
+
+    former_user_rsp = current_user_rsp;
+
+    StartProccess(id->file_handle, fat32_fs);
+}
+
+

@@ -2,7 +2,7 @@
 #define SYS_H
 #include "uint_definitions.h"
 #include <stdbool.h>
-
+#include "fs_flags.h"
 
 typedef struct {
     u8 year, month, day;
@@ -20,6 +20,13 @@ void print_mem(void);
 void acpi(bool shutdown);
 void ls(char *path);
 void backspace(void);
+
+int fs_open(char *path, int flags, unsigned mode);
+i64 fs_read(int fd, void *buffer, u64 count);
+i64 fs_write(int fd, const void *buffer, u64 count);
+i64 fs_seek(int fd, i64 offset, int whence);
+int fs_close(int fd);
+void fs_start(int fd);
 
 
 #endif

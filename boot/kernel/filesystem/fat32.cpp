@@ -264,10 +264,6 @@ u32 BootFileSystem::load_clusters(u32 cluster, u32 count, void *buffer) {
        drive->read_sectors(lba, sector_count, cache);
        cache += cluster_size;
        cluster = find_next_cluster(cluster);
-       if (cluster >= 0x0FFFFFF8 && cluster <= 0x0FFFFFFF) {
-            delete[] cache_org;
-            return cluster;
-       }
     }
 
 
@@ -382,6 +378,7 @@ bool BootFileSystem::increase_files(Paths_table *table, char *filename, u32 clus
     table->open_files[table->file_count].name = filename;
     table->open_files[table->file_count].starting_cluster = cluster;
     table->open_files[table->file_count].last_cluster = cluster;
+    table->file_count++;
     return true;
 }
 
@@ -968,7 +965,7 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
     
 }
 
-void BootFileSystem::write_file(u64 file_handle, u64 offset, u32 size, void *buffer) {
+void BootFileSystem::write_file(u64 file_handle, u64 offset, u32 size, const void *buffer) {
     u32 path_index = (u32)(file_handle >> 32);
     u32 file_index = (u32)file_handle;
 
@@ -1558,4 +1555,21 @@ extern "C" void ls(char *path) {
 char *BootFileSystem::return_str(u32 path_index) {
     char *str = table[path_index].str;
     return str;
+}
+
+
+
+u64 BootFileSystem::get_filesize(u64 file_handle) {
+    u32 path_index = (u32)(file_handle >> 32);
+    u32 file_index = (u32)(file_handle);
+
+    if (path_index >= Path_count)
+        return 0;  // 0 size means failure here
+
+    if (file_index >= table[path_index].file_count)
+        return 0;
+
+    int cluster_count = table[path_index].open_files[file_index].cluster_count;
+
+    return (u64)(cluster_count * cluster_size);
 }

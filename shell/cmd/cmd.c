@@ -14,7 +14,9 @@ int main() {
         "mem",
         "shutdown",
         "reboot",
-        "ls"
+        "ls",
+        "start",
+        "help"
     };
 
 
@@ -87,6 +89,19 @@ int main() {
                         goto exit;
                     }
                     
+                    case 7 : {
+                        int fd = fs_open(buffer+size+1, RD_ONLY, 0);
+                        fs_start(fd);
+                        fs_close(fd);
+                        goto exit;
+                    }
+
+                    case 8 : {
+                        for (int j = 0; j < count; j++) {
+                            printf("%s \n", commands[j]);
+                        }
+                        goto exit;
+                    }
         
                 }
             } else if (i == (count-1)) {

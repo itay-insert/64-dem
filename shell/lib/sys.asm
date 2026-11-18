@@ -13,6 +13,12 @@ global print_mem
 global acpi
 global ls
 global backspace
+global fs_open
+global fs_read
+global fs_write
+global fs_seek
+global fs_close
+global fs_start
 
 kprintf:
     xor rax, rax ; kprintf
@@ -72,5 +78,35 @@ ls:
 
 backspace:
     mov rax, 10
+    syscall
+    ret
+
+fs_open:
+    mov rax, 11
+    syscall
+    ret
+
+fs_read:
+    mov rax, 12
+    syscall
+    ret
+
+fs_write:
+    mov rax, 13
+    syscall
+    ret
+
+fs_seek:
+    mov rax, 14
+    syscall
+    ret
+
+fs_close:
+    mov rax, 15
+    syscall
+    ret
+
+fs_start:
+    mov rax, 16
     syscall
     ret

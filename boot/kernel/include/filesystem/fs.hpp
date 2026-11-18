@@ -127,13 +127,13 @@ class BootFileSystem {
         void close_file(u64 file_handle);
         void close_path(u32 path_index);
         void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
-        void write_file(u64 file_handle, u64 offset, u32 size, void *buffer);
+        void write_file(u64 file_handle, u64 offset, u32 size, const void *buffer);
         bool fat32_make_entry(u32 path_index, const char *entry_name);
         void list_path(u32 index);
         char *return_str(u32 path_index);
+        u64 get_filesize(u64 file_handle);
 };
 
 
 char *convert_str_to_fat32(const char *str);
 char *convert_fat32_to_str(const char *fat32);
-char *convert_fat32_to_str(char *fat32);
