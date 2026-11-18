@@ -352,6 +352,7 @@ void NVMe_drive::init() {
                   namespaces[namespace_index].ctrl &&
                   namespaces[namespace_index].ctrl->ready;
     sector_size = initialized ? namespaces[namespace_index].block_size : 0;
+    block_count = initialized ? namespaces[namespace_index].blocks : 0;
 }
 
 bool NVMe_drive::try_read_sectors(u32 lba, u32 sector_count, void *buffer) {

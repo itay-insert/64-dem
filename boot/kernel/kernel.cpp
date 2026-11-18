@@ -55,6 +55,7 @@ u64 acpiadd = 0;
 u64 usb_addr = 0;
 
 u64 kernel_stack = 0;
+u64 storage_addr = 0;
 
 extern volatile u64 keyboard_irq_count;
 
@@ -309,6 +310,7 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     }
 
     storage disks;
+    storage_addr = (u64)&disks;
     printf("Storage: %u drives registered\n", (u32)disks.drive_count);
 #ifdef NVME_QEMU_PROBE
     nvme_qemu_probe(disks);

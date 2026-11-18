@@ -108,6 +108,7 @@ void ATA_drive::init() {
             return;
         } else {
             initialized = true;
+            block_count = drive.block_count;
         }
     }
 

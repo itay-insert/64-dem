@@ -5,6 +5,53 @@
 #include "stdio.h"
 
 
+
+const char *digits = "0123456789";
+
+static inline unsigned int asscii_to_digit(char ch) {
+    for (int i = 0; i < 10; i++) {
+        if (ch == digits[i])
+            return i;
+    }
+
+    return 0xFFFFFFFF; // for failure
+}
+
+static inline unsigned int make_hz(char *str, unsigned int *hz) {
+    unsigned int count = 0;
+    *hz = 0;
+    while (*str != ' ' || *str != '\0') {
+        unsigned int result = asscii_to_digit(*str);
+        if (result == 0xFFFFFFFF)
+            return count;
+        *hz = (*hz * 10) + result;
+        str++;
+        count++;
+    }
+
+    return count;
+}
+
+
+static inline void make_ms(char *str, u64 *ms) {
+    *ms = 0;
+    while (*str != ' ' || *str != '\0') {
+        unsigned int result = asscii_to_digit(*str);
+        if (result == 0xFFFFFFFF)
+            return;
+        *ms = (*ms * 10) + result;
+        str++;
+    }
+
+}
+
+void take_values(char *str, unsigned int *hz, u64 *ms) {
+    unsigned int count = make_hz(str, hz);
+    str += (count+1);
+    make_ms(str, ms);
+}
+
+
 int main() {
 
     const char *commands[] = {
@@ -16,7 +63,9 @@ int main() {
         "reboot",
         "ls",
         "start",
-        "help"
+        "help",
+        "disksts",
+        "beep"
     };
 
 
@@ -100,6 +149,19 @@ int main() {
                         for (int j = 0; j < count; j++) {
                             printf("%s \n", commands[j]);
                         }
+                        goto exit;
+                    }
+
+                    case 9 : {
+                        print_drives();
+                        goto exit;
+                    }
+
+                    case 10 : {
+                        unsigned int hz = 0;
+                        u64 ms = 0;
+                        take_values(buffer+size+1, &hz, &ms);
+                        beep(hz, ms);
                         goto exit;
                     }
         

@@ -1568,6 +1568,7 @@ void SATA_drive::init() {
     memcpy(vendor, "SATA", sizeof("SATA"));
     initialized = drive_port->initialized;
     sector_size = drive_port->sector_size;
+    block_count = drive_port->capacity;
     current_port++;
 }
 

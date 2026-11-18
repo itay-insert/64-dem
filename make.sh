@@ -48,6 +48,8 @@ gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-z
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/handlers.c -o handlers.o
 gcc -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone -c kernel/x86-64/apic.c -o apic.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
+    -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/spkr.cpp -o spkr.o
+g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/usb/xhci.cpp -o xhci.o
 g++ -O2 -march=x86-64 -Ikernel/include -fpie -ffreestanding -nostdlib -mno-red-zone \
     -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -c kernel/drivers/usb/uhci.cpp -o uhci.o

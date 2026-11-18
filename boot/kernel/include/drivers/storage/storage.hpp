@@ -8,6 +8,7 @@ class disk_drive {
         u8 disk_type;
         u8 disk_index;
         u32 sector_size; // now disk_drive contains sector_size
+        u64 block_count;
         bool initialized;
         virtual void read_sectors(u32 lba, u32 sector_count, void *buffer) = 0;
         virtual void write_sectors(u32 lba, u32 sector_count, void *buffer) = 0;
@@ -26,5 +27,6 @@ class storage {
         u8 drive_count;
         u64 drives_size;
         disk_drive *find_boot_drive();
+        void print_drives();
         storage();
 };

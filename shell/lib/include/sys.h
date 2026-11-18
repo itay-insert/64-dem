@@ -27,6 +27,8 @@ i64 fs_write(int fd, const void *buffer, u64 count);
 i64 fs_seek(int fd, i64 offset, int whence);
 int fs_close(int fd);
 void fs_start(int fd);
+void print_drives(void);
+void beep(unsigned int hz, u64 ms);
 
 
 #endif

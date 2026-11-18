@@ -19,6 +19,8 @@ global fs_write
 global fs_seek
 global fs_close
 global fs_start
+global print_drives
+global beep
 
 kprintf:
     xor rax, rax ; kprintf
@@ -108,5 +110,15 @@ fs_close:
 
 fs_start:
     mov rax, 16
+    syscall
+    ret
+
+print_drives:
+    mov rax, 17
+    syscall
+    ret
+
+beep:
+    mov rax, 18
     syscall
     ret

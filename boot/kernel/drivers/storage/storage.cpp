@@ -1,4 +1,5 @@
 #include "const_new.hpp"
+#include "drivers/display/vga.h"
 #include "drivers/storage/storage.hpp"
 #include "drivers/storage/ide/ide.hpp"
 #include "x86-64/memory/kmalloc.h"
@@ -17,6 +18,8 @@ extern u16 usb_drive_count;
 extern void ums_discover();
 extern void free_drives();
 extern u64 timeradd;
+
+extern u64 storage_addr;
 
 bool storage::increase_drives(u64 ClassSize) {
     if (!ClassSize || ClassSize > ~0ull - drives_size)
@@ -139,4 +142,32 @@ storage::storage() {
             drive_count++;
         }
     }
+}
+
+
+
+
+void storage::print_drives() {
+    printf("drive       vendor      status      sector_size      block_count\n");
+    printf("---------------------------------------------------------------\n");
+    for (u64 i = 0; i < drive_count; i++) {
+       disk_drive *drive = (disk_drive *)((u8 *)drives + offsets[i]);
+       printf("0x%b     %s      ", drive->disk_index, drive->vendor);
+       if (drive->initialized) {
+            Set_GlobalTextColor(Green);
+            printf("OK");
+       } else {
+            Set_GlobalTextColor(Red);
+            printf("ERR");
+       }
+       Set_GlobalTextColor(LightGray);
+       printf("     %u      %lu\n", drive->sector_size, drive->block_count);
+    }
+}
+
+
+
+extern "C" void print_drives() {
+    storage *disks = (storage *)storage_addr;
+    disks->print_drives();
 }

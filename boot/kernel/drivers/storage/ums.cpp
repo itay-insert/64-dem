@@ -369,6 +369,7 @@ void UMS_drive::init() {
     memcpy(vendor, "UMS ", sizeof("UMS "));
     initialized = ums_init(drive);
     sector_size = drive->block_size;
+    block_count = drive->block_count;
     if (!initialized) {
         printf("UMS: failed to initialize drive 0x%w\n", current_drive);
     }

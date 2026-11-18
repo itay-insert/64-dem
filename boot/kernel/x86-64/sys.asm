@@ -23,6 +23,9 @@ extern fs_close
 extern fs_start
 extern former_user_rsp
 extern print_proccess_mem
+extern print_drives
+extern beep
+
 
 extern sys_exit
 
@@ -195,31 +198,31 @@ jmp exit
 skip_backspace:
 
 cmp rax, 11
-jne skip_fs_open
+jne skip_fs_open ; sys_fs_open()
 call fs_open
 jmp exit
 skip_fs_open:
 
 cmp rax, 12
-jne skip_fs_read
+jne skip_fs_read ; sys fs_read()
 call fs_read
 jmp exit
 skip_fs_read:
 
 cmp rax, 13
-jne skip_fs_write
+jne skip_fs_write ; sys fs_write()
 call fs_write
 jmp exit
 skip_fs_write:
 
 cmp rax, 14
-jne skip_fs_seek
+jne skip_fs_seek ; sys fs_seek()
 call fs_seek
 jmp exit
 skip_fs_seek:
 
 cmp rax, 15
-jne skip_fs_close
+jne skip_fs_close ; sys fs_close()
 call fs_close
 jmp exit
 skip_fs_close:
@@ -227,9 +230,23 @@ skip_fs_close:
 
 cmp rax, 16
 jne skip_fs_start
-jmp _start_syscall
+jmp _start_syscall  ; sys fs_start()
 jmp exit
 skip_fs_start:
+
+
+cmp rax, 17
+jne skip_print_drives ; sys print_drives()
+call print_drives
+jmp exit
+skip_print_drives:
+
+
+cmp rax, 18
+jne skip_beep   ; sys_beep
+call beep
+jmp exit
+skip_beep:
 
 
 exit:
