@@ -48,6 +48,18 @@ void cursor_Setpos(int coulmn, int row);
 u8 str_size(const char *str);
 void kprintf(const char *str);
 
+extern const char *digits;
+
+
+static inline unsigned int ascii_to_digit(char ch) {
+    for (int i = 0; i < 10; i++) {
+        if (ch == digits[i])
+            return i;
+    }
+
+    return 0xFFFFFFFF; // for failure
+}
+
 KERNEL_EXTERN_C_END
 
 #endif

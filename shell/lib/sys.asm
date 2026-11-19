@@ -23,6 +23,7 @@ global print_drives
 global beep
 global set_begin
 global read_freq
+global stdout_write
 
 kprintf:
     xor rax, rax ; kprintf
@@ -132,5 +133,10 @@ set_begin:
 
 read_freq:
     mov rax, 20
+    syscall
+    ret
+
+stdout_write:
+    mov rax, 21
     syscall
     ret

@@ -27,6 +27,7 @@ extern print_drives
 extern beep
 extern set_begin
 extern read_freq
+extern write
 
 extern sys_exit
 
@@ -262,6 +263,13 @@ jne skip_readfreq ; sys read_freq
 call read_freq
 jmp exit
 skip_readfreq:
+
+
+cmp rax, 21
+jne skip_write
+call write
+jmp exit
+skip_write:
 
 exit:
 

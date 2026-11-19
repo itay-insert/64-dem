@@ -63,6 +63,11 @@ void qemu_debug_hex_u64(u64 value) {
 #define Forwards 0
 #define Backwards 1
 
+
+#define BOOT 0
+#define FB 1
+#define STDOUT 2
+
 u32 vga16_color[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 
     0xaa0000, 0xaa00aa, 0xaa5500, 0xaaaaaa,
@@ -85,10 +90,14 @@ int p_scanln = 0;
 int p_format = RGB;
 int size = 0;
 
+int mode = BOOT;
+
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
     fb_phys = fb_base;
     size = p_scan * vres;
     fb_addr = (u64)kmalloc(size<<2);
+
+    mode = BOOT;
 
     coulmns = (hres + 7) >> 3;
     rows = (vres + 15) >> 4;
@@ -592,3 +601,13 @@ void backspace(void) {
 void set_begin(void) {
     cursor.coulmn = 0;
 }
+
+
+void set_start(void) {
+    cursor.row = 0;
+    cursor.coulmn = 0;
+}
+
+
+const char *digits = "0123456789";
+

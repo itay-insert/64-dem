@@ -4,6 +4,8 @@
 #include "x86-64/apic.h"
 #include "x86-64/lowlevel.h"
 
+extern void set_start(void);
+
 u64 former_ss = 0;
 u64 former_cs = 0;
 u64 former_rflags = 0;
@@ -50,6 +52,20 @@ volatile u64 cursor_ticks = 0;
 
 bool blink = false;
 
+char stdout[4096] = {0};
+int stdout_pc = 0;
+int stdout_wc = 0;
+
+
+static inline int stdout_parse(int index) {
+    index = (index + 1) % 256;
+    if (stdout[index] == 'H') {
+        set_start();
+        index = (index + 1) % 256;
+        return index;
+    } 
+}
+
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
     cursor_ticks++;
@@ -67,7 +83,14 @@ void timer_handler(u64 cs, u64 rip) {
 
     usb_background_tick(cs, rip);
 
-
+    while (stdout_pc != stdout_wc) {
+        if (stdout[stdout_pc] == '\x1b') {
+            stdout_pc = stdout_parse((stdout_pc+1) % 256);
+        } else {
+            printf("%c", stdout[stdout_pc]);
+            stdout_pc = (stdout_pc + 1) % 256;
+        }
+    }
 
 	lapic_write(0xB0, 0);
 }
@@ -75,4 +98,14 @@ void timer_handler(u64 cs, u64 rip) {
 
 u64 get_ticks(void) {
 	return timer_ticks;
+}
+
+
+void write(char *buf, int len) {
+    for (int i = 0; i < len; i++) {
+        stdout[(stdout_wc + i) % 4096] = buf[i];
+    }
+
+    stdout_wc = (stdout_wc + len) % 4096;
+
 }

@@ -115,4 +115,9 @@ static inline int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb
     return count;
 }
 
+
+static inline void mch_write(unsigned char *s, int len) {
+    stdout_write(s, len);
+}
+
 #endif
