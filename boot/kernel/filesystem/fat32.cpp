@@ -350,38 +350,25 @@ Path_ret BootFileSystem::increase_paths(u64 address, char *path, int cluster_cou
 
 
 
-// Register a file under its cached parent directory. File contents are loaded
-// lazily by read_file; here only the name and first disk cluster are recorded.
-bool BootFileSystem::increase_files(Paths_table *table, char *filename, u32 cluster) {
+// Register the file and retain its directory-entry offset for writeback.
+bool BootFileSystem::increase_files(Paths_table *table, char *filename,
+                                    const FAT32_DIR &entry, u64 directory_offset) {
     if (table == nullptr || filename == nullptr)
         return false;
 
-    if (table->open_files == nullptr || table->file_count == 0) {
-        table->open_files = new file_cache[1];
-        table->open_files->cluster_count = 0;
-        table->open_files->cache = nullptr;
-        table->open_files->starting_cluster = cluster;
-        table->open_files->last_cluster = cluster;
-        table->open_files->name = filename;
-        table->file_count = 1;
-        return true;
-    }
-
-    u64 files_size = table->file_count * sizeof(file_cache);
-    u64 new_size = files_size + sizeof(file_cache);
-    table->open_files = (file_cache *)krealloc(table->open_files, files_size, new_size);
-    if (table->open_files == nullptr)
+    u64 old_size = table->file_count * sizeof(file_cache);
+    file_cache *files = table->file_count == 0
+        ? new file_cache[1]
+        : (file_cache *)krealloc(table->open_files, old_size, old_size + sizeof(file_cache));
+    if (files == nullptr)
         return false;
 
-    table->open_files[table->file_count].cache = nullptr;
-    table->open_files[table->file_count].cluster_count = 0;
-    table->open_files[table->file_count].name = filename;
-    table->open_files[table->file_count].starting_cluster = cluster;
-    table->open_files[table->file_count].last_cluster = cluster;
-    table->file_count++;
+    u32 cluster = ((u32)entry.cluster_high << 16) | entry.cluster_low;
+    files[table->file_count++] = {cluster, cluster, nullptr, 0, filename,
+                                  directory_offset, entry.file_size, false};
+    table->open_files = files;
     return true;
 }
-
 
 
 // Cache sizes are expressed in clusters; krealloc receives byte counts.
@@ -502,6 +489,7 @@ u32 BootFileSystem::return_last_cluster(u32 cluster, int count) {
 // Resolve slash-separated components from the root using the scratch buffer.
 // Once resolved, cache the complete target directory chain and register its index.
 Path_ret BootFileSystem::open_path(const char *path) { // Resolve directory components from the root and register a directory cache.
+    const char *original_path = path;
     Path_ret ret = {0}; // Initialize the result with failure status until a cache is registered.
 
     u32 backup_cluster = RootCluster; // Remember the first cluster of the most recently matched directory.
@@ -609,7 +597,7 @@ Path_ret BootFileSystem::open_path(const char *path) { // Resolve directory comp
     u8 *path_cache = new u8[size]; // Allocate a persistent buffer separate from the traversal scratch buffer.
     cluster = backup_cluster; // Restore the target directory's starting cluster.
     load_clusters(cluster, count, path_cache); // Load the entire target directory chain into the persistent cache.
-    ret = increase_paths((u64)path_cache, (char *)path, count, backup_cluster); // Register the cache; path now points into the consumed input, not its original start.
+    ret = increase_paths((u64)path_cache, (char *)original_path, count, backup_cluster);
     if (!ret.status) // Check whether registering the directory cache failed.
         delete[] path_cache; // Release the unregistered cache on failure.
     return ret; // Return the current status and registered index, if available.
@@ -702,9 +690,8 @@ u64 BootFileSystem::open_file_by_path(const char *path, const char *filename) {
         if (memcmp(file, name, cmp_count) == 0) {
             delete[] name;
             delete[] file;
-            u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
             Paths_table *ptr = &table[ret.index];
-            if (increase_files(ptr, (char *)filename, cluster)) {
+            if (increase_files(ptr, (char *)filename, *dir, (u64)cache - Paths[ret.index])) {
                 u64 file_handle = ((u64)ret.index << 32) | ((u64)ptr->file_count - 1);
                 return file_handle;
             }
@@ -773,9 +760,8 @@ u64 BootFileSystem::open_file_by_index(u32 index, const char *filename) {
         if (memcmp(file, name, cmp_count) == 0) {
             delete[] name;
             delete[] file;
-            u32 cluster = ((u32)dir->cluster_high << 16) | (u32)dir->cluster_low;
             Paths_table *ptr = &table[index];
-            if (increase_files(ptr, (char *)filename, cluster)) {
+            if (increase_files(ptr, (char *)filename, *dir, (u64)cache - Paths[index])) {
                 u64 file_handle = ((u64)index << 32) | ((u64)ptr->file_count - 1);
                 return file_handle;
             }
@@ -801,16 +787,17 @@ static inline void remove_file_entry(Paths_table *table, u32 file_index) {
         delete[] filecache;
     }
 
-    for (u32 i = file_index; i < table->file_count; i++) 
+    for (int i = file_index; i + 1 < table->file_count; i++)
         table->open_files[i] = table->open_files[i+1];
 
     u64 old_size = table->file_count * sizeof(file_cache);
     u64 new_size = old_size - sizeof(file_cache);
 
 
-    if (new_size == 0) 
+    if (new_size == 0) {
         kfree(table->open_files);
-    else {
+        table->open_files = nullptr;
+    } else {
         file_cache *old_pointer = table->open_files;
         table->open_files = (file_cache *)krealloc(table->open_files, old_size, new_size);
         if (table->open_files == nullptr)
@@ -821,6 +808,8 @@ static inline void remove_file_entry(Paths_table *table, u32 file_index) {
     table->file_count--;
 }
 
+
+static void update_entry_metadata(FAT32_DIR &entry, u32 size);
 
 // Unpack and validate both indices before removing the cached file record.
 void BootFileSystem::close_file(u64 file_handle) {
@@ -833,12 +822,14 @@ void BootFileSystem::close_file(u64 file_handle) {
     if (file_index >= table[path_index].file_count || table[path_index].open_files == nullptr)
         return;
 
-    cache_descriptor *filecache = table->open_files[file_index].cache;
-    if (filecache != nullptr && filecache->cache != nullptr) {
-        write_clusters(table[path_index].open_files[file_index].starting_cluster, table[path_index].open_files[file_index].cluster_count, filecache->cache);
-        if (!update_parent_dir(table[path_index].str, table[path_index].open_files[file_index].name, table[path_index].open_files[file_index].cluster_count * cluster_size)) {
-            printf("FAT32: updating the file pointed by file handle 0x%lx failed\n", file_handle);
-        }
+    Paths_table &parent = table[path_index];
+    file_cache &file = parent.open_files[file_index];
+    if (file.dirty && file.cache && file.cache->cache) {
+        write_clusters(file.starting_cluster, file.cluster_count, file.cache->cache);
+
+        auto *entry = reinterpret_cast<FAT32_DIR *>(Paths[path_index] + file.directory_offset);
+        update_entry_metadata(*entry, file.file_size);
+        write_clusters(parent.starting_cluster, parent.cluster_count, (void *)Paths[path_index]);
     }
     remove_file_entry(&table[path_index], file_index);
     
@@ -860,7 +851,7 @@ void BootFileSystem::close_path(u32 path_index) { // Close cached files, write d
    table[path_index] = {0}; // Clear metadata for the path being removed.
    kfree((void *)Paths[path_index]); // Release this directory's in-memory cache.
         // relocate paths entries
-   for (u32 i = path_index; i < Path_count; i++) { // Shift later paths left; the final iteration currently reads index Path_count.
+   for (u32 i = path_index; i + 1 < Path_count; i++) { // Shift later paths left.
         table[i] = table[i+1]; // Move the next metadata record into the current slot.
         Paths[i] = Paths[i+1]; // Move its matching cache address into the same slot.
    } // End this block.
@@ -966,6 +957,9 @@ void BootFileSystem::read_file(u64 file_handle, u64 offset, u32 size, void *buff
 }
 
 void BootFileSystem::write_file(u64 file_handle, u64 offset, u32 size, const void *buffer) {
+    if (!size || offset > 0xffffffffULL - size)
+        return;
+
     u32 path_index = (u32)(file_handle >> 32);
     u32 file_index = (u32)file_handle;
 
@@ -983,8 +977,14 @@ void BootFileSystem::write_file(u64 file_handle, u64 offset, u32 size, const voi
     if (clusters > file->cluster_count) 
         allocate_clusters(file, (clusters - file->cluster_count), true);
     
-    memcpy((void *)(file->cache->cache+offset), buffer, size);
-    
+    if (!file->cache || !file->cache->cache || clusters > file->cluster_count)
+        return;
+
+    memcpy(file->cache->cache + offset, buffer, size);
+    u32 end = (u32)(offset + size);
+    if (end > file->file_size)
+        file->file_size = end;
+    file->dirty = true;
 }
 
 // Terminate a chain at this cluster and detach the successor's reverse link.
@@ -1252,6 +1252,18 @@ bool BootFileSystem::set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir)
 }
 
 
+static void update_entry_metadata(FAT32_DIR &entry, u32 size) {
+    u8 min = rtc_to_num(rtc_read(0x02));
+    u8 hour = rtc_to_num(rtc_read(0x04));
+    u8 day = rtc_to_num(rtc_read(0x07));
+    u8 month = rtc_to_num(rtc_read(0x08));
+    u8 year = rtc_to_num(rtc_read(0x09));
+
+    entry.last_modify_time = (hour << 11) + (min << 5);
+    entry.last_modify_date = (year << 9) + (month << 5) + (day & 0x1F);
+    entry.file_size = size;
+}
+
 // Find the child directory record in its parent cache, refresh its modification
 // timestamp/size, then close the parent through the normal writeback path.
 bool BootFileSystem::update_parent_dir(const char *path_name, const char *dir, u32 new_size) {
@@ -1302,15 +1314,7 @@ bool BootFileSystem::update_parent_dir(const char *path_name, const char *dir, u
         if (memcmp(file, name, cmp_count) == 0) {
             delete[] name; // Release the decoded candidate after finding a match.
             delete[] file; // Release the padded comparison buffer.
-            u8 min = rtc_to_num(rtc_read(0x02));
-            u8 hour = rtc_to_num(rtc_read(0x04));
-            u8 day = rtc_to_num(rtc_read(0x07));
-            u8 month = rtc_to_num(rtc_read(0x08));
-            u8 year = rtc_to_num(rtc_read(0x09));
-
-            dir32->last_modify_time = (hour << 11) + (min << 5);
-            dir32->last_modify_date = (year << 9) + (month << 5) + (day & 0x1F);
-            dir32->file_size = new_size; // Record the caller-supplied directory size in bytes.
+            update_entry_metadata(*dir32, new_size);
 
             close_path(path.index); // Close the parent cache through its writeback path.
             return true; // Report that the matching parent entry was updated.

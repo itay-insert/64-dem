@@ -41,6 +41,9 @@ typedef struct {
     cache_descriptor *cache;
     int cluster_count;
     char *name;
+    u64 directory_offset;
+    u32 file_size;
+    bool dirty;
 } file_cache;
 
 
@@ -96,7 +99,8 @@ class BootFileSystem {
         void scan_fat(void);
         void fat32_set_entry(FAT32_DIR *dir, bool lfn, const char *name);
         Path_ret increase_paths(u64 address, char *path, int cluster_count, u32 starting_cluster);
-        bool increase_files(Paths_table *table, char *filename, u32 cluster);
+        bool increase_files(Paths_table *table, char *filename,
+                            const FAT32_DIR &entry, u64 directory_offset);
         u64 resize_cache(u64 address, u64 old_count, u64 new_count);
         int scan_dir(u32 cluster);
         u32 return_last_cluster(u32 cluster, int count);

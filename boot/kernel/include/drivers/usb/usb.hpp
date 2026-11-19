@@ -334,8 +334,8 @@ class usb_controller {
         u8 type;
         u8 controller_type;
         int status;
-        usb_port_descriptor *ports;
-        int ports_count;
+        usb_port_descriptor *ports = nullptr;
+        int ports_count = 0;
         bool discover_controller(usb_controller_t *controller, u8 class_code, u8 subclass, u8 prog_if, const char *str);
         void MapController(usb_controller_t *controller, u8 type);
         void construct_controller(void);

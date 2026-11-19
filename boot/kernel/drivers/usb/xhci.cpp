@@ -448,7 +448,7 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
             if (port != 0 && port < 256) {
                 // Capture the controller's state when an enumerated device
                 // changes links. The event itself gives only the port number.
-                if (ports && port <= (u32)ports_count &&
+                if (ports && (int)port <= ports_count &&
                     ports[port - 1].device && ports[port - 1].device->discovered) {
                     const u32 previous = ports[port - 1].port_status;
                     auto *portsc = (volatile u32 *)port_to_address((u8)port);
@@ -465,7 +465,7 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
                                   (current & XHCI_PORTSC_CHANGE_MASK);
                     ports[port - 1].port_status = *portsc;
                 }
-                if (ports && port <= (u32)ports_count) {
+                if (ports && (int)port <= ports_count) {
                     const u32 status = *(volatile u32 *)port_to_address((u8)port);
                     if (!(status & CCS) ||
                         ((status & (1u << 17)) && ports[port - 1].device))
