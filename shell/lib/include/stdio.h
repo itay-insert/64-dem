@@ -65,4 +65,16 @@ static inline void *memset(const void *ptr, int value, unsigned long size) {
     return ptr;
 }
 
+
+extern const char *digits;
+
+static inline unsigned int ascii_to_digit(char ch) {
+    for (int i = 0; i < 10; i++) {
+        if (ch == digits[i])
+            return i;
+    }
+
+    return 0xFFFFFFFF; // for failure
+}
+
 #endif

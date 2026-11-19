@@ -3,6 +3,8 @@
 #include "stdio.h"
 #include "sys.h"
 
+const char *digits = "0123456789";
+
 int printf(const char *format, ...) {
     char output[256];
     size_t used = 0;

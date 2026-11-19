@@ -5,23 +5,11 @@
 #include "stdio.h"
 
 
-
-const char *digits = "0123456789";
-
-static inline unsigned int asscii_to_digit(char ch) {
-    for (int i = 0; i < 10; i++) {
-        if (ch == digits[i])
-            return i;
-    }
-
-    return 0xFFFFFFFF; // for failure
-}
-
 static inline unsigned int make_hz(char *str, unsigned int *hz) {
     unsigned int count = 0;
     *hz = 0;
     while (*str != ' ' || *str != '\0') {
-        unsigned int result = asscii_to_digit(*str);
+        unsigned int result = ascii_to_digit(*str);
         if (result == 0xFFFFFFFF)
             return count;
         *hz = (*hz * 10) + result;
@@ -36,7 +24,7 @@ static inline unsigned int make_hz(char *str, unsigned int *hz) {
 static inline void make_ms(char *str, u64 *ms) {
     *ms = 0;
     while (*str != ' ' || *str != '\0') {
-        unsigned int result = asscii_to_digit(*str);
+        unsigned int result = ascii_to_digit(*str);
         if (result == 0xFFFFFFFF)
             return;
         *ms = (*ms * 10) + result;
