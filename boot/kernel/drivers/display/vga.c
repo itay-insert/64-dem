@@ -588,3 +588,7 @@ void backspace(void) {
     cursor_dec();
     draw_cursor(LightGray);
 }
+
+void set_begin(void) {
+    cursor.coulmn = 0;
+}

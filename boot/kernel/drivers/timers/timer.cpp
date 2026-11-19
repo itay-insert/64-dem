@@ -81,3 +81,11 @@ extern "C" void sleep_ms(u64 ms) {
 
     wait_ms(*source, ms);
 }
+
+extern "C" u64 read_freq() {
+    Timer *timer = (Timer *)timeradd;
+    TimerSource *source = timer->Src;
+
+    u64 freq = source->read_freq();
+    return freq;
+}

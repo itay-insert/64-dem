@@ -21,6 +21,8 @@ global fs_close
 global fs_start
 global print_drives
 global beep
+global set_begin
+global read_freq
 
 kprintf:
     xor rax, rax ; kprintf
@@ -120,5 +122,15 @@ print_drives:
 
 beep:
     mov rax, 18
+    syscall
+    ret
+
+set_begin:
+    mov rax, 19
+    syscall
+    ret
+
+read_freq:
+    mov rax, 20
     syscall
     ret

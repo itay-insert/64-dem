@@ -77,4 +77,42 @@ static inline unsigned int ascii_to_digit(char ch) {
     return 0xFFFFFFFF; // for failure
 }
 
+
+
+int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb_change_cnt) {
+    if (maxlen > 256)
+        return 0;
+
+    int count = 0; 
+    char key = 0;
+
+    for (int i = 0; i < maxlen; i++) {
+        if (wtime > 0) {
+            for (int j = 0; j < wtime; j++) {
+                count = mch_inchar(buff, maxlen, 0, tb_change_cnt);  
+                if (count > 0)
+                    return count;  
+                sleep_ms(1);
+            }
+            return count;
+        } else if (wtime == -1) {
+            while (key == 0x00) {
+                key = read_key(true, false);
+            }
+
+            buff[i] = key;
+            wtime = 0;
+        } else {
+            key = read_key(true, false);
+            if (key == 0)
+                break;
+            buff[i] = key;
+        }
+
+        count++;
+    }
+
+    return count;
+}
+
 #endif

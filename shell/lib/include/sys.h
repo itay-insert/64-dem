@@ -29,6 +29,7 @@ int fs_close(int fd);
 void fs_start(int fd);
 void print_drives(void);
 void beep(unsigned int hz, u64 ms);
-
+void set_begin(void);
+u64 read_freq();
 
 #endif

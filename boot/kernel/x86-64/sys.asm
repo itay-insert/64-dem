@@ -25,7 +25,8 @@ extern former_user_rsp
 extern print_proccess_mem
 extern print_drives
 extern beep
-
+extern set_begin
+extern read_freq
 
 extern sys_exit
 
@@ -248,6 +249,19 @@ call beep
 jmp exit
 skip_beep:
 
+
+cmp rax, 19
+jne skip_sysbegin ; sys_begin
+call set_begin
+jmp exit
+skip_sysbegin:
+
+
+cmp rax, 20
+jne skip_readfreq ; sys read_freq
+call read_freq
+jmp exit
+skip_readfreq:
 
 exit:
 
