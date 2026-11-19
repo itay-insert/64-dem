@@ -25,6 +25,10 @@
 #define TRB_SETUP       2
 #define TRB_DATA        3
 #define TRB_STATUS      4
+#define TRB_RESET_ENDPOINT 14
+#define TRB_SET_TR_DEQUEUE 16
+#define TRB_RESET_TSP     (1u << 9)
+#define XHCI_USB_TRANSACTION_ERROR 4
 
 #define TRT_NO_DATA     0
 #define TRT_OUT         2
@@ -466,9 +470,13 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
             } else if (!event_data) {
                 for (auto &request : requests) {
                     if (!request.active || request.completed || request.event_received ||
-                        request.slot_id != slot_id || request.endpoint_id != endpoint_id ||
-                        (trb_pointer != request.trb_physical &&
-                         (completion_code == 1 || completion_code == 13))) continue;
+                        request.slot_id != slot_id || request.endpoint_id != endpoint_id) continue;
+                    if (trb_pointer != request.trb_physical) {
+                        if (completion_code == XHCI_USB_TRANSACTION_ERROR)
+                            printf("xHCI: unmatched transaction error, event TRB=0x%lx expected=0x%lx\n",
+                                   trb_pointer, request.trb_physical);
+                        continue;
+                    }
                     request.event[0] = event.d0;
                     request.event[1] = event.d1;
                     request.event[2] = event.d2;
@@ -1893,8 +1901,71 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
     async.result.hardware_status = completion.d2;
     const u32 code = completion.d2 >> 24;
     const u32 residual = completion.d2 & 0xffffffu;
+    u32 recovery_code = 0;
+    auto reset_endpoint = [&]() {
+        XhciTrb reset = {};
+        reset.d3 = TRB_TYPE(TRB_RESET_ENDPOINT) | TRB_RESET_TSP |
+                   ((u32)async.endpoint_id << 16) | ((u32)async.slot_id << 24);
+        const u64 command_phys = submit_command(reset);
+        XhciTrb reset_completion = {};
+        const bool completed = wait_command(timer, command_phys, &reset_completion, 500);
+        recovery_code = completed ? reset_completion.d2 >> 24 : 255;
+        return recovery_code == 1;
+    };
+    bool recovery_command_failed = false;
+    if (code == XHCI_USB_TRANSACTION_ERROR && endpoint_ring.endpoint_type == 7 &&
+        async.xhci_retries < 3) { // USB Transaction Error halts the pipe.
+        // Preserve the USB data toggle and retry the same interrupt TD.
+        if (reset_endpoint()) {
+            ++async.xhci_retries;
+            async.event_received = false;
+            async.elapsed = 0;
+            async.previous_tick = (u32)timer.read() & 0xffffffu;
+            asm volatile("mfence" ::: "memory");
+            doorbells[async.slot_id] = async.endpoint_id;
+            return;
+        }
+        recovery_command_failed = true;
+    }
+    if (code == XHCI_USB_TRANSACTION_ERROR && endpoint_ring.endpoint_type == 7 &&
+        async.xhci_retries == 3 && endpoint_ring.consecutive_errors < 3) {
+        // This poll still failed. Reset the halted pipe, discard its TD, and
+        // let the interrupt subscription queue a fresh poll.
+        if (reset_endpoint()) {
+            u32 next_index = endpoint_ring.enqueue_index + 1;
+            u32 next_cycle = endpoint_ring.cycle;
+            if (next_index == EP0_LINK) {
+                next_index = 0;
+                next_cycle ^= 1u;
+            }
+            const u64 next_trb = endpoint_ring.dma.physical_address +
+                                 next_index * sizeof(XhciTrb);
+            XhciTrb dequeue = {};
+            dequeue.d0 = (u32)next_trb | next_cycle;
+            dequeue.d1 = (u32)(next_trb >> 32);
+            dequeue.d3 = TRB_TYPE(TRB_SET_TR_DEQUEUE) |
+                         ((u32)async.endpoint_id << 16) | ((u32)async.slot_id << 24);
+            const u64 dequeue_phys = submit_command(dequeue);
+            XhciTrb dequeue_completion = {};
+            const bool completed = wait_command(timer, dequeue_phys, &dequeue_completion, 500);
+            recovery_code = completed ? dequeue_completion.d2 >> 24 : 255;
+            if (recovery_code == 1) {
+                endpoint_ring.enqueue_index = next_index;
+                endpoint_ring.cycle = next_cycle;
+                ++endpoint_ring.consecutive_errors;
+                transfer_complete(async, TRANSFER_DROPPED);
+                return;
+            }
+        }
+        recovery_command_failed = true;
+    }
     if (code != 1 && !(async.in && code == 13)) {
-        controller.needs_reinit = true;
+        if (endpoint_ring.endpoint_type == 7)
+            printf("xHCI: interrupt transfer code=%u residual=%u requested=%u retries=%u recovery=%u\n",
+                   code, residual, async.length, (u32)async.xhci_retries, recovery_code);
+        if (recovery_command_failed || code != XHCI_USB_TRANSACTION_ERROR ||
+            endpoint_ring.endpoint_type != 7)
+            controller.needs_reinit = true;
         transfer_complete(async, FAILED);
         return;
     }
@@ -1908,6 +1979,7 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
         endpoint_ring.cycle ^= 1u;
     }
     async.result.actual_length = async.length - residual;
+    endpoint_ring.consecutive_errors = 0;
     transfer_complete(async, TRANSFER_SUCCESS);
 }
 

@@ -204,10 +204,11 @@ void usb_controller::usb_service_interrupts(TimerSource &timer) {
             return;
         }
         interrupt_request = 0;
-        // Errors stop the subscription. A callback may explicitly recover later.
+        // A recovered interrupt poll can be dropped without ending the subscription.
         auto callback = interrupt_callback;
         void *context = interrupt_context;
-        if (result.status_code != TRANSFER_SUCCESS) {
+        if (result.status_code != TRANSFER_SUCCESS &&
+            result.status_code != TRANSFER_DROPPED) {
             interrupt_callback = nullptr;
             interrupt_context = nullptr;
             interrupt_stopping = true;

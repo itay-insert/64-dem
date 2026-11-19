@@ -25,18 +25,18 @@ CONTROLLERS = {
 
 
 def prepare(root):
-    for name in ("boot", "EFI"):
+    for name in ("boot", "EFI", "shell"):
         shutil.copytree(REPO / name, root / name, ignore=shutil.ignore_patterns("*.o"))
     for name in ("make.sh", "bios_qemu.sh"):
         shutil.copy2(REPO / name, root / name)
     shutil.copy2(REPO / "tests/usb_concurrency_probe.hpp", root / "boot/kernel/usb_concurrency_probe.hpp")
     kernel = root / "boot/kernel/kernel.cpp"
     source = kernel.read_text()
-    marker = "    u64 old_keyboard_irq = keyboard_irq_count;"
+    marker = "    disk_drive *boot_drive = disks.find_boot_drive();"
     if source.count(marker) != 1:
-        raise RuntimeError("Cannot locate foreground loop for test-kernel injection")
+        raise RuntimeError("Cannot locate test-kernel injection point")
     # Replace only the temporary kernel's tail. The integration probe controls
-    # foreground service, independent of whatever boot-device work is in progress.
+    # foreground service, independent of the boot filesystem work that follows.
     source = source[:source.index(marker)] + """
     usb_concurrency_probe(USB, *timer.Src);
     for (;;) { USB.service_interrupts(*timer.Src); wait_ms(*timer.Src, 1); }
@@ -63,7 +63,7 @@ def run_case(root, firmware, controller, mode, timeout):
     monitor = root / f"{name}.sock"
     stderr_path = root / f"{name}.stderr"
     device = CONTROLLERS[controller] + ",id=usbtest"
-    if controller == "xhci":
+    if controller == "xhci" and mode != "auto":
         device += f",msi={'on' if mode == 'msi' else 'off'},msix={'on' if mode == 'msix' else 'off'}"
     command = [
         "qemu-system-x86_64", "-machine", "pc", "-m", "512M",
@@ -125,11 +125,11 @@ def run_case(root, firmware, controller, mode, timeout):
                 raise RuntimeError(f"{name} did not exercise the idle keyboard case")
             if controller == "xhci":
                 routed = "MSI IRQ vector" if mode == "msi" else "MSI-X IRQ vector"
-                if mode != "polling" and routed not in content:
+                if mode != "auto" and mode != "polling" and routed not in content:
                     raise RuntimeError(f"{name} did not install its requested IRQ route")
                 trace = (root / f"{name}.trace").read_text(errors="replace")
                 deliveries = len(re.findall(r"v=50[^\n]*pc=ffff8", trace))
-                if (mode != "polling" and deliveries < 2) or (mode == "polling" and deliveries):
+                if (mode != "auto" and mode != "polling" and deliveries < 2) or (mode == "polling" and deliveries):
                     raise RuntimeError(f"{name}: unexpected hardware IRQ deliveries: {deliveries}")
                 print(f"{name}: kernel vector 0x50 deliveries={deliveries}", flush=True)
         finally:
@@ -144,7 +144,7 @@ def run_case(root, firmware, controller, mode, timeout):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--controller", choices=["all", *CONTROLLERS], default="all")
-    parser.add_argument("--irq-mode", choices=["all", "msi", "msix", "polling"], default="all")
+    parser.add_argument("--irq-mode", choices=["all", "auto", "msi", "msix", "polling"], default="all")
     parser.add_argument("--firmware", type=Path, default=Path("/usr/share/OVMF/OVMF_CODE_4M.fd"))
     parser.add_argument("--timeout", type=int, default=180, help="seconds per QEMU case")
     parser.add_argument("--work-dir", type=Path, help="new or empty directory to retain build/log artifacts")

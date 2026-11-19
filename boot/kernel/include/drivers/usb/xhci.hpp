@@ -106,6 +106,7 @@ typedef struct {
     bool configured;
     u32 enqueue_index;
     u32 cycle;
+    u8 consecutive_errors = 0;
 } xhci_endpoint_ring;
 
 typedef struct {

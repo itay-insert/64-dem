@@ -75,6 +75,10 @@ void HIDK::init() {
 
 void HIDK::completion(void *context, const usb_transfer_result &result, const u8 *data) {
     auto &keyboard = *static_cast<HIDK *>(context);
+    if (result.status_code == TRANSFER_DROPPED) {
+        keyboard.process_report({}); // Do not leave a key held after a lost poll.
+        return;
+    }
     if (result.status_code != TRANSFER_SUCCESS) {
         printf("USB keyboard: transfer failed, status=%d hardware=0x%ux length=%u\n",
             result.status_code, result.hardware_status, result.actual_length);
@@ -88,10 +92,6 @@ void HIDK::completion(void *context, const usb_transfer_result &result, const u8
             keyboard.warned_short_report = true;
         }
         return;
-    }
-    if (!keyboard.received_report) {
-        printf("USB keyboard: first 8-byte input report received\n");
-        keyboard.received_report = true;
     }
     hid_keyboard_report incoming;
     memcpy(&incoming, data, sizeof(incoming));

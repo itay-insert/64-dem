@@ -48,6 +48,7 @@
 #define TRANSFER_BUSY 10
 #define INVALID_REQUEST 11
 #define TRANSFER_CANCELLED 12
+#define TRANSFER_DROPPED 13
 
 
 typedef struct {
@@ -261,6 +262,7 @@ struct usb_async_request {
     u8 slot_id = 0;
     u8 endpoint_id = 0;
     bool event_received = false;
+    u8 xhci_retries = 0;
 };
 
 // Called by the USB service worker (foreground, user-mode timer tick, or idle).

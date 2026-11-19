@@ -46,6 +46,11 @@ protected:
         } else if (hold_keyboard && async.result.endpoint_handle == 0 && !keyboard_input) {
             return; // Model an interrupt-IN endpoint that NAKs until a key arrives.
         } else if (++steps[slot] >= (async.result.endpoint_handle == 0 ? 3u : completion_steps)) {
+            if (async.result.endpoint_handle == 0 && drop_next_keyboard) {
+                drop_next_keyboard = false;
+                transfer_complete(async, TRANSFER_DROPPED);
+                return;
+            }
             if (hold_keyboard && async.result.endpoint_handle == 0) keyboard_input = false;
             if (async.in)
                 for (u32 i = 0; i < async.length; ++i) dma[slot][i] = (unsigned char)(i + 1);
@@ -56,6 +61,7 @@ protected:
 public:
     bool hold_keyboard = false;
     bool keyboard_input = false;
+    bool drop_next_keyboard = false;
     unsigned completion_steps = 3;
     FakeController() { controller = {}; controller_type = 4; controller.index = 2; }
     int controller_init(TimerSource &) override { return 0; }
@@ -88,11 +94,17 @@ struct CallbackState {
     FakeController *controller;
     FakeTimer *timer;
     unsigned calls = 0;
+    unsigned drops = 0;
     bool detach = false;
     bool saw_pending_bulk = false;
 };
 static void completed(void *context, const usb_transfer_result &result, const u8 *data) {
     auto &state = *static_cast<CallbackState *>(context);
+    if (result.status_code == TRANSFER_DROPPED) {
+        assert(result.actual_length == 0);
+        ++state.drops;
+        return;
+    }
     assert(result.status_code == TRANSFER_SUCCESS && result.actual_length == 8);
     for (unsigned i = 0; i < 8; ++i) assert(data[i] == i + 1);
     ++state.calls;
@@ -187,6 +199,14 @@ int main() {
     hc.usb_service_interrupts(timer);
     hc.usb_service_interrupts(timer);
     assert(state.calls == 1 && !hc.usb_interrupt_registered());
+    hc.drop_next_keyboard = true;
+    assert(hc.usb_register_interrupt(0, 8, completed, &state));
+    for (unsigned i = 0; i < 10 && !state.drops; ++i)
+        hc.usb_service_interrupts(timer);
+    assert(state.drops == 1 && state.calls == 1 &&
+           hc.usb_interrupt_registered() && hc.usb_transfer_pending());
+    hc.usb_unregister_interrupt(timer);
+    while (hc.usb_interrupt_registered()) hc.usb_service_interrupts(timer);
     state.detach = true;
     assert(hc.usb_register_interrupt(0, 8, completed, &state));
     for (unsigned i = 0; i < 4; ++i) hc.usb_service_interrupts(timer);
