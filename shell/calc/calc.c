@@ -7,9 +7,9 @@
 static inline int make_long(char *str, long *num, bool neg) {
     *num = 0;
     int count = 0;
-    u8 buff[7] = {'-', '+', '\0', '*', '=', ')', ']'};
+    u8 buff[11] = {'-', '+', '\0', '*', '=', ')', ']', '/', '%', '<', '>'};
     while (1) {
-        for (int i = 0; i < 7; i++)
+        for (int i = 0; i < 11; i++)
             if (*str == buff[i])
                 goto exit;
     
@@ -39,18 +39,23 @@ static inline int make_long(char *str, long *num, bool neg) {
 #define shr 6
 #define shl 5
 
-static int calc(char *buffer, long *sum) {
+static int calc(char *buffer, long *sum, bool former) {
     int index = 0;
     long num = 0;
+    if (former)
+        num = *sum;
+
     bool neg = false;
     if (buffer[0] == '-') {
         neg = true;
         index++;
     }
 
-    index += make_long(&buffer[index], &num, neg);
+    long temp = 0;
+    index += make_long(&buffer[index], &temp, neg);
     neg = false;
 
+    num += temp;
     const char *ops = "+-*/%:";
     int op = 0;
     while (buffer[index] != '=' && buffer[index] != '\0') {
@@ -87,7 +92,7 @@ static int calc(char *buffer, long *sum) {
 
         if (buffer[index] == '(' || buffer[index] == '[') {
             index++;
-            index += calc(&buffer[index], &in);
+            index += calc(&buffer[index], &in, false);
         } else {
             if (buffer[index] == '-') {
                 index++;
@@ -100,6 +105,8 @@ static int calc(char *buffer, long *sum) {
         }
         
 
+        if (in == 0)
+            continue;
 
         switch (op) {
             case ADD: {
@@ -147,12 +154,18 @@ static int calc(char *buffer, long *sum) {
 
     }
 
-    *sum += num;
+
+    if (!former)
+        *sum += num;
+    else
+        *sum = num;
     return index;
 }
 
 
 int main() {
+    long sum = 0;
+
     while (1) {
         printf(">");
         char buffer[256] = {0};
@@ -181,8 +194,11 @@ int main() {
         printf("\n");
 
 
-        long sum = 0;
-        if (calc(buffer, &sum) == 0)
+        long num = 0;
+        if (make_long(buffer, &num, false) != 0) 
+            sum = 0;
+
+        if (calc(buffer, &sum, true) == 0)
             continue;
 
         printf("%ld\n", sum);
