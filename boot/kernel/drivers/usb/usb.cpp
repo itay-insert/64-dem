@@ -9,6 +9,8 @@
 #include "drivers/usb/ohci.hpp"
 #include "drivers/usb/ehci.hpp"
 #include "drivers/usb/xhci.hpp"
+#include "drivers/keyboard/hid.hpp"
+#include "drivers/keyboard/keyboard.hpp"
 #include "x86-64/memory/kmalloc.h"
 
 #define config_case 0x02
@@ -31,6 +33,8 @@ const char *codes[] = {
 
 
 extern u64 timeradd;
+extern u64 usb_addr;
+extern GlobalKeyboard *globalkeyboard;
 
 u64 keyboard_usb_address = 0;
 bool keyboard_usb_found = false;
@@ -508,6 +512,12 @@ void usb_controller::scan_ports(TimerSource &timer) {
                 ports[i].device = new usb_device(enumerated);
         }
     }
+    // Start runtime connect detection with the enumeration changes acknowledged.
+    for (int i = 0; i < ports_count; ++i) {
+        const u32 status = root_port_status(ports[i].port_number);
+        acknowledge_port_change(ports[i].port_number, status);
+        ports[i].port_status = root_port_status(ports[i].port_number);
+    }
 }
 
 void usb_controller::construct_controller() {
@@ -626,6 +636,191 @@ void GlobalUSB::service_interrupts(TimerSource &timer) {
     for (u32 i = 0; i < ohci_count; ++i) service_controller(ohci_controllers[i], timer);
     for (u32 i = 0; i < ehci_count; ++i) service_controller(ehci_controllers[i], timer);
     for (u32 i = 0; i < xhci_count; ++i) service_controller(xhci_controllers[i], timer);
+}
+
+static void release_usb_device(usb_device *device) {
+    if (!device) return;
+    if (device->interfaces) {
+        for (u16 i = 0; i < device->usb_interface_count; ++i)
+            delete[] device->interfaces[i].endpoints;
+        delete[] device->interfaces;
+    }
+    kfree(device);
+}
+
+static bool is_selected_keyboard_port(const usb_controller &controller, u8 port_index) {
+    return keyboard_usb_found &&
+        (u8)(keyboard_usb_address >> 32) == controller.controller_type - 1 &&
+        (u8)(keyboard_usb_address >> 24) == controller.controller.index &&
+        (u8)(keyboard_usb_address >> 16) == port_index;
+}
+
+static void service_keyboard_port(usb_controller &controller, u8 index,
+                                  HIDK &keyboard, TimerSource &timer) {
+    usb_port_descriptor &port = controller.ports[index];
+    const u8 number = port.port_number;
+    const u32 status = controller.root_port_status(number);
+    if (status == 0xffffffffu ||
+        (controller.controller_type == UHCI && status == 0xffffu)) return;
+    const bool live = (status & 1u) != 0;
+    const u32 connect_change = controller.controller_type == xHCI ? (1u << 17) :
+                               controller.controller_type == OHCI ? (1u << 16) : (1u << 1);
+    if ((status & connect_change) || live != port.connected)
+        port.hotplug_pending = true;
+    controller.acknowledge_port_change(number, status);
+    port.port_status = controller.root_port_status(number);
+    if (!port.hotplug_pending) return;
+
+    const bool selected = is_selected_keyboard_port(controller, index);
+    if (port.device && !selected) {
+        u8 iface = 0, endpoint = 0;
+        const bool boot_keyboard = usb_find_boot_keyboard(*port.device, iface, endpoint);
+        if (boot_keyboard && !live && !controller.usb_port_transfer_pending(index) &&
+            controller.retire_port(number, timer)) {
+            release_usb_device(port.device);
+            port.device = nullptr;
+        } else if (boot_keyboard && live && !keyboard_usb_found) {
+            keyboard_usb_address = (u64(controller.controller_type - 1) << 32) |
+                (u64(controller.controller.index) << 24) |
+                (u64(index) << 16) | (u64(iface) << 8) | endpoint;
+            keyboard_usb_found = true;
+            port.hotplug_pending = false;
+            keyboard.init();
+            printf("USB.%s: keyboard on port %u %s\n", controller.vendor,
+                   (u32)number, keyboard.ready ? "ready" : "enumerated without input");
+        }
+        // Other device classes may have active clients; leave their state owned.
+        port.connected = live;
+        port.hotplug_pending = false;
+        return;
+    }
+    if (selected && keyboard.ready) {
+        keyboard.ready = false;
+        keyboard.process_report({});
+        controller.usb_unregister_interrupt(timer);
+    }
+    if (controller.usb_port_transfer_pending(index) ||
+        (selected && controller.usb_interrupt_registered())) {
+        controller.usb_service_interrupts(timer);
+        return;
+    }
+    if (!controller.retire_port(number, timer)) return;
+    if (port.device) {
+        release_usb_device(port.device);
+        port.device = nullptr;
+    }
+    if (selected) {
+        keyboard_usb_found = false;
+        keyboard_usb_address = 0;
+    }
+    port.connected = false;
+    if (!live) {
+        port.hotplug_pending = false;
+        printf("USB.%s: keyboard removed from port %u\n", controller.vendor, (u32)number);
+        return;
+    }
+
+    // Enumeration and SET_PROTOCOL may wait for commands. This worker is
+    // invoked only from the foreground keyboard wait path, never a timer ISR.
+    wait_ms(timer, 100);
+    const u32 settled = controller.root_port_status(number);
+    if (!(settled & 1u)) {
+        port.hotplug_pending = false;
+        return;
+    }
+    controller.acknowledge_port_change(number, settled);
+    port.connected = true;
+    usb_device discovered = controller.get_device(number, timer);
+    u8 interface_index = 0, endpoint_index = 0;
+    if (!usb_find_boot_keyboard(discovered, interface_index, endpoint_index)) {
+        if (discovered.address || discovered.interfaces) {
+            port.device = new usb_device(discovered);
+            if (port.device) {
+                if (!controller.retire_port(number, timer)) return;
+                release_usb_device(port.device);
+                port.device = nullptr;
+            }
+        } else {
+            controller.retire_port(number, timer);
+        }
+        port.hotplug_pending = false;
+        return;
+    }
+    port.device = new usb_device(discovered);
+    if (!port.device) {
+        controller.retire_port(number, timer);
+        port.hotplug_pending = false;
+        return;
+    }
+    // get_device selects the first boot keyboard while keyboard_usb_found is clear.
+    port.hotplug_pending = false;
+    if (is_selected_keyboard_port(controller, index)) {
+        keyboard.init();
+        printf("USB.%s: keyboard on port %u %s\n", controller.vendor,
+               (u32)number, keyboard.ready ? "ready" : "enumerated without input");
+    }
+}
+
+void GlobalUSB::service_keyboard_hotplug(TimerSource &timer) {
+    if (!globalkeyboard || !globalkeyboard->keyboards[1]) return;
+    const u32 now = (u32)timer.read() & 0xffffffu;
+    const u32 interval = (u32)(timer.read_freq() / 100u);
+    const u32 period = interval ? interval : 1u;
+    if (hotplug_clock_started &&
+        ((now - hotplug_previous_tick) & 0xffffffu) < period) {
+        bool pending = false;
+        auto check = [&](usb_controller &controller) {
+            for (int i = 0; controller.ports && i < controller.ports_count; ++i)
+                if (controller.ports[i].hotplug_pending) pending = true;
+        };
+        for (u8 i = 0; i < uhci_count; ++i) check(uhci_controllers[i]);
+        for (u8 i = 0; i < ohci_count; ++i) check(ohci_controllers[i]);
+        for (u8 i = 0; i < ehci_count; ++i) check(ehci_controllers[i]);
+        for (u8 i = 0; i < xhci_count; ++i) check(xhci_controllers[i]);
+        if (!pending) return;
+    }
+    hotplug_previous_tick = now;
+    hotplug_clock_started = true;
+    HIDK &keyboard = *static_cast<HIDK *>(globalkeyboard->keyboards[1]);
+    usb_controller *processed_controller = nullptr;
+    u8 processed_port = 0;
+    // Retire the selected keyboard before considering a keyboard on another
+    // port, so get_device may publish a new selected address.
+    if (keyboard_usb_found) {
+        const u8 type = (u8)(keyboard_usb_address >> 32);
+        const u8 index = (u8)(keyboard_usb_address >> 24);
+        const u8 port = (u8)(keyboard_usb_address >> 16);
+        usb_controller *selected = nullptr;
+        if (type == 0 && index < uhci_count) selected = &uhci_controllers[index];
+        if (type == 1 && index < ohci_count) selected = &ohci_controllers[index];
+        if (type == 2 && index < ehci_count) selected = &ehci_controllers[index];
+        if (type == 3 && index < xhci_count) selected = &xhci_controllers[index];
+        if (selected && selected->ports && port < selected->ports_count &&
+            !selected->controller.needs_reinit) {
+            service_keyboard_port(*selected, port, keyboard, timer);
+            processed_controller = selected;
+            processed_port = port;
+        }
+    }
+    auto service = [&](usb_controller &controller) {
+        if (controller.status || !controller.ports || controller.controller.needs_reinit)
+            return;
+        for (u8 i = 0; i < controller.ports_count; ++i) {
+            if (&controller == processed_controller && i == processed_port) continue;
+            service_keyboard_port(controller, i, keyboard, timer);
+        }
+    };
+    for (u8 i = 0; i < uhci_count; ++i) service(uhci_controllers[i]);
+    for (u8 i = 0; i < ohci_count; ++i) service(ohci_controllers[i]);
+    for (u8 i = 0; i < ehci_count; ++i) service(ehci_controllers[i]);
+    for (u8 i = 0; i < xhci_count; ++i) service(xhci_controllers[i]);
+}
+
+extern "C" void usb_keyboard_hotplug(void) {
+    if (!usb_addr || !timeradd) return;
+    auto *usb = reinterpret_cast<GlobalUSB *>(usb_addr);
+    auto *timer = reinterpret_cast<Timer *>(timeradd);
+    if (timer->Src) usb->service_keyboard_hotplug(*timer->Src);
 }
 
 

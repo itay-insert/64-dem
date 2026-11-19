@@ -11,6 +11,13 @@ usb_transfer_result usb_controller::transfer_result(int status, u32 handle) cons
     return result;
 }
 
+bool usb_controller::usb_port_transfer_pending(u8 port_index) const {
+    for (const auto &request : requests)
+        if (request.active && ((request.result.endpoint_handle >> 16) & 0xffu) == port_index)
+            return true;
+    return false;
+}
+
 bool usb_controller::phase_expired(const usb_async_request &async, TimerSource &timer, u32 ms) const {
     return async.phase_elapsed >= (timer.read_freq() * ms + 999) / 1000;
 }

@@ -211,6 +211,7 @@ typedef struct {
     int controller_type;
     u32 port_status;
     usb_device *device = nullptr;
+    bool hotplug_pending = false;
 } usb_port_descriptor;
 
 // Pick the first boot-keyboard interrupt-IN endpoint in descriptor order.
@@ -322,6 +323,7 @@ class usb_controller {
             for (const auto &request : requests) if (request.active) return true;
             return false;
         }
+        bool usb_port_transfer_pending(u8 port_index) const;
         // Progress all endpoints without collecting caller-owned results.
         void usb_service_transfers(TimerSource &timer);
         char vendor[5];
@@ -343,6 +345,10 @@ class usb_controller {
         virtual int enumrate_ports() = 0;
         virtual int reset_port(u8 port, TimerSource &timer) = 0;
         virtual int disable_port(u8 port, TimerSource &timer) = 0;
+        virtual u32 root_port_status(u8) { return 0xffffffffu; }
+        virtual void acknowledge_port_change(u8, u32) {}
+        // Called after all requests on this port have left the controller schedule.
+        virtual bool retire_port(u8, TimerSource &) { return false; }
         virtual usb_device_descriptor identify_device(u8 port, TimerSource &timer) = 0;
         virtual usb_device set_address(usb_device_descriptor &desc, TimerSource &timer, u8 port) = 0;
         virtual void *usb_send_packet(usb_setup_packet packet, u32 maxpacketsize, u64 length, u8 address, TimerSource &timer, u8 port) = 0;
@@ -419,6 +425,8 @@ class uhci_controller;
 
 class GlobalUSB {
     public: 
+        u32 hotplug_previous_tick = 0;
+        bool hotplug_clock_started = false;
         u8 class_code;
         u8 subclass;
         u8 prog_if;
@@ -434,6 +442,7 @@ class GlobalUSB {
         // Returns only active interfaces with both bulk directions; free interfaces with kfree().
         usb_interface_return find_interface(u8 class_code, u8 subclass, bool usepr, u8 protocol);
         void service_interrupts(TimerSource &timer);
+        void service_keyboard_hotplug(TimerSource &timer);
         // Boot CPU only. Call after enumeration; USB/timer must outlive the worker.
         bool start_background_service(TimerSource &timer);
         
@@ -441,3 +450,4 @@ class GlobalUSB {
 
 
 void usb_find_callback(const PCI_ret *device, void *context);
+extern "C" void usb_keyboard_hotplug(void);

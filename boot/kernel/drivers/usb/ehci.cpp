@@ -424,6 +424,49 @@ u64 ehci_controller::port_to_address(u8 port) {
     return port_base;
 }
 
+u32 ehci_controller::root_port_status(u8 port) {
+    if (!port || port > ports_count) return 0xffffffffu;
+    return *(volatile u32 *)port_to_address(port);
+}
+
+void ehci_controller::acknowledge_port_change(u8 port, u32 status) {
+    if (!port || port > ports_count || status == 0xffffffffu) return;
+    // PORTSC.PE is write-one-to-disable; do not echo it while clearing W1C flags.
+    const u32 changes = status & W1C_MASK;
+    if (changes)
+        *(volatile u32 *)port_to_address(port) =
+            (status & ~(W1C_MASK | PE | PR | FPR)) | changes;
+}
+
+bool ehci_controller::retire_port(u8 port, TimerSource &timer) {
+    (void)timer;
+    if (!ports || !port || port > ports_count || !ports[port - 1].device)
+        return true;
+    const u8 address = ports[port - 1].device->address;
+    for (u8 i = 0; i < state_count; ++i) {
+        if (states[i].device_address != address) continue;
+        ehci_address_state &state = states[i];
+        if (state.interfaces) for (u16 j = 0; j < state.interfaces_count; ++j) {
+            ehci_interface_state &iface = state.interfaces[j];
+            if (iface.endpoints) for (u16 k = 0; k < iface.endpoint_count; ++k)
+                if (iface.endpoints[k].scheduled) return false;
+        }
+        if (state.interfaces) for (u16 j = 0; j < state.interfaces_count; ++j) {
+            ehci_interface_state &iface = state.interfaces[j];
+            if (iface.endpoints) for (u16 k = 0; k < iface.endpoint_count; ++k)
+                if (iface.endpoints[k].dma.virtual_address)
+                    free_dma(iface.endpoints[k].dma.virtual_address);
+            delete[] iface.endpoints;
+        }
+        delete[] state.interfaces;
+        for (u8 j = i + 1; j < state_count; ++j) states[j - 1] = states[j];
+        --state_count;
+        if (!state_count) { delete[] states; states = nullptr; }
+        return true;
+    }
+    return true;
+}
+
 int ehci_controller::disable_port(u8 port, TimerSource &timer) {
     if (port < 1 || port > ports_count)
         return INVALID_PORT;
@@ -829,11 +872,16 @@ usb_device_descriptor ehci_controller::identify_device(u8 port, TimerSource &tim
 
 static u8 next_usb_address = 1;
 
-static inline u8 allocate_usb_address(void) {
-    if (next_usb_address > 127) 
-        return 0;  // no addresses left
-
-    return next_usb_address++;
+static inline u8 allocate_usb_address(usb_port_descriptor *ports, int count) {
+    for (u32 attempt = 0; attempt < 127; ++attempt) {
+        const u8 address = next_usb_address;
+        next_usb_address = address == 127 ? 1 : address + 1;
+        bool used = false;
+        for (int i = 0; i < count; ++i)
+            if (ports[i].device && ports[i].device->address == address) used = true;
+        if (!used) return address;
+    }
+    return 0;
 }
 
 
@@ -875,7 +923,7 @@ usb_device ehci_controller::set_address(usb_device_descriptor &desc, TimerSource
     usb_setup_packet *setup = (usb_setup_packet *)((u8 *)status_qtd + sizeof(ehci_qtd));
 
 
-    u8 address = allocate_usb_address();
+    u8 address = allocate_usb_address(ports, ports_count);
     if (!address) {
         free_dma(alloc.virtual_address);
         return device;
@@ -1491,12 +1539,12 @@ int ehci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
 
     u16 interfaces_count = states[state_count-1].interfaces_count;
     // we wanna use state_count-1 because state_count represents the highest object
-    states[state_count-1].interfaces = new ehci_interface_state[interfaces_count];
+    states[state_count-1].interfaces = new ehci_interface_state[interfaces_count]{};
 
     for (u16 i = 0; i < interfaces_count; i++) {
         states[state_count-1].interfaces[i].interface_number = device.interfaces[i].descriptor.bInterfaceNumber;
         states[state_count-1].interfaces[i].endpoint_count = device.interfaces[i].endpoint_count;
-        states[state_count-1].interfaces[i].endpoints = new ehci_endpoint_state[device.interfaces[i].endpoint_count];
+        states[state_count-1].interfaces[i].endpoints = new ehci_endpoint_state[device.interfaces[i].endpoint_count]{};
         for (u16 j = 0; j < states[state_count-1].interfaces[i].endpoint_count; j++) {
             states[state_count-1].interfaces[i].endpoints[j] = configure_endpoint(device, j, i, timer);
             if (states[state_count-1].interfaces[i].endpoints[j].dma.status != 0)
@@ -1866,6 +1914,17 @@ usb_transfer_result ehci_controller::start_transfer(usb_async_request &async, u3
 
 void ehci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     auto &ep = *(ehci_endpoint_state *)async.endpoint;
+    const u8 port_index = (u8)(async.result.endpoint_handle >> 16);
+    bool detached = false;
+    if (ports && port_index < ports_count) {
+        const u32 port_status = root_port_status(ports[port_index].port_number);
+        detached = !(port_status & CCS) || ports[port_index].hotplug_pending;
+        if (detached) {
+            ports[port_index].connected = false;
+            ports[port_index].hotplug_pending = true;
+            async.cancel = true;
+        }
+    }
     auto *cap = (volatile ehci_cap_regs_t *)controller.io_base;
     auto *op = (volatile ehci_op_regs_t *)(controller.io_base + cap->cap_length);
     const bool periodic = ep.transfer_type == 3;
@@ -1971,7 +2030,9 @@ void ehci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
         }
         const u32 token = ((volatile ehci_qtd *)ep.data_qtd)->token;
         async.result.hardware_status = token;
-        if (token & (1u << 7)) {
+        if (detached) {
+            transfer_complete(async, NOT_CONNECTED);
+        } else if (token & (1u << 7)) {
             // Retain controller-owned DMA/toggle state for recovery.
             fail(async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
         } else if (token & 0x7cu) {

@@ -238,6 +238,48 @@ static inline u64 port_to_address(u8 port, u64 io_base) {
     return (io_base + 0x54 + ((port - 1) << 2));  // calculate the port_base address
 }
 
+u32 ohci_controller::root_port_status(u8 port) {
+    if (!port || port > ports_count) return 0xffffffffu;
+    return *(volatile u32 *)port_to_address(port, controller.io_base);
+}
+
+void ohci_controller::acknowledge_port_change(u8 port, u32 status) {
+    if (!port || port > ports_count || status == 0xffffffffu) return;
+    // OHCI root-hub low bits are commands. Write only the upper change flags.
+    const u32 changes = status & 0xffff0000u;
+    if (changes)
+        *(volatile u32 *)port_to_address(port, controller.io_base) = changes;
+}
+
+bool ohci_controller::retire_port(u8 port, TimerSource &timer) {
+    (void)timer;
+    if (!ports || !port || port > ports_count || !ports[port - 1].device)
+        return true;
+    const u8 address = ports[port - 1].device->address;
+    for (u8 i = 0; i < state_count; ++i) {
+        if (states[i].device_address != address) continue;
+        ohci_address_state &state = states[i];
+        if (state.interfaces) for (u16 j = 0; j < state.interfaces_count; ++j) {
+            ohci_interface_state &iface = state.interfaces[j];
+            if (iface.endpoints) for (u16 k = 0; k < iface.endpoint_count; ++k)
+                if (iface.endpoints[k].scheduled) return false;
+        }
+        if (state.interfaces) for (u16 j = 0; j < state.interfaces_count; ++j) {
+            ohci_interface_state &iface = state.interfaces[j];
+            if (iface.endpoints) for (u16 k = 0; k < iface.endpoint_count; ++k)
+                if (iface.endpoints[k].dma.virtual_address)
+                    free_dma(iface.endpoints[k].dma.virtual_address);
+            delete[] iface.endpoints;
+        }
+        delete[] state.interfaces;
+        for (u8 j = i + 1; j < state_count; ++j) states[j - 1] = states[j];
+        --state_count;
+        if (!state_count) { delete[] states; states = nullptr; }
+        return true;
+    }
+    return true;
+}
+
 
 int ohci_controller::reset_port(u8 port, TimerSource &timer) {
     if (port < 1 || port > ports_count)
@@ -1011,11 +1053,16 @@ usb_device_descriptor ohci_controller::identify_device(u8 port, TimerSource &tim
 
 static u8 next_usb_address = 1;
 
-static inline u8 allocate_usb_address(void) {
-    if (next_usb_address > 127) 
-        return 0;  // no addresses left
-
-    return next_usb_address++;
+static inline u8 allocate_usb_address(usb_port_descriptor *ports, int count) {
+    for (u32 attempt = 0; attempt < 127; ++attempt) {
+        const u8 address = next_usb_address;
+        next_usb_address = address == 127 ? 1 : address + 1;
+        bool used = false;
+        for (int i = 0; i < count; ++i)
+            if (ports[i].device && ports[i].device->address == address) used = true;
+        if (!used) return address;
+    }
+    return 0;
 }
 
 
@@ -1054,7 +1101,7 @@ usb_device ohci_controller::set_address(usb_device_descriptor &desc, TimerSource
     usb_setup_packet *setup =
     (usb_setup_packet *)((u8 *)dummy_td + sizeof(ohci_td));
 
-    u8 address = allocate_usb_address();
+    u8 address = allocate_usb_address(ports, ports_count);
     if (!address) {
         free_dma(alloc.virtual_address);
         return device;
@@ -1925,12 +1972,12 @@ int ohci_controller::configure_endpoints(usb_device device, u16 bConfigurationVa
 
     u16 interfaces_count = states[state_count-1].interfaces_count;
     // we wanna use state_count-1 because state_count represents the highest object
-    states[state_count-1].interfaces = new ohci_interface_state[interfaces_count];
+    states[state_count-1].interfaces = new ohci_interface_state[interfaces_count]{};
 
     for (u16 i = 0; i < interfaces_count; i++) {
         states[state_count-1].interfaces[i].interface_number = device.interfaces[i].descriptor.bInterfaceNumber;
         states[state_count-1].interfaces[i].endpoint_count = device.interfaces[i].endpoint_count;
-        states[state_count-1].interfaces[i].endpoints = new ohci_endpoint_state[device.interfaces[i].endpoint_count];
+        states[state_count-1].interfaces[i].endpoints = new ohci_endpoint_state[device.interfaces[i].endpoint_count]{};
         for (u16 j = 0; j < states[state_count-1].interfaces[i].endpoint_count; j++) {
             states[state_count-1].interfaces[i].endpoints[j] = configure_endpoint(device, j, i, timer);
             if (states[state_count-1].interfaces[i].endpoints[j].dma.status != 0)
@@ -2238,6 +2285,17 @@ usb_transfer_result ohci_controller::start_transfer(usb_async_request &async, u3
 
 void ohci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     auto &ep = *(ohci_endpoint_state *)async.endpoint;
+    const u8 port_index = (u8)(async.result.endpoint_handle >> 16);
+    bool detached = false;
+    if (ports && port_index < ports_count) {
+        const u32 port_status = root_port_status(ports[port_index].port_number);
+        detached = !(port_status & CCS) || ports[port_index].hotplug_pending;
+        if (detached) {
+            ports[port_index].connected = false;
+            ports[port_index].hotplug_pending = true;
+            async.cancel = true;
+        }
+    }
     auto *regs = (volatile ohci_registers_t *)controller.io_base;
     auto *hc = (volatile ohci_hcca *)hcca;
     auto *ed = (volatile ohci_ed *)ep.ed;
@@ -2338,7 +2396,7 @@ void ohci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
         const u32 control = td->control;
         const u32 cc = (control >> 28) & 15u;
         async.result.hardware_status = control;
-        if (cc < 14 && !(async.retired & OHCI_TD_DATA_DONE)) {
+        if (!detached && cc < 14 && !(async.retired & OHCI_TD_DATA_DONE)) {
             if (phase_expired(async, timer, 20)) fail(FAILED);
             return;
         }
@@ -2349,6 +2407,10 @@ void ohci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
         if (!periodic && (async.saved_command & enable) && regs->bulk_head_ed)
             regs->command_status = OHCI_BLF;
         (void)regs->control;
+        if (detached) {
+            transfer_complete(async, NOT_CONNECTED);
+            return;
+        }
         if (cc >= 14) {
             transfer_complete(async, async.cancel ? TRANSFER_CANCELLED : TIMEOUT);
             return;

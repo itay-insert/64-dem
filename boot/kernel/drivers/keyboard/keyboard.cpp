@@ -46,10 +46,14 @@ void GlobalKeyboard::proccess_ascii(char ch) {
 }
 
 extern "C" void interrupt_idle();
+extern "C" void usb_keyboard_hotplug();
 
 extern "C" u8 read_key(bool ascii, bool wait) {
     if (!globalkeyboard)
         return 0;
+    // Shell input uses nonblocking read_key calls, so it must also drive
+    // deferred hotplug work after a controller reports a port change.
+    usb_keyboard_hotplug();
 
     if (ascii) {
         ascii_again:
@@ -59,8 +63,10 @@ extern "C" u8 read_key(bool ascii, bool wait) {
             globalkeyboard->former_ascii = (globalkeyboard->former_ascii + 1) % 256;
             return key;
         } else if (wait) {
-            while (globalkeyboard->former_ascii == globalkeyboard->ascii_top) 
+            while (globalkeyboard->former_ascii == globalkeyboard->ascii_top) {
                 interrupt_idle();
+                usb_keyboard_hotplug();
+            }
             goto ascii_again;
         }
         return 0;
@@ -72,10 +78,13 @@ extern "C" u8 read_key(bool ascii, bool wait) {
             globalkeyboard->former_scancode = (globalkeyboard->former_scancode + 1) % 256;
             return key;
         } else if (wait) {
-            while (globalkeyboard->former_scancode == globalkeyboard->scancode_top)
+            while (globalkeyboard->former_scancode == globalkeyboard->scancode_top) {
                 interrupt_idle();
+                usb_keyboard_hotplug();
+            }
             goto scancode_again;
         }
         return 0;
     }
+    return 0;
 }

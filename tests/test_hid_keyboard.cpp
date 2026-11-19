@@ -5,6 +5,8 @@
 #include "drivers/acpiPM.hpp"
 GlobalKeyboard *globalkeyboard = nullptr;
 u64 acpiadd = 0;
+extern "C" void interrupt_idle() {}
+extern "C" void usb_keyboard_hotplug() {}
 // Hardware discovery is excluded from this report decoder test.
 void HIDK::init() {}
 void PS2K::init() {}

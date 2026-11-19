@@ -1,7 +1,7 @@
 #include <stdarg.h>
 #include <stddef.h>
-#include "stdio.h"
 #include "sys.h"
+#include "stdio.h"
 
 const char *digits = "0123456789";
 

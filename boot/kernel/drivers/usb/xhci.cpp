@@ -29,11 +29,13 @@
 #define TRB_SET_TR_DEQUEUE 16
 #define TRB_RESET_TSP     (1u << 9)
 #define XHCI_USB_TRANSACTION_ERROR 4
+#define XHCI_PORTSC_CHANGE_MASK (0x7fu << 17)
 
 #define TRT_NO_DATA     0
 #define TRT_OUT         2
 #define TRT_IN          3
 
+static inline u32 xhci_portsc_neutral(u32 value);
 
 xhci_controller::xhci_controller() {
     memcpy(vendor, "xHCI", sizeof(vendor));
@@ -444,6 +446,31 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
         } else if (type == 34) { // Port Status Change Event
             const u32 port = event.d0 >> 24;
             if (port != 0 && port < 256) {
+                // Capture the controller's state when an enumerated device
+                // changes links. The event itself gives only the port number.
+                if (ports && port <= (u32)ports_count &&
+                    ports[port - 1].device && ports[port - 1].device->discovered) {
+                    const u32 previous = ports[port - 1].port_status;
+                    auto *portsc = (volatile u32 *)port_to_address((u8)port);
+                    const u32 current = *portsc;
+                    if ((current & (1u << 17)) || !(current & CCS))
+                        ports[port - 1].hotplug_pending = true;
+                    printf("xHCI: port event port=%u previous=0x%ux current=0x%ux "
+                           "ccs=%u ped=%u pls=%u changes=0x%ux usbsts=0x%ux\n",
+                           port, previous, current, current & CCS,
+                           (current & PED) != 0, (current & PLS_MASK) >> 5,
+                           current & XHCI_PORTSC_CHANGE_MASK, op->usbsts);
+                    if (current & XHCI_PORTSC_CHANGE_MASK)
+                        *portsc = xhci_portsc_neutral(current) |
+                                  (current & XHCI_PORTSC_CHANGE_MASK);
+                    ports[port - 1].port_status = *portsc;
+                }
+                if (ports && port <= (u32)ports_count) {
+                    const u32 status = *(volatile u32 *)port_to_address((u8)port);
+                    if (!(status & CCS) ||
+                        ((status & (1u << 17)) && ports[port - 1].device))
+                        ports[port - 1].hotplug_pending = true;
+                }
                 __atomic_fetch_or(&pending_port_changes[port >> 5],
                                   1u << (port & 31), __ATOMIC_RELEASE);
             }
@@ -473,7 +500,8 @@ extern "C" u32 xhci_controller::xhci_process_events(void) {
                         request.slot_id != slot_id || request.endpoint_id != endpoint_id) continue;
                     if (trb_pointer != request.trb_physical) {
                         if (completion_code == XHCI_USB_TRANSACTION_ERROR)
-                            printf("xHCI: unmatched transaction error, event TRB=0x%lx expected=0x%lx\n",
+                            printf("xHCI: unmatched transaction error slot=%u ep=%u remaining=%u event=0x%lx expected=0x%lx\n",
+                                   (u32)slot_id, (u32)endpoint_id, event.d2 & 0xffffffu,
                                    trb_pointer, request.trb_physical);
                         continue;
                     }
@@ -762,6 +790,19 @@ void xhci_controller::scan_ports(TimerSource &timer) {
         if (elapsed != 500)
             wait_ms(timer, 10);
     }
+    // Port-change flags left by attach/reset would suppress a later event:
+    // the controller signals only when the OR of these flags rises from zero.
+    for (int i = 0; i < ports_count; ++i) {
+        auto *portsc = (volatile u32 *)(op_base + XHCI_PORTSC_BASE +
+                                        i * XHCI_PORTSC_STRIDE);
+        const u32 status = *portsc;
+        if (status == 0xffffffffu)
+            continue;
+        if (status & XHCI_PORTSC_CHANGE_MASK)
+            *portsc = xhci_portsc_neutral(status) |
+                      (status & XHCI_PORTSC_CHANGE_MASK);
+        ports[i].port_status = *portsc;
+    }
     u32 connected_count = 0;
     for (int i = 0; i < ports_count; ++i)
         if (ports[i].connected)
@@ -775,6 +816,35 @@ void xhci_controller::scan_ports(TimerSource &timer) {
 
 static inline u32 xhci_portsc_neutral(u32 value) {
     return (value & RO_MASK) | (value & RWS_MASK);
+}
+
+u32 xhci_controller::root_port_status(u8 port) {
+    if (!port || port > ports_count) return 0xffffffffu;
+    return *(volatile u32 *)port_to_address(port);
+}
+
+void xhci_controller::acknowledge_port_change(u8 port, u32 status) {
+    if (!port || port > ports_count || status == 0xffffffffu) return;
+    const u32 changes = status & XHCI_PORTSC_CHANGE_MASK;
+    if (changes)
+        *(volatile u32 *)port_to_address(port) = xhci_portsc_neutral(status) | changes;
+}
+
+bool xhci_controller::retire_port(u8 port, TimerSource &timer) {
+    if (!slots || !port || port > ports_count) return false;
+    usb_slot &slot = slots[port - 1];
+    if (!slot.slot_id) return true;
+    if (!disable_device_slot(slot.slot_id, timer)) return false;
+    dcbaa[slot.slot_id] = 0;
+    for (u32 dci = 2; dci < 32; ++dci) {
+        xhci_endpoint_ring &ring = slot.endpoint_rings[dci];
+        if (ring.packet_dma.virtual_address) free_dma(ring.packet_dma.virtual_address);
+        if (ring.dma.virtual_address) free_dma(ring.dma.virtual_address);
+    }
+    if (slot.EP0.virtual_address) free_dma(slot.EP0.virtual_address);
+    if (slot.output_context.virtual_address) free_dma(slot.output_context.virtual_address);
+    slot = {};
+    return true;
 }
 
 int xhci_controller::reset_port(u8 port, TimerSource &timer) {
@@ -1799,6 +1869,10 @@ usb_transfer_result xhci_controller::start_transfer(
         !dcbaa || !doorbells || port_index >= (u32)ports_count)
         return result;
     usb_port_descriptor &port = ports[port_index];
+    if (port.hotplug_pending) {
+        result.status_code = NOT_CONNECTED;
+        return result;
+    }
     if (!port.connected) {
         result.status_code = NOT_CONNECTED;
         return result;
@@ -1827,6 +1901,15 @@ usb_transfer_result xhci_controller::start_transfer(
     }
     if (!port.port_number || port.port_number > ports_count)
         return result;
+    // The port descriptor is a boot-time snapshot. A device may disappear
+    // after enumeration while its slot and endpoint contexts still exist.
+    const u32 port_status = *(volatile u32 *)port_to_address(port.port_number);
+    if (!(port_status & CCS)) {
+        port.port_status = port_status;
+        port.connected = false;
+        result.status_code = NOT_CONNECTED;
+        return result;
+    }
     usb_slot &slot = slots[port.port_number - 1];
     const u32 dci = number * 2u + (in ? 1u : 0u);
     xhci_endpoint_ring &endpoint_ring = slot.endpoint_rings[dci];
@@ -1885,6 +1968,22 @@ usb_transfer_result xhci_controller::start_transfer(
 
 void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &timer) {
     xhci_process_events();
+    const u32 port_index = (async.result.endpoint_handle >> 16) & 0xffu;
+    if (ports && port_index < (u32)ports_count) {
+        usb_port_descriptor &port = ports[port_index];
+        if (port.port_number && port.port_number <= ports_count) {
+            const u32 port_status = *(volatile u32 *)port_to_address(port.port_number);
+            if (!(port_status & CCS) || port.hotplug_pending) {
+                port.port_status = port_status;
+                port.connected = false;
+                async.result.hardware_status = async.event_received ? async.event[2] : 0;
+                printf("xHCI: port %u changed during transfer, PORTSC=0x%ux\n",
+                       (u32)port.port_number, port_status);
+                transfer_complete(async, NOT_CONNECTED);
+                return;
+            }
+        }
+    }
     if (!async.event_received) {
         if (async.cancel || transfer_expired(async, timer) || controller.needs_reinit) {
             // Stop Endpoint recovery is not implemented. Quarantine DMA and
@@ -1901,7 +2000,39 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
     async.result.hardware_status = completion.d2;
     const u32 code = completion.d2 >> 24;
     const u32 residual = completion.d2 & 0xffffffu;
-    u32 recovery_code = 0;
+    if (code != 1 && !(async.in && code == 13) &&
+        endpoint_ring.endpoint_type == 7 && async.xhci_retries == 0) {
+        u32 port_number = 0;
+        u32 port_status = 0;
+        u32 endpoint_state = 0xff; // 1 running, 2 halted, 3 stopped, 4 error.
+        const u32 port_index = (async.result.endpoint_handle >> 16) & 0xffu;
+        if (ports && slots && port_index < (u32)ports_count) {
+            port_number = ports[port_index].port_number;
+            if (port_number && port_number <= (u32)ports_count) {
+                const auto *cap = (volatile xhci_cap_regs *)controller.io_base;
+                const u32 context_bytes = (cap->hccparams1 & CSZ) ? 64u : 32u;
+                const usb_slot &slot = slots[port_number - 1];
+                if (slot.output_context_virtual) {
+                    auto *context = (volatile u32 *)(slot.output_context_virtual +
+                                                       (u64)async.endpoint_id * context_bytes);
+                    endpoint_state = context[0] & 7u;
+                }
+                auto *op = (volatile xhci_op_regs *)(controller.io_base + cap->caplength);
+                auto *portsc = (volatile u32 *)((u8 *)op + 0x400 +
+                                                (port_number - 1) * 0x10);
+                port_status = *portsc;
+            }
+        }
+        const auto *ring = (volatile XhciTrb *)endpoint_ring.dma.virtual_address;
+        const u32 trb_length = ring[endpoint_ring.enqueue_index].d2 & 0x1ffffu;
+        printf("xHCI: transfer error code=%u remaining=%u requested=%u TRB=%u\n",
+               code, residual, async.length, trb_length);
+        printf("xHCI: slot=%u ep=%u state=%u port=%u portsc=0x%ux\n",
+               (u32)async.slot_id, (u32)async.endpoint_id, endpoint_state,
+               port_number, port_status);
+    }
+    u32 reset_code = 0;
+    u32 dequeue_code = 0;
     auto reset_endpoint = [&]() {
         XhciTrb reset = {};
         reset.d3 = TRB_TYPE(TRB_RESET_ENDPOINT) | TRB_RESET_TSP |
@@ -1909,8 +2040,8 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
         const u64 command_phys = submit_command(reset);
         XhciTrb reset_completion = {};
         const bool completed = wait_command(timer, command_phys, &reset_completion, 500);
-        recovery_code = completed ? reset_completion.d2 >> 24 : 255;
-        return recovery_code == 1;
+        reset_code = completed ? reset_completion.d2 >> 24 : 255;
+        return reset_code == 1;
     };
     bool recovery_command_failed = false;
     if (code == XHCI_USB_TRANSACTION_ERROR && endpoint_ring.endpoint_type == 7 &&
@@ -1948,8 +2079,8 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
             const u64 dequeue_phys = submit_command(dequeue);
             XhciTrb dequeue_completion = {};
             const bool completed = wait_command(timer, dequeue_phys, &dequeue_completion, 500);
-            recovery_code = completed ? dequeue_completion.d2 >> 24 : 255;
-            if (recovery_code == 1) {
+            dequeue_code = completed ? dequeue_completion.d2 >> 24 : 255;
+            if (dequeue_code == 1) {
                 endpoint_ring.enqueue_index = next_index;
                 endpoint_ring.cycle = next_cycle;
                 ++endpoint_ring.consecutive_errors;
@@ -1961,8 +2092,9 @@ void xhci_controller::advance_transfer(usb_async_request &async, TimerSource &ti
     }
     if (code != 1 && !(async.in && code == 13)) {
         if (endpoint_ring.endpoint_type == 7)
-            printf("xHCI: interrupt transfer code=%u residual=%u requested=%u retries=%u recovery=%u\n",
-                   code, residual, async.length, (u32)async.xhci_retries, recovery_code);
+            printf("xHCI: terminal error code=%u retries=%u drops=%u reset=%u dequeue=%u\n",
+                   code, (u32)async.xhci_retries,
+                   (u32)endpoint_ring.consecutive_errors, reset_code, dequeue_code);
         if (recovery_command_failed || code != XHCI_USB_TRANSACTION_ERROR ||
             endpoint_ring.endpoint_type != 7)
             controller.needs_reinit = true;

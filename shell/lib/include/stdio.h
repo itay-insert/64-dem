@@ -79,7 +79,7 @@ static inline unsigned int ascii_to_digit(char ch) {
 
 
 
-int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb_change_cnt) {
+static inline int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb_change_cnt) {
     if (maxlen > 256)
         return 0;
 

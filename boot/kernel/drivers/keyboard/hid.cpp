@@ -16,6 +16,7 @@ static void init_error(const char *reason) {
 
 void HIDK::init() {
     if (ready) return;
+    controller = nullptr;
     if (!keyboard_usb_found) {
         printf("USB keyboard: no boot-keyboard interrupt-IN endpoint discovered\n");
         return;
@@ -80,10 +81,21 @@ void HIDK::completion(void *context, const usb_transfer_result &result, const u8
         return;
     }
     if (result.status_code != TRANSFER_SUCCESS) {
-        printf("USB keyboard: transfer failed, status=%d hardware=0x%ux length=%u\n",
-            result.status_code, result.hardware_status, result.actual_length);
+        if (result.status_code == NOT_CONNECTED)
+            printf("USB keyboard: disconnected, hardware=0x%ux\n",
+                result.hardware_status);
+        else
+            printf("USB keyboard: transfer failed, status=%d hardware=0x%ux length=%u\n",
+                result.status_code, result.hardware_status, result.actual_length);
+        printf("USB keyboard: controller=%u index=%u endpoint_handle=0x%ux\n",
+            (u32)result.controller_type, (u32)result.controller_index,
+            result.endpoint_handle);
         keyboard.process_report({}); // Release held keys on terminal failure.
         keyboard.ready = false;
+        const u32 port_index = (result.endpoint_handle >> 16) & 0xffu;
+        if (keyboard.controller && keyboard.controller->ports &&
+            port_index < (u32)keyboard.controller->ports_count)
+            keyboard.controller->ports[port_index].hotplug_pending = true;
         return;
     }
     if (result.actual_length != sizeof(hid_keyboard_report)) {
