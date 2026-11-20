@@ -78,6 +78,13 @@ cc -std=c11 -Wall -Wextra -Werror -O1 -g \
     -o /tmp/64-dem-test-ata
 /tmp/64-dem-test-ata
 
+c++ -std=c++11 -Wall -Wextra -Werror -O1 -g -fno-rtti -ffreestanding \
+    -ffunction-sections -fdata-sections -Wl,--gc-sections -fsanitize=undefined \
+    -Dprintf=kernel_printf -Dstat=kernel_stat $kernel_includes \
+    tests/test_fat32_files.cpp boot/kernel/filesystem/fat32.cpp \
+    boot/kernel/filesystem/fat32sys.cpp -o /tmp/64-dem-test-fat32-files
+/tmp/64-dem-test-fat32-files
+
 cc -std=c11 -Wall -Wextra -Werror -Wno-error -O1 -g \
     -fsanitize=undefined -DVA_TREE=0x300000000ULL \
     $kernel_includes tests/test_va_alloc.c \

@@ -20,6 +20,7 @@ extern fs_read
 extern fs_write
 extern fs_seek
 extern fs_close
+extern stat
 extern fs_start
 extern former_user_rsp
 extern print_proccess_mem
@@ -277,6 +278,12 @@ jne skip_getshell
 call getshellsize
 jmp exit
 skip_getshell:
+
+cmp rax, 23
+jne skip_fs_stat
+call stat
+jmp exit
+skip_fs_stat:
 
 exit:
 

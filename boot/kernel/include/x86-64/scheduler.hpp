@@ -9,9 +9,8 @@ typedef struct file_id file_id;
 struct file_id {
     u64 file_handle;
     u64 file_offset;
-    u32 pid;
     int flags;
-    u64 file_size;
+    bool active;
 };
 
 
@@ -34,4 +33,4 @@ typedef struct {
 
 
 
-void StartProccess(u64 file_handle, BootFileSystem *fat32);
+void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg);

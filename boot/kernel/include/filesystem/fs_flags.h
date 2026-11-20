@@ -7,6 +7,21 @@
 #define WR_ONLY 1
 #define RD_WR 2
 #define ACCMODE 3
+#define FS_OPEN_CREATE    0x04
+#define FS_OPEN_EXCLUSIVE 0x08
+#define FS_OPEN_TRUNCATE  0x10
+#define FS_OPEN_APPEND    0x20
+
+/* Stable error values returned as negative results by fs_open. */
+#define FS_OPEN_ERR_NO_ENTRY   2
+#define FS_OPEN_ERR_IO         5
+#define FS_OPEN_ERR_ACCESS    13
+#define FS_OPEN_ERR_EXISTS    17
+#define FS_OPEN_ERR_NOT_DIR   20
+#define FS_OPEN_ERR_DIRECTORY 21
+#define FS_OPEN_ERR_INVALID   22
+#define FS_OPEN_ERR_NO_SPACE  28
+
 
 
 #define S_IRUSR    0400

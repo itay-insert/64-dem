@@ -1,3 +1,4 @@
+#include "drivers/keyboard/key_codes.h"
 #include "x86-64/ports.h"
 #include "drivers/keyboard/keyboard.hpp"
 #include "drivers/keyboard/ps2.hpp"
@@ -17,7 +18,7 @@ struct KeyMap {
 };
 
 static const KeyMap keymap[] = {
-    {0x02, '1', '!'}, {0x03, '2', '@'},
+    {0x01, '\x1b', '\x1b'}, {0x02, '1', '!'}, {0x03, '2', '@'},
     {0x04, '3', '#'}, {0x05, '4', '$'},
     {0x06, '5', '%'}, {0x07, '6', '^'},
     {0x08, '7', '&'}, {0x09, '8', '*'},
@@ -105,9 +106,10 @@ char scancode_to_ascii(u8 scancode)
     u8 code = scancode & 0x7F;
 
     if (ext) {
-        if (!released && code == 0x1C) return '\n';
-        if (!released && code == 0x35) return '/';
-        return 0;
+        if (released) return 0;
+        if (code == 0x1C) return '\n';
+        if (code == 0x35) return '/';
+        return dem_arrow_key(code);
     }
 
     switch (code) {

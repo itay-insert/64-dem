@@ -9,6 +9,7 @@
 #include "drivers/display/vga.h"
 
 extern int GbPageSupport;
+extern BootFileSystem *fat32_fs;
 extern "C" void clock();
 
 Proccess *pid = nullptr;
@@ -134,7 +135,24 @@ void construct_mapping(Proccess *proc, u64 size, u64 physical_address) {
 }
 
 
-void StartProccess(u64 file_handle, BootFileSystem *fat32) {
+void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
+    constexpr u64 user_base = 0x40000000;
+    char argument[4096];
+    u64 argument_size = 0;
+    if (arg) {
+        if (!pid || arg < user_base || arg - user_base >= pid[current_proccess].allocated_bytes)
+            return;
+        u64 available = pid[current_proccess].allocated_bytes - (arg - user_base);
+        const char *source = (const char *)arg;
+        while (argument_size < sizeof(argument) && argument_size < available) {
+            char ch = source[argument_size];
+            argument[argument_size++] = ch;
+            if (ch == '\0')
+                break;
+        }
+        if (argument[argument_size - 1] != '\0')
+            return;
+    }
 
     Proccess *new_pid = increase_proccesses();
     current_proccess = active_proccesses - 1;
@@ -148,7 +166,7 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32) {
     size = (size + 0x41000);
 
     // _start calls main, so its initial stack must be 16-byte aligned.
-    new_pid->rsp = (0x40000000ULL + size) & ~0xFULL;
+    new_pid->rsp = (user_base + size - argument_size) & ~0xFULL;
     new_pid->file_count = 0;
     new_pid->files = nullptr;
 
@@ -165,7 +183,11 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32) {
 
     load_elf_64(file_handle, fat32, new_pid->buffer);
 
-    enter_userspace(new_pid->rsp);
+    // The child replaces the caller's mappings. Put its argument above its initial stack.
+    u64 child_argument = argument_size ? new_pid->rsp : 0;
+    if (argument_size)
+        memcpy((void *)child_argument, argument, argument_size);
+    enter_userspace(new_pid->rsp, child_argument);
     
 }
 
@@ -200,7 +222,13 @@ void terminate_procces(int index) {
     // Process images are mapped allocations, not kmalloc allocations.
     free(pid[index].buffer, true);
     delete[] pid[index].MappedPages;
-    delete[] pid[index].files;
+    for (int fd = 0; fd < pid[index].file_count; ++fd) {
+        const file_id &file = pid[index].files[fd];
+        if (file.active)
+            fat32_fs->close_file(file.file_handle);
+    }
+    if (pid[index].files)
+        kfree(pid[index].files);
 
     for (int i = index; i + 1 < active_proccesses; ++i)
         pid[i] = pid[i + 1];

@@ -1,3 +1,4 @@
+#include "drivers/keyboard/key_codes.h"
 #include <assert.h>
 #include <stdio.h>
 #include "drivers/keyboard/hid.hpp"
@@ -43,11 +44,11 @@ int main() {
     count = base->scancode_top;
     hid.process_report({0, 0, {0x4f}}); // Right arrow, E0 4D
     assert(u8(base->buffer[count]) == 0xe0 && u8(base->buffer[count+1]) == 0x4d);
-    assert(base->ascii_top == 5);
+    assert(base->ascii_top == 6 && u8(base->ascii[5]) == DEM_KEY_RIGHT);
     hid.process_report({0, 0, {}});
     hid.process_report({0, 0, {0x53}}); // Num lock
     hid.process_report({0, 0, {0x59}});
-    assert(base->ascii[5] == '1');
+    assert(base->ascii[6] == '1');
     hid.process_report({0, 0, {}});
     base->scancode_top = 255;
     base->ascii_top = 255;

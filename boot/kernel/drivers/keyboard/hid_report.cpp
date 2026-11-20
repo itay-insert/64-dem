@@ -1,4 +1,5 @@
 #include "drivers/keyboard/hid.hpp"
+#include "drivers/keyboard/key_codes.h"
 
 
 extern GlobalKeyboard *globalkeyboard;
@@ -92,6 +93,9 @@ void HIDK::key(u8 usage, bool pressed, u8 modifiers) {
             case 0x55: character = '*'; break;
             case 0x56: character = '-'; break;
             case 0x57: character = '+'; break;
+            case 0x4f: case 0x50: case 0x51: case 0x52:
+                character = dem_arrow_key(code & 0xff);
+                break;
             default:
                 if (usage >= 0x59 && usage <= 0x63 && (num_lock ^ shift))
                     character = "1234567890."[usage - 0x59];

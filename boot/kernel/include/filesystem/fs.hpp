@@ -31,21 +31,15 @@ typedef struct {
 
 
 typedef struct {
-    u8 *cache;
-    int cluster_index;
-} cache_descriptor;
-
-typedef struct {
     u32 starting_cluster;
     u32 last_cluster;
-    cache_descriptor *cache;
+    u8 *cache;
     int cluster_count;
-    char *name;
     u64 directory_offset;
     u32 file_size;
     bool dirty;
+    u32 references;
 } file_cache;
-
 
 typedef struct {
     u32 index;
@@ -57,64 +51,37 @@ typedef struct {
 } Paths_table;
 
 typedef struct {
-    u8 *cache;
-    u32 index;
-} Search_ret;
-
-typedef struct {
     bool status;
     u32 index;
 } Path_ret;
-
-typedef struct FAT32_cluster FAT32_cluster;
-
-struct FAT32_cluster {
-    FAT32_cluster *previous_cluster;
-    u32 previous_cluster_index;
-    u32 fat_value;
-    FAT32_cluster *next_cluster;
-    u32 next_cluster_index;
-};
-
 
 class BootFileSystem {
     private:
         u32 first_data_lba = 0;
         u8 SectorsPerCluster = 0;
-        u8 NumOfFATS = 0;
-        u16 RootEntries = 0;
+        u8 fat_copies = 0;
+        u32 sectors_per_fat = 0;
         u32 cluster_size = 0;
         u32 fat_lba = 0;
         u32 RootCluster = 0;
         u32 Cluster_To_LBA(u32 cluster);
-        u32 LBA_to_Cluster(u32 lba);
         u32 find_next_cluster(u32 cluster);
         u32 load_clusters(u32 cluster, u32 count, void *buffer);
         u32 write_clusters(u32 cluster, u32 count, void *buffer);
-        u64 *Paths;
-        Paths_table *table;
-        u32 Path_count;
-        FAT32_cluster *cluster_map;
-        u32 clusters;
-        void scan_fat(void);
-        void fat32_set_entry(FAT32_DIR *dir, bool lfn, const char *name);
+        u64 *Paths = nullptr;
+        Paths_table *table = nullptr;
+        u32 Path_count = 0;
+        u32 *cluster_map = nullptr;
+        u32 clusters = 0;
+        bool scan_fat();
         Path_ret increase_paths(u64 address, char *path, int cluster_count, u32 starting_cluster);
-        bool increase_files(Paths_table *table, char *filename,
-                            const FAT32_DIR &entry, u64 directory_offset);
-        u64 resize_cache(u64 address, u64 old_count, u64 new_count);
-        int scan_dir(u32 cluster);
-        u32 return_last_cluster(u32 cluster, int count);
-        Search_ret search_path(char *path);
-        void allocate_clusters(file_cache *file, u32 cluster_count, bool alloc);
-        void fat32_unlink(u32 cluster);
-        void fat32_link(u32 current, u32 next);
-        void fat32_free(u32 cluster, bool dont);
-        void mark_as_eoc(u32 cluster);
-        void clusters_alloc(u32 count, u32 cluster_link);
-        u32 find_free_cluster(void);
-        void clusters_dealloc(u32 count, u32 cluster_link);
-        bool set_entry(const char *entry_name, bool lfn, FAT32_DIR *dir);
-        bool update_parent_dir(const char *path_name, const char *dir, u32 new_size);
+        bool valid_cluster(u32 cluster) const;
+        FAT32_DIR *find_entry(u32 index, const char *filename) const;
+        int reserve_file_slot(Paths_table &parent);
+        file_cache *get_open_file(u64 handle) const;
+        bool ensure_file_clusters(file_cache &file, u32 count, bool extend);
+        void set_fat_entry(u32 cluster, u32 value);
+        u32 find_free_cluster(u32 start = 2);
 
     public:
         u64 SizeInBytes;
@@ -126,14 +93,21 @@ class BootFileSystem {
         BootPartition *Partition;
         void fs_init(disk_drive *boot_drive, BootPartition *partition, u32 lba, u64 size);
         Path_ret open_path(const char *path);
+        Path_ret find_open_path(const char *path) const;
+        bool lookup_entry(u32 index, const char *filename, FAT32_DIR &entry) const;
         u64 open_file_by_path(const char *path, const char *filename);
         u64 open_file_by_index(u32 index, const char *filename);
         void close_file(u64 file_handle);
         void close_path(u32 path_index);
-        void read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
-        void write_file(u64 file_handle, u64 offset, u32 size, const void *buffer);
-        bool fat32_make_entry(u32 path_index, const char *entry_name);
+        bool read_file(u64 file_handle, u64 offset, u32 size, void *buffer);
+        bool write_file(u64 file_handle, u64 offset, u32 size, const void *buffer);
+        bool fat32_make_entry(u32 path_index, const char *entry_name, bool read_only = false);
+        bool truncate_file(u64 handle);
         void list_path(u32 index);
+        // Look up an open file. A cache miss returns 0xFFFFFFFF.
+        u64 get_file_handle(const char *path, const char *filename);
+        // Copy the cached directory entry. An out-of-range handle returns a zeroed entry.
+        FAT32_DIR get_file_dir(u64 file_handle) const;
         char *return_str(u32 path_index);
         u64 get_filesize(u64 file_handle);
 };

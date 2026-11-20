@@ -6,7 +6,7 @@ KERNEL_EXTERN_C_BEGIN
 
 #include "uint_definitions.h"
 u64 get_syscall(void);
-void enter_userspace(u64 user_rsp);
+void enter_userspace(u64 user_rsp, u64 arg);
 void resume_userspace();
 
 KERNEL_EXTERN_C_END

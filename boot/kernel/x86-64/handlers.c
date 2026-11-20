@@ -161,10 +161,10 @@ void timer_handler(u64 cs, u64 rip) {
 
     while (stdout_pc != stdout_wc) {
         if (stdout[stdout_pc] == '\x1b') {
-            stdout_pc = stdout_parse((stdout_pc+1) % 256);
+            stdout_pc = stdout_parse((stdout_pc + 1) % sizeof(stdout));
         } else {
             printf("%c", stdout[stdout_pc]);
-            stdout_pc = (stdout_pc + 1) % 256;
+            stdout_pc = (stdout_pc + 1) % sizeof(stdout);
         }
     }
 

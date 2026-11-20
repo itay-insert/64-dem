@@ -19,6 +19,7 @@ global fs_read
 global fs_write
 global fs_seek
 global fs_close
+global fs_stat
 global fs_start
 global print_drives
 global beep
@@ -149,5 +150,10 @@ stdout_write:
 
 getshellsize:
     mov rax, 22
+    syscall
+    ret
+
+fs_stat:
+    mov rax, 23
     syscall
     ret

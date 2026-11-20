@@ -64,7 +64,7 @@ int main() {
         int index = 0;
         again:
         u8 key = read_key(true, false);
-        if (key != 0 && key != '\n' && key != '\b') {
+        if (key >= ' ' && key < 0x7f) {
             buffer[index] = key;
             index = (index + 1) % 256;
             buffer[index] = '\0';
@@ -77,23 +77,24 @@ int main() {
                 buffer[index+1] = '\0';
             }
         }
-        u8 scancode = read_key(false, false);
-        if (key != '\n' && scancode != 0x01) goto again;
-    
-        if (scancode == 0x01)
+        if (key == 0x1b)
             return 0;
+        if (key != '\n')
+            goto again;
 
         printf("\n");
 
+        char *command = buffer + (buffer[0] == '/');
         u64 count = sizeof(commands) / sizeof(u64);
         for (u64 i = 0; i < count; i++) {
             int size = get_size(commands[i]);
 
 
-            if (memcmp(buffer, commands[i], size) == 0) {
+            if (memcmp(command, commands[i], size) == 0 &&
+                (command[size] == ' ' || command[size] == '\0')) {
                 switch (i) {
                     case 0 : {
-                        printf("%s", buffer + size + 1);
+                        printf("%s", command + size + (command[size] == ' '));
                         goto exit;
                     }
 
@@ -122,13 +123,32 @@ int main() {
                     }
 
                     case 6 : {
-                        ls(buffer+size+1);
+                        ls(command + size + (command[size] == ' '));
                         goto exit;
                     }
                     
                     case 7 : {
-                        int fd = fs_open(buffer+size+1, RD_ONLY, 0);
-                        fs_start(fd);
+                        char *program = command + size;
+                        while (*program == ' ')
+                            ++program;
+                        if (!*program) {
+                            printf("Usage: start PROGRAM [FILENAME]");
+                            goto exit;
+                        }
+                        char *argument = program;
+                        while (*argument && *argument != ' ')
+                            ++argument;
+                        if (*argument) {
+                            *argument++ = '\0';
+                            while (*argument == ' ')
+                                ++argument;
+                        }
+                        int fd = fs_open(program, RD_ONLY, 0);
+                        if (fd < 0) {
+                            printf("Cannot open %s", program);
+                            goto exit;
+                        }
+                        fs_start(fd, *argument ? (u64)argument : 0);
                         fs_close(fd);
                         goto exit;
                     }
@@ -148,7 +168,7 @@ int main() {
                     case 10 : {
                         unsigned int hz = 0;
                         u64 ms = 0;
-                        take_values(buffer+size+1, &hz, &ms);
+                        take_values(command + size + (command[size] == ' '), &hz, &ms);
                         beep(hz, ms);
                         goto exit;
                     }

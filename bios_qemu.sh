@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${BIOS_IMAGE:-$ROOT_DIR/bios-disk.img}"
-IMAGE_SIZE_MIB="${BIOS_IMAGE_SIZE_MIB:-128}"
+IMAGE_SIZE_MIB="${BIOS_IMAGE_SIZE_MIB:-2048}"
 PARTITION_START=2048
 SECTOR_SIZE=512
 RUN_QEMU=true

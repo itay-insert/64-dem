@@ -8,6 +8,10 @@
 /* Hexadecimal output is uppercase and padded to 2, 4, 8, or 16 digits. */
 int printf(const char *format, ...);
 
+static inline int stat(const char *path, struct fs_stat *st) {
+    return fs_stat(path, st) == 0 ? 0 : -1;
+}
+
 
 static inline int get_size(char *str) {
     int count = 0;

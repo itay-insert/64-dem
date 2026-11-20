@@ -9,6 +9,13 @@ typedef struct {
     u8 hour, min, sec;
 } rtc_data;
 
+struct fs_stat {
+    u32 mode;
+    u32 reserved;
+    u64 size;
+    i64 mtime;
+};
+
 void kprintf(const char *str);
 u8 read_key(bool ascii, bool wait);
 void *malloc(u64 Size);
@@ -22,12 +29,13 @@ void acpi(bool shutdown);
 void ls(char *path);
 void backspace(void);
 
-int fs_open(char *path, int flags, unsigned mode);
+int fs_open(const char *path, int flags, unsigned mode);
 i64 fs_read(int fd, void *buffer, u64 count);
 i64 fs_write(int fd, const void *buffer, u64 count);
 i64 fs_seek(int fd, i64 offset, int whence);
 int fs_close(int fd);
-void fs_start(int fd);
+int fs_stat(const char *path, struct fs_stat *st);
+void fs_start(int fd, u64 arg);
 void print_drives(void);
 void beep(unsigned int hz, u64 ms);
 void set_begin(void);
