@@ -120,4 +120,9 @@ static inline void mch_write(unsigned char *s, int len) {
     stdout_write(s, len);
 }
 
+
+static inline void mch_sleep(long ms, int busy) {
+    sleep_ms((u64)ms);
+}
+
 #endif
