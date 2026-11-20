@@ -92,6 +92,7 @@ int size = 0;
 
 int mode = STDOUT;
 
+
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
     fb_phys = fb_base;
     size = p_scan * vres;
@@ -652,14 +653,14 @@ void clear_screen(void) {
 
 
 
-static inline void clear_row(int row) {
+static void clear_row(int row) {
     for (int coulmn = 0; coulmn < coulmns; coulmn++)
         draw_char(' ', coulmn, row); // fill coulmns with blank
 
 }
 
 
-static inline void copy_row_to_row(int dest, int src) {
+static void copy_row_to_row(int dest, int src) {
     for (int coulmn = 0; coulmn < coulmns; coulmn++)
         diff[(dest * coulmns) + coulmn] = true; // update diff on destination row for screen update
 
@@ -667,9 +668,10 @@ static inline void copy_row_to_row(int dest, int src) {
     src = src << 4;
 
     u32 *vga = (u32 *)fb_addr;
-    for (int x = 0; x < p_scanln; x++) 
-        vga[(dest * p_scanln) + x] = vga[(src * p_scanln) + x]; // copy source row to destination
-
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < p_scanln; x++) 
+            vga[((dest+y) * p_scanln) + x] = vga[((src+y) * p_scanln) + x]; // copy source row to destination
+    }
     
 }
 
@@ -698,4 +700,50 @@ static inline void shift_row_up(int row) {
 
 
 
+void make_blank_row(void) {
+    for (int row = (rows - 1); row > (cursor.row-1); row--) {
+        shift_row_down(row);
+    }
 
+    clear_row(cursor.row);
+}
+
+
+void delete_row(void) {
+    clear_row(cursor.row);
+    for (int row = (cursor.row+1); row < rows; row++) {
+        shift_row_up(row);
+    }
+
+    clear_row(rows-1);
+}
+
+
+void make_blank_rows(int n) {
+    int row_org = cursor.row;
+
+    if (n > rows - cursor.row)
+        n = rows - cursor.row;
+
+    for (int i = 0; i < n; i++) {
+        make_blank_row();
+        cursor.row++;
+    }
+
+    cursor.row = row_org;
+}
+
+
+void delete_rows(int n) {
+    int row_org = cursor.row;
+
+    if (n > rows - cursor.row)
+        n = rows - cursor.row;
+
+    for (int i = 0; i < n; i++) {
+        delete_row();
+        cursor.row++;
+    }
+
+    cursor.row = row_org;
+}

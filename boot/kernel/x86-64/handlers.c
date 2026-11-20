@@ -9,6 +9,8 @@ extern void erase_from_cursor(void);
 extern void enable_reverse_video(void);
 extern void reset_video(void);
 extern void clear_screen(void);
+extern void make_blank_rows(int n);
+extern void delete_rows(int n);
 
 u64 former_ss = 0;
 u64 former_cs = 0;
@@ -75,7 +77,13 @@ static inline void stdout_exec(int arg0, int arg1, char ch) {
         }
 
         case 'L': {
-            
+            make_blank_rows(arg0);
+            return;
+        }
+
+        case 'M': {
+            delete_rows(arg0);
+            return;
         }
     }
 }
