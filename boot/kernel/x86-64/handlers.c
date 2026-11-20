@@ -5,6 +5,10 @@
 #include "x86-64/lowlevel.h"
 
 extern void set_start(void);
+extern void erase_from_cursor(void);
+extern void enable_reverse_video(void);
+extern void reset_video(void);
+extern void clear_screen(void);
 
 u64 former_ss = 0;
 u64 former_cs = 0;
@@ -57,14 +61,78 @@ int stdout_pc = 0;
 int stdout_wc = 0;
 
 
-static inline int stdout_parse(int index) {
-    index = (index + 1) % 256;
-    if (stdout[index] == 'H') {
-        set_start();
-        index = (index + 1) % 256;
-        return index;
-    } 
+static inline void stdout_exec(int arg0, int arg1, char ch) {
+    switch (ch) {
+        case 'H': {
+            cursor_Setpos(arg1-1, arg0-1);
+            return;
+        }
+
+
+        case 'C': {
+            move_cursor(arg0);
+            return;
+        }
+
+        case 'L': {
+            
+        }
+    }
 }
+
+
+static inline int stdout_parse(int index) {
+    index = (index + 1) % 4096;
+    if (stdout[index] == 'H') { // ESC [ H: set cursor top-left
+        set_start();
+        index = (index + 1) % 4096;
+        return index;
+    } else if (stdout[index] == 'K') { // ESC [ K: erase from cursor to the end of the line
+        erase_from_cursor();
+        index = (index + 1) % 4096;
+        return index;
+    } else if (stdout[index] == '7' && stdout[(index + 1) % 4096] == 'm') { // ESC [ 7 m: enable reverse video
+        enable_reverse_video();
+        index = (index + 2) % 4096;
+        return index;
+    } else if (stdout[index] == '0' && stdout[(index + 1) % 4096] == 'm') { // ESC [ 0 m: restore video defaults
+        reset_video();
+        index = (index + 2) % 4096;
+        return index;
+    } else if (stdout[index] == '2' && stdout[(index + 1) % 4096] == 'J') { // ESC [ 2 J: clear screen
+        clear_screen();
+        index = (index + 2) % 4096;
+        return index;
+    }
+
+
+    int arg_buffer[2] = {0};
+
+    for (int i = 0; i < 2; i++) {
+        int arg = 0;
+        unsigned int digit = ascii_to_digit(stdout[index]);
+        while (digit != 0xFFFFFFFF) {
+            arg = (arg * 10) + digit;
+            index = (index + 1) % 4096;
+            digit = ascii_to_digit(stdout[index]);
+        }
+
+        if (stdout[index] != ';') {
+            arg_buffer[i] = arg;
+            break;
+        }
+
+        arg_buffer[i] = arg;
+        index = (index + 1) % 4096;
+    }
+
+
+    stdout_exec(arg_buffer[0], arg_buffer[1], stdout[index]);
+    index = (index + 1) % 4096;
+    return index;
+}
+
+
 
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;

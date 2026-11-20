@@ -64,9 +64,9 @@ void qemu_debug_hex_u64(u64 value) {
 #define Backwards 1
 
 
-#define BOOT 0
+#define STDOUT 0
 #define FB 1
-#define STDOUT 2
+
 
 u32 vga16_color[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 
@@ -90,14 +90,14 @@ int p_scanln = 0;
 int p_format = RGB;
 int size = 0;
 
-int mode = BOOT;
+int mode = STDOUT;
 
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
     fb_phys = fb_base;
     size = p_scan * vres;
     fb_addr = (u64)kmalloc(size<<2);
 
-    mode = BOOT;
+    mode = STDOUT;
 
     coulmns = (hres + 7) >> 3;
     rows = (vres + 15) >> 4;
@@ -209,6 +209,7 @@ void draw_16color_phys(int x, int y, int color_index) {
 }
 
 int global_textcolor = LightGray;
+int background_color = Black;
 
 void Set_GlobalTextColor(int color_index) {
     global_textcolor = color_index;
@@ -228,7 +229,7 @@ void draw_char(char ch, int coulmn, int row) {
             if (chk == 1) {
                 draw_16color(coulmn, row, global_textcolor);
             } else {
-				draw_16color(coulmn, row, Black);
+				draw_16color(coulmn, row, background_color);
 			}
             coulmn++;
         }
@@ -610,4 +611,91 @@ void set_start(void) {
 
 
 const char *digits = "0123456789";
+
+void erase_from_cursor(void) {
+    if (cursor.coulmn >= (coulmns-1))
+        return;
+
+    while (cursor.coulmn < coulmns) {
+        draw_char(' ', cursor.coulmn, cursor.row);
+        cursor.coulmn++;
+    }
+
+    present();
+}
+
+
+void enable_reverse_video(void) {
+    int bg = background_color; // swap background and foreground colors
+    int gt = global_textcolor;
+    background_color = gt;
+    global_textcolor = bg;
+}
+
+
+void reset_video(void) {
+    background_color = Black;  // reset background and foreground colors to defualt
+    global_textcolor = LightGray;
+}
+
+
+void clear_screen(void) {
+    for (int i = 0; i < ver_res; i++) { // fill screen framebuffer with black
+        for (int j = 0; j < p_scanln; j++) {
+            draw_pixel(j, i, 0);
+        }
+    }
+
+    present();
+}
+
+
+
+
+static inline void clear_row(int row) {
+    for (int coulmn = 0; coulmn < coulmns; coulmn++)
+        draw_char(' ', coulmn, row); // fill coulmns with blank
+
+}
+
+
+static inline void copy_row_to_row(int dest, int src) {
+    for (int coulmn = 0; coulmn < coulmns; coulmn++)
+        diff[(dest * coulmns) + coulmn] = true; // update diff on destination row for screen update
+
+    dest = dest << 4;
+    src = src << 4;
+
+    u32 *vga = (u32 *)fb_addr;
+    for (int x = 0; x < p_scanln; x++) 
+        vga[(dest * p_scanln) + x] = vga[(src * p_scanln) + x]; // copy source row to destination
+
+    
+}
+
+
+static inline void shift_row_down(int row) {
+    if (row >= (rows-1)) { // if last row... clear it
+        clear_row(row);
+        return;
+    }
+
+    copy_row_to_row(row+1, row); // else copy it to the row below
+    
+}
+
+
+
+static inline void shift_row_up(int row) {
+    if (row == 0) {
+        clear_row(row);
+        return;
+    }
+
+
+    copy_row_to_row(row-1, row);
+}
+
+
+
 
