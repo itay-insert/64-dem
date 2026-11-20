@@ -1,0 +1,1329 @@
+" Test 'statusline'
+"
+" Not tested yet:
+"   %N
+
+source util/screendump.vim
+
+func SetUp()
+  set laststatus=2
+endfunc
+
+func TearDown()
+  set laststatus&
+endfunc
+
+func s:get_statusline()
+  redraw!
+  if has('gui_running')
+    sleep 1m
+  endif
+  " Read the screen directly after redraw! instead of going through
+  " ScreenLines(), whose own redraw! may process events and change the window
+  " layout between here and the screenstring() calls.
+  let row = &lines - 1
+  return join(map(range(1, &columns), 'screenstring(row, v:val)'), '')
+endfunc
+
+func StatuslineWithCaughtError()
+  let s:func_in_statusline_called = 1
+  try
+    call eval('unknown expression')
+  catch
+  endtry
+  return ''
+endfunc
+
+func StatuslineWithError()
+  let s:func_in_statusline_called = 1
+  call eval('unknown expression')
+  return ''
+endfunc
+
+" Function used to display syntax group.
+func SyntaxItem()
+  call assert_equal(s:expected_curbuf, g:actual_curbuf)
+  call assert_equal(s:expected_curwin, g:actual_curwin)
+  return synIDattr(synID(line("."), col("."),1), "name")
+endfunc
+
+func Test_caught_error_in_statusline()
+  let s:func_in_statusline_called = 0
+  let statusline = '%{StatuslineWithCaughtError()}'
+  let &statusline = statusline
+  redrawstatus
+  call assert_true(s:func_in_statusline_called)
+  call assert_equal(statusline, &statusline)
+  set statusline=
+endfunc
+
+func Test_statusline_will_be_disabled_with_error()
+  let s:func_in_statusline_called = 0
+  let statusline = '%{StatuslineWithError()}'
+  try
+    let &statusline = statusline
+    redrawstatus
+  catch
+  endtry
+  call assert_true(s:func_in_statusline_called)
+  call assert_equal('', &statusline)
+  set statusline=
+endfunc
+
+func Test_statusline()
+  CheckFeature quickfix
+
+  " %a: Argument list ({current} of {max})
+  set statusline=%a
+  call assert_match('^\s*$', s:get_statusline())
+  arglocal a1 a2
+  rewind
+  call assert_match('^ (1 of 2)\s*$', s:get_statusline())
+  next
+  call assert_match('^ (2 of 2)\s*$', s:get_statusline())
+  e Xstatusline
+  call assert_match('^ ((2) of 2)\s*$', s:get_statusline())
+
+  only
+  set splitbelow
+  call setline(1, range(1, 10000))
+
+  " %b: Value of character under cursor.
+  " %B: As above, in hexadecimal.
+  call cursor(9000, 1)
+  set statusline=%b,%B
+  call assert_match('^57,39\s*$', s:get_statusline())
+
+  " %o: Byte number in file of byte under cursor, first byte is 1.
+  " %O: As above, in hexadecimal.
+  set statusline=%o,%O
+  set fileformat=dos
+  call assert_match('^52888,CE98\s*$', s:get_statusline())
+  set fileformat=mac
+  call assert_match('^43889,AB71\s*$', s:get_statusline())
+  set fileformat=unix
+  call assert_match('^43889,AB71\s*$', s:get_statusline())
+  set fileformat&
+
+  " %f: Path to the file in the buffer, as typed or relative to current dir.
+  set statusline=%f
+  call assert_match('^Xstatusline\s*$', s:get_statusline())
+
+  " %F: Full path to the file in the buffer.
+  set statusline=%F
+  call assert_match('/testdir/Xstatusline\s*$', s:get_statusline())
+
+  " Test for min and max width with %(. For some reason, if this test is moved
+  " after the below test for the help buffer flag, then the code to truncate
+  " the string is not executed.
+  set statusline=%015(%f%)
+  call assert_match('^    Xstatusline\s*$', s:get_statusline())
+  set statusline=%.6(%f%)
+  call assert_match('^<sline\s*$', s:get_statusline())
+  set statusline=%.5(1234567%),%2.5(1234567%),%5.5(1234567%),%50.5(1234567%)
+  call assert_match('^<4567,<4567,<4567,<4567\s*$', s:get_statusline())
+  set statusline=%14f
+  call assert_match('^   Xstatusline\s*$', s:get_statusline())
+  set statusline=%.4L
+  call assert_match('^10>3\s*$', s:get_statusline())
+  for filler in ['-', '∙']
+    exec 'set fillchars+=stl:'..filler
+    set statusline=%-5(x%),%-5.(x%),%-5.5(x%),%-5.10(x%);
+    call assert_match(substitute('^x____,x____,x____,x____;_*$', '_', filler, 'g'), s:get_statusline())
+    set statusline=%5(x%),%5.(x%),%5.5(x%),%5.10(x%);
+    call assert_match(substitute('^____x,____x,____x,____x;_*$', '_', filler, 'g'), s:get_statusline())
+    set statusline=%.5(12🙂345%),%4.5(12🙂345%),%5.5(12🙂345%),%50.5(12🙂345%);
+    call assert_match(substitute('^<345,<345,<345_,<345_;_*$', '_', filler, 'g'), s:get_statusline())
+  endfor
+  if has('linux')
+    " This assumes MAXPATHL is 4096 bytes.
+    set stl=%{%repeat('x',4096-6)%}%10(X%)
+    set fillchars+=stl:-
+    call assert_match('^<x\+----X$', s:get_statusline())
+    set fillchars+=stl:∙
+    call assert_match('^<x\+∙X$', s:get_statusline())
+  endif
+  set fillchars&
+
+  " %h: Help buffer flag, text is "[help]".
+  " %H: Help buffer flag, text is ",HLP".
+  set statusline=%h,%H
+  call assert_match('^,\s*$', s:get_statusline())
+  help
+  call assert_match('^\[Help\],HLP\s*$', s:get_statusline())
+  helpclose
+
+  " %k: Value of "b:keymap_name" or 'keymap'
+  "     when :lmap mappings are being used: <keymap>"
+  set statusline=%k
+  if has('keymap')
+    set keymap=esperanto
+    call assert_match('^<Eo>\s*$', s:get_statusline())
+    set keymap&
+  else
+    call assert_match('^\s*$', s:get_statusline())
+  endif
+
+  " %l: Line number.
+  " %L: Number of line in buffer.
+  " %c: Column number.
+  set statusline=%l/%L,%c
+  call assert_match('^9000/10000,1\s*$', s:get_statusline())
+
+  " %m: Modified flag, text is "[+]", "[-]" if 'modifiable' is off.
+  " %M: Modified flag, text is ",+" or ",-".
+  set statusline=%m%M
+  call assert_match('^\[+\],+\s*$', s:get_statusline())
+  set nomodifiable
+  call assert_match('^\[+-\],+-\s*$', s:get_statusline())
+  write
+  call assert_match('^\[-\],-\s*$', s:get_statusline())
+  set modifiable&
+  call assert_match('^\s*$', s:get_statusline())
+
+  " %n: Buffer number.
+  set statusline=%n
+  call assert_match('^'.bufnr('%').'\s*$', s:get_statusline())
+
+  " %p: Percentage through file in lines as in CTRL-G.
+  " %P: Percentage through file of displayed window.
+  set statusline=%p,%P
+  0
+  call assert_match('^0,Top\s*$', s:get_statusline())
+  norm G
+  call assert_match('^100,Bot\s*$', s:get_statusline())
+  " The exact percentage depends on the window height, so create a window with
+  " known height.
+  9000 | botright 10split | setlocal scrolloff=0 | normal! zb
+  call assert_match('^90,89%\s*$', s:get_statusline())
+  normal! zt
+  call assert_match('^90,90%\s*$', s:get_statusline())
+  " %P should result in a string with 3 in length when not translated.
+  normal! 500zb
+  call assert_match('^5, 4%\s*$', s:get_statusline())
+  close
+
+  " %q: "[Quickfix List]", "[Location List]" or empty.
+  set statusline=%q
+  call assert_match('^\s*$', s:get_statusline())
+  copen
+  call assert_match('^\[Quickfix List\]\s*$', s:get_statusline())
+  cclose
+  lexpr getline(1, 2)
+  lopen
+  call assert_match('^\[Location List\]\s*$', s:get_statusline())
+  lclose
+
+  " %r: Readonly flag, text is "[RO]".
+  " %R: Readonly flag, text is ",RO".
+  set statusline=%r,%R
+  call assert_match('^,\s*$', s:get_statusline())
+  help
+  call assert_match('^\[RO\],RO\s*$', s:get_statusline())
+  helpclose
+
+  " %t: File name (tail) of file in the buffer.
+  set statusline=%t
+  call assert_match('^Xstatusline\s*$', s:get_statusline())
+
+  " %v: Virtual column number.
+  " %V: Virtual column number as -{num}. Not displayed if equal to 'c'.
+  call cursor(9000, 2)
+  set statusline=%v,%V
+  call assert_match('^2,\s*$', s:get_statusline())
+  set virtualedit=all
+  norm 10|
+  call assert_match('^10,-10\s*$', s:get_statusline())
+  set list
+  call assert_match('^10,-10\s*$', s:get_statusline())
+  set virtualedit&
+  exe "norm A\<Tab>\<Tab>a\<Esc>"
+  " In list mode a <Tab> is shown as "^I", which is 2-wide.
+  call assert_match('^9,-9\s*$', s:get_statusline())
+  set list&
+  " Now the second <Tab> ends at the 16th screen column.
+  call assert_match('^17,-17\s*$', s:get_statusline())
+  undo
+
+  " %w: Preview window flag, text is "[Preview]".
+  " %W: Preview window flag, text is ",PRV".
+  set statusline=%w%W
+  call assert_match('^\s*$', s:get_statusline())
+  pedit
+  wincmd j
+  call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
+  pclose
+  pbuffer
+  wincmd j
+  call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
+  pclose
+
+  " %y: Type of file in the buffer, e.g., "[vim]". See 'filetype'.
+  " %Y: Type of file in the buffer, e.g., ",VIM". See 'filetype'.
+  set statusline=%y\ %Y
+  call assert_match('^\s*$', s:get_statusline())
+  setfiletype vim
+  call assert_match('^\[vim\] VIM\s*$', s:get_statusline())
+
+  " %=: Separation point between left and right aligned items.
+  set statusline=foo%=bar
+  call assert_match('^foo\s\+bar\s*$', s:get_statusline())
+  set statusline=foo%=bar%=baz
+  call assert_match('^foo\s\+bar\s\+baz\s*$', s:get_statusline())
+  set statusline=foo%=bar%=baz%=qux
+  call assert_match('^foo\s\+bar\s\+baz\s\+qux\s*$', s:get_statusline())
+
+  " Test min/max width, leading zeroes, left/right justify.
+  set statusline=%04B
+  call cursor(9000, 1)
+  call assert_match('^0039\s*$', s:get_statusline())
+  set statusline=#%4B#
+  call assert_match('^#  39#\s*$', s:get_statusline())
+  set statusline=#%-4B#
+  call assert_match('^#39  #\s*$', s:get_statusline())
+  set statusline=%.6f
+  call assert_match('^<sline\s*$', s:get_statusline())
+
+  " %<: Where to truncate.
+  " First check with when %< should not truncate with many columns
+  exe 'set statusline=a%<b' . repeat('c', &columns - 3) . 'd'
+  call assert_match('^abc\+d$', s:get_statusline())
+  exe 'set statusline=a' . repeat('b', &columns - 2) . '%<c'
+  call assert_match('^ab\+c$', s:get_statusline())
+  " Then check when %< should truncate when there with too few columns.
+  exe 'set statusline=a%<b' . repeat('c', &columns - 2) . 'd'
+  call assert_match('^a<c\+d$', s:get_statusline())
+  exe 'set statusline=a' . repeat('b', &columns - 1) . '%<c'
+  call assert_match('^ab\+>$', s:get_statusline())
+
+  "%{: Evaluate expression between '%{' and '}' and substitute result.
+  syntax on
+  let s:expected_curbuf = string(bufnr(''))
+  let s:expected_curwin = string(win_getid())
+  set statusline=%{SyntaxItem()}
+  call assert_match('^vimAddress\s*$', s:get_statusline())
+  s/^/"/
+  call assert_match('^vimLineComment\s*$', s:get_statusline())
+  syntax off
+
+  " %0{: result of expression is inserted verbatim
+  set statusline=%{'\ x'}
+  call assert_match('^x\s*$', s:get_statusline())
+  set statusline=%0{'\ x'}
+  call assert_match('^ x\s*$', s:get_statusline())
+  set statusline=%{'000'}
+  call assert_match('^0\s*$', s:get_statusline())
+  set statusline=%0{'000'}
+  call assert_match('^000\s*$', s:get_statusline())
+
+  "%{%expr%}: evaluates expressions present in result of expr
+  func! Inner_eval()
+    return '%n some other text'
+  endfunc
+  func! Outer_eval()
+    return 'some text %{%Inner_eval()%}'
+  endfunc
+  set statusline=%{%Outer_eval()%}
+  call assert_match('^some text ' . bufnr() . ' some other text\s*$', s:get_statusline())
+  delfunc Inner_eval
+  delfunc Outer_eval
+
+  "%{%expr%}: Doesn't get stuck in recursion
+  func! Recurse_eval()
+    return '%{%Recurse_eval()%}'
+  endfunc
+  set statusline=%{%Recurse_eval()%}
+  call assert_match('^%{%Recurse_eval()%}\s*$', s:get_statusline())
+  delfunc Recurse_eval
+
+  "%(: Start of item group.
+  set statusline=ab%(cd%q%)de
+  call assert_match('^abde\s*$', s:get_statusline())
+  copen
+  call assert_match('^abcd\[Quickfix List]de\s*$', s:get_statusline())
+  cclose
+
+  " %#: Set highlight group. The name must follow and then a # again.
+  set statusline=ab%#Todo#cd%#Error#ef
+  call assert_match('^abcdef\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 3)
+  let sa3=screenattr(&lines - 1, 5)
+  call assert_notequal(sa1, sa2)
+  call assert_notequal(sa1, sa3)
+  call assert_notequal(sa2, sa3)
+  call assert_equal(sa1, screenattr(&lines - 1, 2))
+  call assert_equal(sa2, screenattr(&lines - 1, 4))
+  call assert_equal(sa3, screenattr(&lines - 1, 6))
+  call assert_equal(sa3, screenattr(&lines - 1, 7))
+
+  " %*: Set highlight group to User{N}
+  set statusline=a%1*b%0*c
+  call assert_match('^abc\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 2)
+  let sa3=screenattr(&lines - 1, 3)
+  call assert_equal(sa1, sa3)
+  call assert_notequal(sa1, sa2)
+
+  " An empty group that contains highlight changes
+  let g:a = ''
+  set statusline=ab%(cd%1*%{g:a}%*%)de
+  call assert_match('^abde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 4)
+  call assert_equal(sa1, sa2)
+  let g:a = 'X'
+  call assert_match('^abcdXde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 5)
+  let sa3=screenattr(&lines - 1, 7)
+  call assert_equal(sa1, sa3)
+  call assert_notequal(sa1, sa2)
+
+  let g:a = ''
+  set statusline=ab%1*%(cd%*%{g:a}%1*%)de
+  call assert_match('^abde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 4)
+  call assert_notequal(sa1, sa2)
+  let g:a = 'X'
+  call assert_match('^abcdXde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 3)
+  let sa3=screenattr(&lines - 1, 5)
+  let sa4=screenattr(&lines - 1, 7)
+  call assert_notequal(sa1, sa2)
+  call assert_equal(sa1, sa3)
+  call assert_equal(sa2, sa4)
+
+  " An empty group that contains highlight changes and doesn't reset them
+  let g:a = ''
+  set statusline=ab%(cd%1*%{g:a}%)de
+  call assert_match('^abcdde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 5)
+  call assert_notequal(sa1, sa2)
+  let g:a = 'X'
+  call assert_match('^abcdXde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 5)
+  let sa3=screenattr(&lines - 1, 7)
+  call assert_notequal(sa1, sa2)
+  call assert_equal(sa2, sa3)
+
+  let g:a = ''
+  set statusline=ab%1*%(cd%*%{g:a}%)de
+  call assert_match('^abcdde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 3)
+  let sa3=screenattr(&lines - 1, 5)
+  call assert_notequal(sa1, sa2)
+  call assert_equal(sa1, sa3)
+  let g:a = 'X'
+  call assert_match('^abcdXde\s*$', s:get_statusline())
+  let sa1=screenattr(&lines - 1, 1)
+  let sa2=screenattr(&lines - 1, 3)
+  let sa3=screenattr(&lines - 1, 5)
+  let sa4=screenattr(&lines - 1, 7)
+  call assert_notequal(sa1, sa2)
+  call assert_equal(sa1, sa3)
+  call assert_equal(sa1, sa4)
+
+  let g:a = ''
+  set statusline=%#Error#{%(\ %{g:a}\ %)}
+  call assert_match('^{}\s*$', s:get_statusline())
+  let g:a = 'X'
+  call assert_match('^{ X }\s*$', s:get_statusline())
+
+  " %%: a percent sign.
+  set statusline=10%%
+  call assert_match('^10%\s*$', s:get_statusline())
+
+  " %!: evaluated expression is used as the option value
+  set statusline=%!2*3+1
+  call assert_match('7\s*$', s:get_statusline())
+
+  func GetNested()
+    call assert_equal(string(win_getid()), g:actual_curwin)
+    call assert_equal(string(bufnr('')), g:actual_curbuf)
+    return 'nested'
+  endfunc
+  func GetStatusLine()
+    call assert_equal(win_getid(), g:statusline_winid)
+    return 'the %{GetNested()} line'
+  endfunc
+  set statusline=%!GetStatusLine()
+  call assert_match('the nested line', s:get_statusline())
+  call assert_false(exists('g:actual_curwin'))
+  call assert_false(exists('g:actual_curbuf'))
+  call assert_false(exists('g:statusline_winid'))
+  delfunc GetNested
+  delfunc GetStatusLine
+
+  " Test statusline works with 80+ items
+  function! StatusLabel()
+    redrawstatus
+    return '[label]'
+  endfunc
+  let statusline = '%{StatusLabel()}'
+  for i in range(150)
+    let statusline .= '%#TabLine' . (i % 2 == 0 ? 'Fill' : 'Sel') . '#' . string(i)[0]
+  endfor
+  let &statusline = statusline
+  redrawstatus
+  set statusline&
+  delfunc StatusLabel
+
+
+  " Check statusline in current and non-current window
+  " with the 'fillchars' option.
+  set fillchars=stl:^,stlnc:=,vert:\|,fold:-,diff:-
+  vsplit
+  set statusline=x%=y
+  call assert_match('^x^\+y^x=\+y$', s:get_statusline())
+  set fillchars&
+  close
+
+  %bw!
+  call delete('Xstatusline')
+  set statusline&
+  set splitbelow&
+endfunc
+
+func Test_statusline_trailing_percent_zero()
+  " this was causing illegal memory access
+  set laststatus=2 stl=%!%0
+  call assert_fails('redraw', 'E15: Invalid expression: "%0"')
+  set laststatus& stl&
+endfunc
+
+func Test_statusline_visual()
+  func CallWordcount()
+    call wordcount()
+  endfunc
+  new x1
+  setl statusline=count=%{CallWordcount()}
+  " buffer must not be empty
+  call setline(1, 'hello')
+
+  " window with more lines than x1
+  new x2
+  call setline(1, range(10))
+  $
+  " Visual mode in line below liast line in x1 should not give ml_get error
+  call feedkeys("\<C-V>", "xt")
+  redraw
+
+  delfunc CallWordcount
+  bwipe! x1
+  bwipe! x2
+endfunc
+
+func Test_statusline_removed_group()
+  CheckScreendump
+
+  let lines =<< trim END
+    scriptencoding utf-8
+    set laststatus=2
+    let &statusline = '%#StatColorHi2#%(✓%#StatColorHi2#%) Q≡'
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 10, 'cols': 50})
+  call VerifyScreenDump(buf, 'Test_statusline_1', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_using_mode()
+  CheckScreendump
+
+  let lines =<< trim END
+    setlocal statusline=-%{mode()}-
+    split
+    setlocal statusline=+%{mode()}+
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 7, 'cols': 50})
+  call VerifyScreenDump(buf, 'Test_statusline_mode_1', {})
+
+  call term_sendkeys(buf, ":")
+  call VerifyScreenDump(buf, 'Test_statusline_mode_2', {})
+
+  " clean up
+  call term_sendkeys(buf, "close\<CR>")
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_after_split_vsplit()
+  only
+
+  " Make the status line of each window show the window number.
+  set ls=2 stl=%{winnr()}
+
+  split | redraw
+  vsplit | redraw
+
+  " The status line of the third window should read '3' here.
+  call assert_equal('3', nr2char(screenchar(&lines - 1, 1)))
+
+  only
+  set ls& stl&
+endfunc
+
+" Test using a multibyte character for 'stl' and 'stlnc' items in 'fillchars'
+" with a custom 'statusline'
+func Test_statusline_mbyte_fillchar()
+  only
+  set fillchars=vert:\|,fold:-,stl:━,stlnc:═
+  set statusline=a%=b
+  call assert_match('^a\+━\+b$', s:get_statusline())
+  vnew
+  call assert_match('^a\+━\+b━a\+═\+b$', s:get_statusline())
+  wincmd w
+  call assert_match('^a\+═\+b═a\+━\+b$', s:get_statusline())
+  set statusline& fillchars&
+  %bw!
+endfunc
+
+" Used to write beyond allocated memory.  This assumes MAXPATHL is 4096 bytes.
+func Test_statusline_verylong_filename()
+  let fname = repeat('x', 4090)
+  exe "new " .. fname
+  set buftype=help
+  set previewwindow
+  redraw
+  bwipe!
+endfunc
+
+func Test_statusline_highlight_truncate()
+  CheckScreendump
+
+  let lines =<< trim END
+    set laststatus=2
+    hi! link User1 Directory
+    hi! link User2 ErrorMsg
+    set statusline=%.5(%1*ABC%2*DEF%1*GHI%)
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 6})
+  call VerifyScreenDump(buf, 'Test_statusline_hl', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_showcmd()
+  CheckScreendump
+
+  let lines =<< trim END
+    func MyStatusLine()
+      return '%S'
+    endfunc
+
+    set laststatus=2
+    set statusline=%!MyStatusLine()
+    set showcmdloc=statusline
+    call setline(1, ['a', 'b', 'c'])
+    set foldopen+=jump
+    1,2fold
+    3
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 6})
+
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_1', {})
+
+  " typing "gg" should open the fold
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_2', {})
+
+  call term_sendkeys(buf, "\<C-V>Gl")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_3', {})
+
+  call term_sendkeys(buf, "\<Esc>1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_4', {})
+
+  call term_sendkeys(buf, "\<Esc>:set statusline=\<CR>")
+  call term_sendkeys(buf, ":\<CR>")
+  call term_sendkeys(buf, "1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_5', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_showcmd_cmd_mapping()
+  set showcmd
+  set statusline=AAA%SBBB
+  set showcmdloc=statusline
+  try
+    let g:showcmd_statusline = ''
+    nnoremap <F3> <Cmd>let g:showcmd_statusline = <SID>get_statusline()<CR>
+    call feedkeys("\<F3>", 'xt')
+    call assert_equal('AAABBB', trim(g:showcmd_statusline))
+    let g:showcmd_statusline = ''
+    nunmap <F3>
+
+    nnoremap <F3> <ScriptCmd>let g:showcmd_statusline = <SID>get_statusline()<CR>
+    call feedkeys("\<F3>", 'xt')
+    call assert_equal('AAABBB', trim(g:showcmd_statusline))
+  finally
+    silent! nunmap <F3>
+    unlet! g:showcmd_statusline
+    set showcmd&
+    set statusline&
+    set showcmdloc&
+  endtry
+endfunc
+
+func Test_statusline_showcmd_nop_map()
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    set timeoutlen=500 showcmdloc=statusline laststatus=2
+    nnoremap <space> <nop>
+    nnoremap <space><space> <nop>
+  END
+  call writefile(lines, 'XTest_statusline_showcmd_nop', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_showcmd_nop', {'rows': 6})
+  call term_sendkeys(buf, ' ')
+  call WaitForAssert({-> assert_match('<20>', term_getline(buf, 5))}, 400)
+  sleep 500m
+  call WaitForAssert({-> assert_notmatch('<20>', term_getline(buf, 5))}, 400)
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_highlight_group_cleared()
+  CheckScreendump
+
+  " the laststatus option is there to prevent
+  " the code-style test from complaining about
+  " trailing whitespace
+  let lines =<< trim END
+    set fillchars=stl:\ ,stlnc:\  laststatus=2
+    split
+    hi clear StatusLine
+    hi clear StatusLineNC
+  END
+  call writefile(lines, 'XTest_statusline_stl', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_stl', {})
+
+  call VerifyScreenDump(buf, 'Test_statusline_stl_1', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test for setting both global and local 'statusline' values in a sandbox
+func Test_statusline_in_sandbox()
+  func SandboxStatusLine()
+    call writefile(['after'], 'Xsandboxstatusline_write')
+    return "status line"
+  endfunc
+
+  func Check_statusline_in_sandbox(set_cmd0, set_cmd1)
+    only
+    11new | 20vsplit
+    call setline(1, 'foo')
+    windo setlocal statusline=SomethingElse
+    wincmd t
+    setlocal statusline=
+    call writefile(['before'], 'Xsandboxstatusline_write', 'D')
+
+    exe 'sandbox' a:set_cmd0 'statusline=%!SandboxStatusLine()'
+    call assert_equal('', &l:statusline)
+    sandbox setlocal statusline=%!SandboxStatusLine()
+    call assert_fails('redrawstatus', 'E48:')
+    call assert_equal(['before'], readfile('Xsandboxstatusline_write'))
+    wincmd b
+    call assert_fails('redrawstatus!', 'E48:')
+    call assert_equal(['before'], readfile('Xsandboxstatusline_write'))
+    wincmd t
+
+    5split
+    call assert_fails('redrawstatus!', 'E48:')
+    call assert_equal(['before'], readfile('Xsandboxstatusline_write'))
+    close
+
+    setlocal statusline=%!SandboxStatusLine() | redrawstatus
+    call assert_equal('status line', Screenline(12))
+    call assert_equal(['after'], readfile('Xsandboxstatusline_write'))
+
+    call writefile(['before'], 'Xsandboxstatusline_write')
+    setlocal statusline=
+    call assert_fails('redrawstatus', 'E48:')
+    call assert_equal(['before'], readfile('Xsandboxstatusline_write'))
+
+    5split
+    call assert_fails('redrawstatus!', 'E48:')
+    call assert_equal(['before'], readfile('Xsandboxstatusline_write'))
+
+    exe a:set_cmd1 'statusline=%!SandboxStatusLine()' | redrawstatus!
+    call assert_equal('', &l:statusline)
+    call assert_equal('status line', Screenline(6))
+    call assert_equal('status line', Screenline(12))
+    call assert_equal(['after'], readfile('Xsandboxstatusline_write'))
+    bwipe!
+  endfunc
+
+  set noequalalways
+  call Check_statusline_in_sandbox('setglobal', 'setglobal')
+  call Check_statusline_in_sandbox('setglobal', 'set')
+  call Check_statusline_in_sandbox('set', 'setglobal')
+  call Check_statusline_in_sandbox('set', 'set')
+
+  set equalalways& statusline&
+  delfunc SandboxStatusLine
+  delfunc Check_statusline_in_sandbox
+endfunc
+
+" This used to call memmove with a negative size and crash Vim
+func Test_statusline_singlebyte_negative()
+  let [_columns, _ls, _stl, _enc]  = [&columns, &ls, &stl, &enc]
+  set encoding=latin1
+  set laststatus=2 columns=15
+  setl stl=%#ErrorMsg#abcdtàØ?}}o@`s`ÿæCú\xE%#Normal#
+  vsp
+  setl stl=%#ErrorMsg#abcdtàØ?}}o@`s`ÿæCú\xE%#Normal#
+  redraw!
+  redrawstatus
+  bw!
+  let [&columns, &ls, &stl, &enc] = [_columns, _ls, _stl, _enc]
+endfunc
+
+func g:StlClickTestFunc(info)
+  let g:stl_click_info = a:info
+  return 0
+endfunc
+
+func g:StlClickReturn1(info)
+  let g:stl_click_info = a:info
+  return 1
+endfunc
+
+func Test_statusline_click_handler()
+  let save_mouse = &mouse
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  set mouse=a
+  set laststatus=2
+
+  " Basic click handler
+  set statusline=%[StlClickTestFunc][Click]%[]\ %f
+  redraw!
+
+  " Click on the [Click] region
+  let stl_row = win_screenpos(0)[0] + winheight(0)
+  call test_setmouse(stl_row, 2)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal('l', g:stl_click_info.button)
+  call assert_equal(1, g:stl_click_info.nclicks)
+  call assert_equal(0, g:stl_click_info.minwid)
+  call assert_equal(win_getid(), g:stl_click_info.winid)
+  call assert_equal('statusline', g:stl_click_info.area)
+  unlet! g:stl_click_info
+
+  " Click outside click region (on the filename part)
+  call test_setmouse(stl_row, 20)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_false(exists('g:stl_click_info'))
+
+  " Test with minwid
+  set statusline=%42[StlClickTestFunc][Click]%[]\ %f
+  redraw!
+  call test_setmouse(stl_row, 2)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(42, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  " Test middle click
+  call test_setmouse(stl_row, 2)
+  call feedkeys("\<MiddleMouse>", 'xt')
+  call feedkeys("\<MiddleRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal('m', g:stl_click_info.button)
+  unlet! g:stl_click_info
+  let &mouse = save_mouse
+  let &statusline = save_stl
+  let &laststatus = save_ls
+endfunc
+
+func Test_statusline_click_multiple_regions()
+  let save_mouse = &mouse
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  set mouse=a
+  set laststatus=2
+
+  " Two adjacent click regions with different minwid
+  set statusline=%1[StlClickTestFunc][AAA]%[]%2[StlClickTestFunc][BBB]%[]
+  redraw!
+
+  let stl_row = win_screenpos(0)[0] + winheight(0)
+
+  " Click on [AAA] region (col 2)
+  call test_setmouse(stl_row, 2)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(1, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  " Click on [BBB] region (col 7)
+  call test_setmouse(stl_row, 7)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(2, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  let &mouse = save_mouse
+  let &statusline = save_stl
+  let &laststatus = save_ls
+endfunc
+
+func StlExchangeEnter()
+  let &l:statusline = 'one%@two%@three'
+endfunc
+
+func StlExchangeLeave()
+  setlocal statusline<
+endfunc
+
+" Rows used by the status line of window "nr", derived from where the window
+" ends on the screen.
+func s:StlHeight(nr)
+  return &lines - &cmdheight - win_screenpos(a:nr)[0] - winheight(a:nr) + 1
+endfunc
+
+" Exchanging two windows keeps the status line height with the window.
+func Test_statuslineopt_win_exchange()
+  let save_stlo = &statuslineopt
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  set laststatus=2
+  set statusline=global
+  set statuslineopt=maxheight:3
+
+  augroup TestStlExchange
+    autocmd!
+    autocmd WinEnter * call StlExchangeEnter()
+    autocmd WinLeave * call StlExchangeLeave()
+  augroup END
+
+  new
+  only
+  call StlExchangeEnter()
+  vsplit
+  redraw
+
+  " The current window needs three rows for its status line, the other one.
+  call assert_equal(1, winnr())
+  call assert_equal(3, s:StlHeight(1))
+  call assert_equal(1, s:StlHeight(2))
+
+  " Exchanging puts the cursor in the other window, which then is the one
+  " needing three rows.
+  wincmd x
+  redraw
+  call assert_equal(1, winnr())
+  call assert_equal(3, s:StlHeight(1))
+  call assert_equal(1, s:StlHeight(2))
+
+  augroup TestStlExchange
+    autocmd!
+  augroup END
+  augroup! TestStlExchange
+  delfunc StlExchangeEnter
+  delfunc StlExchangeLeave
+  only
+  bwipe!
+  let &laststatus = save_ls
+  let &statusline = save_stl
+  let &statuslineopt = save_stlo
+endfunc
+
+" Exchanging two windows keeps a fixed status line height with the window.
+func Test_statuslineopt_fixed_win_exchange()
+  let save_stlo = &statuslineopt
+  let save_ls = &laststatus
+  set laststatus=2
+
+  new
+  only
+  vsplit
+  setlocal statuslineopt=fixedheight,maxheight:3
+  redraw
+
+  " Only the current window has a local 'statuslineopt'.
+  call assert_equal(1, winnr())
+  call assert_equal(3, s:StlHeight(1))
+  call assert_equal(1, s:StlHeight(2))
+
+  " The window that was exchanged keeps needing three rows.
+  wincmd x
+  redraw
+  call assert_equal(1, winnr())
+  call assert_equal(1, s:StlHeight(1))
+  call assert_equal(3, s:StlHeight(2))
+
+  only
+  bwipe!
+  let &laststatus = save_ls
+  let &statuslineopt = save_stlo
+endfunc
+
+" Rotating windows keeps a fixed status line height with the window.
+func Test_statuslineopt_fixed_win_rotate()
+  let save_stlo = &statuslineopt
+  let save_ls = &laststatus
+  set laststatus=2
+
+  new
+  only
+  vsplit
+  setlocal statuslineopt=fixedheight,maxheight:3
+  redraw
+
+  call assert_equal(1, winnr())
+  call assert_equal(3, s:StlHeight(1))
+  call assert_equal(1, s:StlHeight(2))
+
+  " Rotating moves the window that needs three rows to the other position.
+  wincmd r
+  redraw
+  call assert_equal(1, s:StlHeight(1))
+  call assert_equal(3, s:StlHeight(2))
+
+  " Rotating back restores it.
+  wincmd r
+  redraw
+  call assert_equal(3, s:StlHeight(1))
+  call assert_equal(1, s:StlHeight(2))
+
+  only
+  bwipe!
+  let &laststatus = save_ls
+  let &statuslineopt = save_stlo
+endfunc
+
+" Click on a region in any row of a multi-line statusline (issue #20116).
+func Test_statusline_click_multiline()
+  let save_mouse = &mouse
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  let save_stlo = &statuslineopt
+  set mouse=a
+  set laststatus=2
+
+  " First row contains the click region, second row is filled with fillchar.
+  set statusline=%[StlClickTestFunc][Click]%[]%@\ \ \ \
+  set statuslineopt=maxheight:2,fixedheight
+  redraw!
+
+  let stl_row = win_screenpos(0)[0] + winheight(0)
+
+  " Click on [Click] in the first row of the multi-line statusline.
+  call test_setmouse(stl_row, 2)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(0, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  " A click region on the second row should also be recognized.
+  set statusline=row1%@%2[StlClickTestFunc][Click2]%[]
+  redraw!
+  call test_setmouse(stl_row + 1, 2)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(2, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  let &mouse = save_mouse
+  let &statusline = save_stl
+  let &laststatus = save_ls
+  let &statuslineopt = save_stlo
+endfunc
+
+func Test_statusline_click_region_extends_to_end()
+  let save_mouse = &mouse
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  set mouse=a
+  set laststatus=2
+
+  " Click region without %[] extends to end of statusline
+  set statusline=xxx%[StlClickTestFunc]Clickable
+  redraw!
+
+  let stl_row = win_screenpos(0)[0] + winheight(0)
+
+  " Click near the end of the statusline
+  call test_setmouse(stl_row, 15)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  unlet! g:stl_click_info
+
+  " Click on "xxx" (before the click region)
+  call test_setmouse(stl_row, 1)
+  call feedkeys("\<LeftMouse>", 'xt')
+  call feedkeys("\<LeftRelease>", 'xt')
+  call assert_false(exists('g:stl_click_info'))
+
+  let &mouse = save_mouse
+  let &statusline = save_stl
+  let &laststatus = save_ls
+endfunc
+
+func Test_statusline_click_option_validation()
+  " Valid formats should not produce errors
+  let save_stl = &statusline
+  set statusline=%[Func]text%[]
+  set statusline=%3[Func]text%[]
+  set statusline=%[Func]text
+  set statusline=%[Func_Name]text%[]
+  " %@ alone is still valid (line break)
+  set statusline=%@
+  let &statusline = save_stl
+endfunc
+
+func Test_statusline_click_linebreak_still_works()
+  " Ensure %@ without FuncName still works as line break
+  let save_stl = &statusline
+  let save_ls = &laststatus
+  set laststatus=2
+
+  " This should not error - %@ is line break
+  set statusline=line1%@line2
+  redraw!
+
+  let &statusline = save_stl
+  let &laststatus = save_ls
+endfunc
+
+func Test_tabline_click_handler()
+  let save_mouse = &mouse
+  let save_tal = &tabline
+  let save_stal = &showtabline
+  if has('gui')
+    let save_go = &guioptions
+    set guioptions-=e
+  endif
+  set mouse=a
+  set showtabline=2
+
+  " Two adjacent click regions in 'tabline' with different minwid.
+  set tabline=%1[StlClickTestFunc][AAA]%[]%2[StlClickTestFunc][BBB]%[]
+  redraw!
+
+  " Click on [AAA] region (tabline is row 1).
+  call test_setmouse(1, 2)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal('l', g:stl_click_info.button)
+  call assert_equal(1, g:stl_click_info.nclicks)
+  call assert_equal(1, g:stl_click_info.minwid)
+  " winid is 0 for tabline clicks (no associated window).
+  call assert_equal(0, g:stl_click_info.winid)
+  call assert_equal('tabline', g:stl_click_info.area)
+  unlet! g:stl_click_info
+
+  " Click on [BBB] region.
+  call test_setmouse(1, 7)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal(2, g:stl_click_info.minwid)
+  unlet! g:stl_click_info
+
+  " Middle click on [AAA].
+  call test_setmouse(1, 2)
+  call feedkeys("\<MiddleMouse>\<MiddleRelease>", 'xt')
+  call assert_true(exists('g:stl_click_info'))
+  call assert_equal('m', g:stl_click_info.button)
+  unlet! g:stl_click_info
+
+  " Click outside any %[...] region: no callback, no error.
+  set tabline=xxx%1[StlClickTestFunc][YYY]%[]
+  redraw!
+  call test_setmouse(1, 1)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'xt')
+  call assert_false(exists('g:stl_click_info'))
+
+  let &mouse = save_mouse
+  let &tabline = save_tal
+  let &showtabline = save_stal
+  if has('gui')
+    let &guioptions = save_go
+  endif
+endfunc
+
+func Test_statusline_empty()
+  set laststatus=2 statusline=%!'%{}%'
+  try
+  redraw!
+  catch
+  endtry
+  set laststatus&
+  set statusline&
+endfunc
+
+func Test_statusline_vsep_borrow_hl()
+  CheckScreendump
+
+  " borrow_stl_vsep_hl(): vsep cells adjacent to a status line should
+  " borrow the highlight of the neighbouring window's status line edge so
+  " that custom highlights flow into the separator column.
+  "  - vsep next to curwin: curwin's edge hl is borrowed.
+  "  - vsep between two non-current windows: the left window's right-edge
+  "    hl is borrowed when the status fillchar is a space.
+  let lines =<< trim END
+    hi User1 ctermfg=Red ctermbg=Yellow
+    hi User2 ctermfg=Blue ctermbg=Green
+    set laststatus=2
+    set statusline=%1*L%=%2*R
+    vsplit
+    vsplit
+    vsplit
+    " curwin is now the leftmost window; move to the second one so the
+    " layout becomes: NC | cur | NC | NC.
+    2wincmd w
+  END
+  call writefile(lines, 'XTest_statusline_vsep_borrow_hl', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_vsep_borrow_hl',
+        \ {'rows': 6, 'cols': 78})
+  call term_sendkeys(buf, "\<C-L>")
+  call VerifyScreenDump(buf, 'Test_statusline_vsep_borrow_hl_01', {})
+
+  " Move curwin to the third window: NC | NC | cur | NC.
+  " Now the leftmost vsep is between two non-current windows.
+  call term_sendkeys(buf, "\<C-w>l\<C-L>")
+  call VerifyScreenDump(buf, 'Test_statusline_vsep_borrow_hl_02', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_vsep_borrow_hl_mode_change()
+  CheckScreendump
+
+  " With 'statusline' set, a mode change repaints the status line through
+  " showruler().  The vsep cell must follow without another key press.
+  let lines =<< trim END
+    hi User1 ctermfg=Red ctermbg=Yellow
+    hi User2 ctermfg=Blue ctermbg=Green
+    set laststatus=2
+    func MyStl()
+      return mode() ==# 'i' ? '%1*INSERT' : '%2*NORMAL'
+    endfunc
+    set statusline=%!MyStl()
+    call setline(1, ['aaa', 'bbb'])
+    vsplit
+    wincmd w
+  END
+  call writefile(lines, 'XTest_statusline_vsep_mode', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_vsep_mode',
+        \ {'rows': 6, 'cols': 78})
+  call term_sendkeys(buf, "\<C-L>")
+  call VerifyScreenDump(buf, 'Test_statusline_vsep_borrow_hl_mode_01', {})
+
+  call term_sendkeys(buf, "i")
+  call VerifyScreenDump(buf, 'Test_statusline_vsep_borrow_hl_mode_02', {})
+
+  " Leaving Insert mode restores the state of the first dump.
+  call term_sendkeys(buf, "\<Esc>")
+  call VerifyScreenDump(buf, 'Test_statusline_vsep_borrow_hl_mode_01', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" A window of zero width has no status line cell to borrow the highlight
+" from.  With its status line on the first screen line the cell before it is
+" outside the screen.
+func Test_statusline_vsep_borrow_zero_width_window()
+  set winminheight=0 winminwidth=0 laststatus=2
+
+  " Two windows side by side above a third.  Sizing from inside the third
+  " and the right one leaves the current window, the left one, 0 by 0.
+  split
+  vsplit
+  call win_execute(win_getid(3), 'wincmd _')
+  call win_execute(win_getid(2), 'wincmd |')
+  call assert_equal([0, 0], [winwidth(0), winheight(0)])
+  redraw
+
+  only!
+  set winminheight& winminwidth& laststatus&
+endfunc
+
+" Creating a full-height vertical split must not add a status line when
+" 'laststatus' is zero.
+func Test_window_cmd_ls0_splitmove()
+  set laststatus=0
+  let avail = &lines - &cmdheight
+
+  " CTRL-W H and CTRL-W L move a window into a full-height vertical split.
+  for cmd in ['H', 'L']
+    split
+    exe 'wincmd ' .. cmd
+    call assert_equal([0, 0],
+          \ map(range(1, winnr('$')), 'avail - winheight(v:val)'),
+          \ 'wincmd ' .. cmd)
+    only!
+  endfor
+
+  " The same when the full-height vertical split is created directly, which
+  " does not go through win_splitmove().
+  for cmd in ['vert topleft new', 'vert botright new',
+        \ 'topleft vsplit', 'botright vsplit']
+    exe cmd
+    call assert_equal([0, 0],
+          \ map(range(1, winnr('$')), 'avail - winheight(v:val)'), cmd)
+    only!
+  endfor
+
+  " With a horizontal split next to it the new window still spans the full
+  " height; the status line between the stacked windows remains.
+  for cmd in ['split | split | wincmd H', 'split | vert topleft new']
+    exe cmd
+    call assert_equal(0, avail - winheight(1), cmd .. ', left window')
+    call assert_equal(1, avail - winheight(2) - winheight(3),
+          \ cmd .. ', right column')
+    only!
+  endfor
+
+  " The reverse still adds a status line to the upper window.
+  vsplit
+  wincmd K
+  call assert_equal(1, avail - winheight(1) - winheight(2))
+  only!
+
+  " With 'laststatus' set every window does get a status line.
+  for ls in [1, 2]
+    exe 'set laststatus=' .. ls
+    split
+    wincmd H
+    call assert_equal([1, 1],
+          \ map(range(1, winnr('$')), 'avail - winheight(v:val)'),
+          \ 'laststatus=' .. ls)
+    only!
+  endfor
+
+  set laststatus&vim
+  %bwipe!
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

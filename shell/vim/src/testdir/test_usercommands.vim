@@ -1,0 +1,1316 @@
+" Tests for user defined commands
+
+import './util/vim9.vim' as v9
+
+source util/screendump.vim
+
+" Test for <mods> in user defined commands
+function Test_cmdmods()
+  let g:mods = ''
+
+  command! -nargs=* MyCmd let g:mods = '<mods>'
+
+  MyCmd
+  call assert_equal('', g:mods)
+  aboveleft MyCmd
+  call assert_equal('aboveleft', g:mods)
+  abo MyCmd
+  call assert_equal('aboveleft', g:mods)
+  belowright MyCmd
+  call assert_equal('belowright', g:mods)
+  bel MyCmd
+  call assert_equal('belowright', g:mods)
+  botright MyCmd
+  call assert_equal('botright', g:mods)
+  bo MyCmd
+  call assert_equal('botright', g:mods)
+  browse MyCmd
+  call assert_equal('browse', g:mods)
+  bro MyCmd
+  call assert_equal('browse', g:mods)
+  confirm MyCmd
+  call assert_equal('confirm', g:mods)
+  conf MyCmd
+  call assert_equal('confirm', g:mods)
+  hide MyCmd
+  call assert_equal('hide', g:mods)
+  hid MyCmd
+  call assert_equal('hide', g:mods)
+  keepalt MyCmd
+  call assert_equal('keepalt', g:mods)
+  keepa MyCmd
+  call assert_equal('keepalt', g:mods)
+  keepjumps MyCmd
+  call assert_equal('keepjumps', g:mods)
+  keepj MyCmd
+  call assert_equal('keepjumps', g:mods)
+  keepmarks MyCmd
+  call assert_equal('keepmarks', g:mods)
+  kee MyCmd
+  call assert_equal('keepmarks', g:mods)
+  keeppatterns MyCmd
+  call assert_equal('keeppatterns', g:mods)
+  keepp MyCmd
+  call assert_equal('keeppatterns', g:mods)
+  leftabove MyCmd  " results in :aboveleft
+  call assert_equal('aboveleft', g:mods)
+  lefta MyCmd
+  call assert_equal('aboveleft', g:mods)
+  lockmarks MyCmd
+  call assert_equal('lockmarks', g:mods)
+  loc MyCmd
+  call assert_equal('lockmarks', g:mods)
+  noautocmd MyCmd
+  call assert_equal('noautocmd', g:mods)
+  noa MyCmd
+  call assert_equal('noautocmd', g:mods)
+  noswapfile MyCmd
+  call assert_equal('noswapfile', g:mods)
+  nos MyCmd
+  call assert_equal('noswapfile', g:mods)
+  rightbelow MyCmd " results in :belowright
+  call assert_equal('belowright', g:mods)
+  rightb MyCmd
+  call assert_equal('belowright', g:mods)
+  " sandbox MyCmd
+  silent MyCmd
+  call assert_equal('silent', g:mods)
+  sil MyCmd
+  call assert_equal('silent', g:mods)
+  silent! MyCmd
+  call assert_equal('silent!', g:mods)
+  sil! MyCmd
+  call assert_equal('silent!', g:mods)
+  tab MyCmd
+  call assert_equal('tab', g:mods)
+  0tab MyCmd
+  call assert_equal('0tab', g:mods)
+  tab split
+  tab MyCmd
+  call assert_equal('tab', g:mods)
+  1tab MyCmd
+  call assert_equal('1tab', g:mods)
+  tabprev
+  tab MyCmd
+  call assert_equal('tab', g:mods)
+  2tab MyCmd
+  call assert_equal('2tab', g:mods)
+  2tabclose
+  topleft MyCmd
+  call assert_equal('topleft', g:mods)
+  to MyCmd
+  call assert_equal('topleft', g:mods)
+  unsilent MyCmd
+  call assert_equal('unsilent', g:mods)
+  uns MyCmd
+  call assert_equal('unsilent', g:mods)
+  verbose MyCmd
+  call assert_equal('verbose', g:mods)
+  verb MyCmd
+  call assert_equal('verbose', g:mods)
+  0verbose MyCmd
+  call assert_equal('0verbose', g:mods)
+  3verbose MyCmd
+  call assert_equal('3verbose', g:mods)
+  999verbose MyCmd
+  call assert_equal('999verbose', g:mods)
+  vertical MyCmd
+  call assert_equal('vertical', g:mods)
+  vert MyCmd
+  call assert_equal('vertical', g:mods)
+  horizontal MyCmd
+  call assert_equal('horizontal', g:mods)
+  hor MyCmd
+  call assert_equal('horizontal', g:mods)
+
+  aboveleft belowright botright browse confirm hide keepalt keepjumps
+	      \ keepmarks keeppatterns lockmarks noautocmd noswapfile silent
+	      \ tab topleft unsilent verbose vertical MyCmd
+
+  call assert_equal('browse confirm hide keepalt keepjumps ' .
+      \ 'keepmarks keeppatterns lockmarks noswapfile unsilent noautocmd ' .
+      \ 'silent verbose aboveleft belowright botright tab topleft vertical',
+      \ g:mods)
+
+  kee keep keepm keepma keepmar keepmarks keepa keepalt keepj keepjumps
+      \ keepp keeppatterns MyCmd
+  call assert_equal('keepalt keepjumps keepmarks keeppatterns', g:mods)
+
+  let g:mods = ''
+  command! -nargs=* MyQCmd let g:mods .= '<q-mods> '
+
+  vertical MyQCmd
+  call assert_equal('"vertical" ', g:mods)
+
+  delcommand MyCmd
+  delcommand MyQCmd
+  unlet g:mods
+endfunction
+
+func SaveCmdArgs(...)
+  let g:args = a:000
+endfunc
+
+func Test_f_args()
+  command -nargs=* TestFArgs call SaveCmdArgs(<f-args>)
+
+  TestFArgs
+  call assert_equal([], g:args)
+
+  TestFArgs one two three
+  call assert_equal(['one', 'two', 'three'], g:args)
+
+  TestFArgs one\\two three
+  call assert_equal(['one\two', 'three'], g:args)
+
+  TestFArgs one\ two three
+  call assert_equal(['one two', 'three'], g:args)
+
+  TestFArgs one\"two three
+  call assert_equal(['one\"two', 'three'], g:args)
+
+  delcommand TestFArgs
+endfunc
+
+func Test_q_args()
+  command -nargs=* TestQArgs call SaveCmdArgs(<q-args>)
+
+  TestQArgs
+  call assert_equal([''], g:args)
+
+  TestQArgs one two three
+  call assert_equal(['one two three'], g:args)
+
+  TestQArgs one\\two three
+  call assert_equal(['one\\two three'], g:args)
+
+  TestQArgs one\ two three
+  call assert_equal(['one\ two three'], g:args)
+
+  TestQArgs one\"two three
+  call assert_equal(['one\"two three'], g:args)
+
+  delcommand TestQArgs
+endfunc
+
+func Test_reg_arg()
+  command -nargs=* -reg TestRegArg call SaveCmdArgs("<reg>", "<register>")
+
+  TestRegArg
+  call assert_equal(['', ''], g:args)
+
+  TestRegArg x
+  call assert_equal(['x', 'x'], g:args)
+
+  delcommand TestRegArg
+endfunc
+
+func Test_no_arg()
+  command -nargs=* TestNoArg call SaveCmdArgs("<args>", "<>", "<x>", "<lt>")
+
+  TestNoArg
+  call assert_equal(['', '<>', '<x>', '<'], g:args)
+
+  TestNoArg one
+  call assert_equal(['one', '<>', '<x>', '<'], g:args)
+
+  delcommand TestNoArg
+endfunc
+
+func Test_range_arg()
+  command -range TestRangeArg call SaveCmdArgs(<range>, <line1>, <line2>)
+  new
+  call setline(1, range(100))
+  let lnum = line('.')
+
+  TestRangeArg
+  call assert_equal([0, lnum, lnum], g:args)
+
+  99TestRangeArg
+  call assert_equal([1, 99, 99], g:args)
+
+  88,99TestRangeArg
+  call assert_equal([2, 88, 99], g:args)
+
+  call assert_fails('102TestRangeArg', 'E16:')
+
+  bwipe!
+  delcommand TestRangeArg
+endfunc
+
+func Test_Ambiguous()
+  command Doit let g:didit = 'yes'
+  command Dothat let g:didthat = 'also'
+  call assert_fails('Do', 'E464:')
+  Doit
+  call assert_equal('yes', g:didit)
+  Dothat
+  call assert_equal('also', g:didthat)
+  unlet g:didit
+  unlet g:didthat
+
+  delcommand Doit
+  Do
+  call assert_equal('also', g:didthat)
+  delcommand Dothat
+
+  call assert_fails("\x4ei\041", ' you demand a ')
+endfunc
+
+func Test_redefine_on_reload()
+  call writefile(['command ExistingCommand echo "yes"'], 'Xcommandexists', 'D')
+  call assert_equal(0, exists(':ExistingCommand'))
+  source Xcommandexists
+  call assert_equal(2, exists(':ExistingCommand'))
+  " Redefining a command when reloading a script is OK.
+  source Xcommandexists
+  call assert_equal(2, exists(':ExistingCommand'))
+
+  " But redefining in another script is not OK.
+  call writefile(['command ExistingCommand echo "yes"'], 'Xcommandexists2', 'D')
+  call assert_fails('source Xcommandexists2', 'E174:')
+
+  " And defining twice in one script is not OK.
+  delcommand ExistingCommand
+  call assert_equal(0, exists(':ExistingCommand'))
+  call writefile([
+	\ 'command ExistingCommand echo "yes"',
+	\ 'command ExistingCommand echo "no"',
+	\ ], 'Xcommandexists')
+  call assert_fails('source Xcommandexists', 'E174:')
+  call assert_equal(2, exists(':ExistingCommand'))
+
+  delcommand ExistingCommand
+endfunc
+
+func Test_CmdUndefined()
+  call assert_fails('Doit', 'E492:')
+  au CmdUndefined Doit :command Doit let g:didit = 'yes'
+  Doit
+  call assert_equal('yes', g:didit)
+  delcommand Doit
+
+  call assert_fails('Dothat', 'E492:')
+  au CmdUndefined * let g:didnot = 'yes'
+  call assert_fails('Dothat', 'E492:')
+  call assert_equal('yes', g:didnot)
+endfunc
+
+func Test_CmdErrors()
+  call assert_fails('com! docmd :', 'E183:')
+  call assert_fails('com! \<Tab> :', 'E182:')
+  call assert_fails('com! _ :', 'E182:')
+  call assert_fails('com! X :', 'E841:')
+  call assert_fails('com! - DoCmd :', 'E175:')
+  call assert_fails('com! -xxx DoCmd :', 'E181:')
+  call assert_fails('com! -addr DoCmd :', 'E179:')
+  call assert_fails('com! -addr=asdf DoCmd :', 'E180:')
+  call assert_fails('com! -complete DoCmd :', 'E179:')
+  call assert_fails('com! -complete=xxx DoCmd :', 'E180:')
+  call assert_fails('com! -complete=custom DoCmd :', 'E467:')
+  call assert_fails('com! -complete=customlist DoCmd :', 'E467:')
+  call assert_fails('com! -complete=behave,CustomComplete DoCmd :', 'E468:')
+  call assert_fails('com! -nargs=x DoCmd :', 'E176:')
+  call assert_fails('com! -count=1 -count=2 DoCmd :', 'E177:')
+  call assert_fails('com! -count=x DoCmd :', 'E178:')
+  call assert_fails('com! -range=x DoCmd :', 'E178:')
+
+  com! -complete=file DoCmd :
+  call assert_match('E1208:', v:warningmsg)
+  let v:warningmsg = ''
+  com! -nargs=0 -complete=file DoCmd :
+  call assert_match('E1208:', v:warningmsg)
+
+  let lines =<< trim END
+      vim9script
+      com! -complete=file DoCmd :
+  END
+  call v9.CheckScriptFailure(lines, 'E1208:', 2)
+
+  let lines =<< trim END
+      vim9script
+      com! -nargs=0 -complete=file DoCmd :
+  END
+  call v9.CheckScriptFailure(lines, 'E1208:', 2)
+
+  com! -nargs=0 DoCmd :
+  call assert_fails('DoCmd x', 'E488:')
+
+  com! -nargs=1 DoCmd :
+  call assert_fails('DoCmd', 'E471:')
+
+  com! -nargs=_ DoCmd :
+  call assert_fails('DoCmd', 'E471:')
+
+  com! -nargs=+ DoCmd :
+  call assert_fails('DoCmd', 'E471:')
+
+  call assert_fails('com DoCmd :', 'E174:')
+  comclear
+  call assert_fails('delcom DoCmd', 'E184:')
+
+  " These used to leak memory
+  call assert_fails('com! -complete=custom,CustomComplete _ :', 'E182:')
+  call assert_fails('com! -complete=custom,CustomComplete docmd :', 'E183:')
+  call assert_fails('com! -complete=custom,CustomComplete -xxx DoCmd :', 'E181:')
+endfunc
+
+func CustomComplete(A, L, P)
+  return "January\nFebruary\nMars\n"
+endfunc
+
+func CustomCompleteList(A, L, P)
+  return [ "Monday", "Tuesday", "Wednesday", {}, test_null_string()]
+endfunc
+
+func CustomCompleteListWithSpaces(A, L, P)
+  return [ "Monday Here", "Tuesday There", "Wednesday OK", {}, test_null_string()]
+endfunc
+
+func CustomCompleteListFuzzy(A, L, P)
+  return [ "Monday Here", "Tuesday There", "Wednesday OK", {}, test_null_string()]->matchfuzzy(a:A)
+endfunc
+
+func Test_CmdCompletion()
+  call feedkeys(":com -\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -addr bang bar buffer complete completeopt count keepscript nargs range register', @:)
+
+  call feedkeys(":com -nargs=0 -\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -nargs=0 -addr bang bar buffer complete completeopt count keepscript nargs range register', @:)
+
+  call feedkeys(":com -nargs=\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -nargs=* + 0 1 ? _', @:)
+
+  call feedkeys(":com -addr=\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -addr=arguments buffers lines loaded_buffers other quickfix tabs windows', @:)
+
+  call feedkeys(":com -complete=co\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -complete=color command compiler', @:)
+
+  " try completion for unsupported argument values
+  call feedkeys(":com -newarg=\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"com -newarg=\t", @:)
+
+  " command completion after the name in a user defined command
+  call feedkeys(":com MyCmd chist\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"com MyCmd chistory", @:)
+
+  " delete the Check commands to avoid them showing up
+  call feedkeys(":com Check\<C-A>\<C-B>\"\<CR>", 'tx')
+  let cmds = substitute(@:, '"com ', '', '')->split()
+  for cmd in cmds
+    exe 'delcommand ' .. cmd
+  endfor
+  delcommand MissingFeature
+
+  command! DoCmd1 :
+  command! DoCmd2 :
+  call feedkeys(":com \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com DoCmd1 DoCmd2', @:)
+
+  call feedkeys(":DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd1 DoCmd2', @:)
+
+  call feedkeys(":delcom DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"delcom DoCmd1 DoCmd2', @:)
+
+  " try argument completion for a command without completion
+  call feedkeys(":DoCmd1 \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"DoCmd1 \t", @:)
+
+  delcom DoCmd1
+  call feedkeys(":delcom DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"delcom DoCmd2', @:)
+
+  call feedkeys(":com DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com DoCmd2', @:)
+
+  delcom DoCmd2
+  call feedkeys(":delcom DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"delcom DoC', @:)
+
+  call feedkeys(":com DoC\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com DoC', @:)
+
+  com! -nargs=1 -complete=behave DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd mswin xterm', @:)
+
+  com! -nargs=_ -complete=behave DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd mswin xterm', @:)
+
+  com! -nargs=1 -complete=retab DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd -indentonly', @:)
+
+  com! -nargs=_ -complete=retab DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd -indentonly', @:)
+
+  " Test for file name completion
+  com! -nargs=1 -complete=file DoCmd :
+  call feedkeys(":DoCmd READM\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd README.txt', @:)
+
+  com! -nargs=_ -complete=file DoCmd :
+  call feedkeys(":DoCmd READM\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd README.txt', @:)
+
+  " Test for buffer name completion
+  com! -nargs=1 -complete=buffer DoCmd :
+  let bnum = bufadd('BufForUserCmd')
+  call setbufvar(bnum, '&buflisted', 1)
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufForUserCmd', @:)
+  bwipe BufForUserCmd
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufFor', @:)
+
+  com! -nargs=_ -complete=buffer DoCmd :
+  let bnum = bufadd('BufForUserCmd')
+  call setbufvar(bnum, '&buflisted', 1)
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufForUserCmd', @:)
+  bwipe BufForUserCmd
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufFor', @:)
+
+  com! -nargs=* -complete=custom,CustomComplete DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd January February Mars', @:)
+
+  com! -nargs=? -complete=customlist,CustomCompleteList DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd Monday Tuesday Wednesday', @:)
+
+  com! -nargs=_ -complete=customlist,CustomCompleteListWithSpaces DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd Monday Here Tuesday There Wednesday OK', @:)
+
+  com! -nargs=_ -complete=customlist,CustomCompleteListFuzzy DoCmd :
+  call feedkeys(":DoCmd mo he\<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd Monday Here', @:)
+
+  com! -nargs=+ -complete=custom,CustomCompleteList DoCmd :
+  call assert_fails("call feedkeys(':DoCmd \<C-D>', 'tx')", 'E730:')
+
+  com! -nargs=+ -complete=customlist,CustomComp DoCmd :
+  call assert_fails("call feedkeys(':DoCmd \<C-D>', 'tx')", 'E117:')
+
+  " custom completion without a function
+  com! -nargs=? -complete=custom, DoCmd
+  call assert_beeps("call feedkeys(':DoCmd \t', 'tx')")
+
+  " custom completion failure with the wrong function
+  com! -nargs=? -complete=custom,min DoCmd
+  call assert_fails("call feedkeys(':DoCmd \t', 'tx')", 'E118:')
+
+  " custom completion for a pattern with a backslash
+  let g:ArgLead = ''
+  func! CustCompl(A, L, P)
+    let g:ArgLead = a:A
+    return ['one', 'two', 'three']
+  endfunc
+  com! -nargs=? -complete=customlist,CustCompl DoCmd
+  call feedkeys(":DoCmd a\\\t", 'xt')
+  call assert_equal('a\', g:ArgLead)
+  delfunc CustCompl
+
+  delcom DoCmd
+endfunc
+
+" Test for -completeopt=escape: spaces, tabs and backslashes returned by a
+" customlist/custom completion function are backslash-escaped when inserted
+" into the command line, so the value survives as a single argument.  The
+" ArgLead passed to the function and the matches shown in the popup menu
+" remain unescaped.
+func Test_command_completeopt_escape()
+  let g:EscArgLead = ''
+  func! EscOne(A, L, P)
+    let g:EscArgLead = a:A
+    return ['hello world']
+  endfunc
+  func! EscBs(A, L, P)
+    let g:EscArgLead = a:A
+    return ['foo\bar']
+  endfunc
+  func! EscBoth(A, L, P)
+    let g:EscArgLead = a:A
+    return ['foo bar\baz']
+  endfunc
+  func! EscTab(A, L, P)
+    let g:EscArgLead = a:A
+    return ["foo\tbar"]
+  endfunc
+  func! EscCustom(A, L, P)
+    let g:EscArgLead = a:A
+    return "hello world"
+  endfunc
+  func! EscMulti(A, L, P)
+    let g:EscArgLead = a:A
+    return filter(['one value', 'two values', 'three values'],
+          \       {_, v -> stridx(v, a:A) == 0})
+  endfunc
+
+  " customlist + -completeopt=escape: spaces and backslashes are escaped.
+  com! -nargs=1 -complete=customlist,EscOne -completeopt=escape DoCmd
+        \ let g:EscQargs = <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd hello\ world', @:)
+  " <q-args> yields the unescaped value.
+  let g:EscQargs = ''
+  call feedkeys(":DoCmd \<Tab>\<CR>", 'tx')
+  call assert_equal('hello world', g:EscQargs)
+  delcom DoCmd
+
+  com! -nargs=1 -complete=customlist,EscBs -completeopt=escape DoCmd echo <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd foo\\bar', @:)
+  delcom DoCmd
+
+  com! -nargs=1 -complete=customlist,EscBoth -completeopt=escape DoCmd echo <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd foo\ bar\\baz', @:)
+  delcom DoCmd
+
+  " A tab in a match is escaped like a space (the argument splitter also
+  " splits on tabs) and <q-args> yields the literal tab again.
+  com! -nargs=1 -complete=customlist,EscTab -completeopt=escape DoCmd
+        \ let g:EscQargs = <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"DoCmd foo\\\tbar", @:)
+  " CTRL-A (insert all matches) escapes each match too.
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"DoCmd foo\\\tbar", @:)
+  let g:EscQargs = ''
+  call feedkeys(":DoCmd \<Tab>\<CR>", 'tx')
+  call assert_equal("foo\tbar", g:EscQargs)
+  let g:EscArgLead = ''
+  call assert_equal(["foo\tbar"], getcompletion("DoCmd foo\\\tb", 'cmdline'))
+  call assert_equal("foo\tb", g:EscArgLead)
+  delcom DoCmd
+  unlet g:EscQargs
+
+  " custom (newline-separated) + -completeopt=escape.
+  com! -nargs=1 -complete=custom,EscCustom -completeopt=escape DoCmd echo <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd hello\ world', @:)
+  delcom DoCmd
+
+  " Without -completeopt=escape the literal string is inserted as-is.
+  com! -nargs=1 -complete=customlist,EscOne DoCmd echo <q-args>
+  call feedkeys(":DoCmd \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd hello world', @:)
+  delcom DoCmd
+
+  " getcompletion() returns the unescaped form even with -completeopt=escape,
+  " because the escape only applies at cmdline insertion, not the pum/list.
+  com! -nargs=1 -complete=customlist,EscBoth -completeopt=escape DoCmd echo <q-args>
+  call assert_equal(['foo bar\baz'], getcompletion('DoCmd ', 'cmdline'))
+  delcom DoCmd
+
+  " ArgLead passed to the completion function is unescaped: the user typed
+  " `foo\ b` (logical "foo b"), so the function should see "foo b", not
+  " "foo\ b", and `getcompletion()` should find the "foo bar\baz" match.
+  com! -nargs=1 -complete=customlist,EscBoth -completeopt=escape DoCmd echo <q-args>
+  let g:EscArgLead = ''
+  call assert_equal(['foo bar\baz'], getcompletion('DoCmd foo\ b', 'cmdline'))
+  call assert_equal('foo b', g:EscArgLead)
+  delcom DoCmd
+
+  " Same logic applies to custom (newline-separated): the regex used for
+  " filtering is built from the unescaped pattern, so "hello\ wo" matches
+  " "hello world".
+  com! -nargs=1 -complete=custom,EscCustom -completeopt=escape DoCmd echo <q-args>
+  let g:EscArgLead = ''
+  call assert_equal(['hello world'], getcompletion('DoCmd hello\ wo', 'cmdline'))
+  call assert_equal('hello wo', g:EscArgLead)
+  delcom DoCmd
+
+  " Multi-argument case: with -nargs=+ the argument splitter still runs, so an
+  " escaped match stays a single argument and <f-args> splits the line on the
+  " unescaped spaces.  This is the scenario -nargs=_ cannot express.
+  com! -nargs=+ -complete=customlist,EscMulti -completeopt=escape DoCmd
+        \ let g:EscArgs = [<f-args>]
+  let g:EscArgs = []
+  call feedkeys(":DoCmd one\<Tab> two\<Tab>\<CR>", 'tx')
+  call assert_equal(['one value', 'two values'], g:EscArgs)
+  delcom DoCmd
+  unlet g:EscArgs
+
+  " Tab-completion on the attribute value.
+  call feedkeys(":com -completeopt=esc\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"com -completeopt=escape', @:)
+
+  " Invalid value gives E475; empty value gives E179.
+  call assert_fails('com! -nargs=1 -complete=customlist,EscOne -completeopt=bogus DoCmd :',
+        \ 'E475:')
+  call assert_fails('com! -nargs=1 -complete=customlist,EscOne -completeopt= DoCmd :',
+        \ 'E179:')
+
+  " -completeopt=escape is meaningless with -nargs=_ (the splitter is disabled),
+  " so the combination is rejected at command-definition time.
+  call assert_fails('com! -nargs=_ -complete=customlist,EscOne -completeopt=escape DoCmd :',
+        \ 'E1579:')
+
+  delfunc EscOne
+  delfunc EscBs
+  delfunc EscBoth
+  delfunc EscTab
+  delfunc EscCustom
+  delfunc EscMulti
+  unlet g:EscArgLead
+endfunc
+
+func CallExecute(A, L, P)
+  " Drop first '\n'
+  return execute('echo "hi"')[1:]
+endfunc
+
+func Test_use_execute_in_completion()
+  command! -nargs=* -complete=custom,CallExecute DoExec :
+  call feedkeys(":DoExec \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoExec hi', @:)
+  delcommand DoExec
+endfunc
+
+func Test_addr_all()
+  command! -addr=lines DoSomething let g:a1 = <line1> | let g:a2 = <line2>
+  %DoSomething
+  call assert_equal(1, g:a1)
+  call assert_equal(line('$'), g:a2)
+
+  command! -addr=arguments DoSomething let g:a1 = <line1> | let g:a2 = <line2>
+  args one two three
+  %DoSomething
+  call assert_equal(1, g:a1)
+  call assert_equal(3, g:a2)
+
+  command! -addr=buffers DoSomething let g:a1 = <line1> | let g:a2 = <line2>
+  %DoSomething
+  for low in range(1, bufnr('$'))
+    if buflisted(low)
+      break
+    endif
+  endfor
+  call assert_equal(low, g:a1)
+  call assert_equal(bufnr('$'), g:a2)
+
+  command! -addr=loaded_buffers DoSomething let g:a1 = <line1> | let g:a2 = <line2>
+  %DoSomething
+  for low in range(1, bufnr('$'))
+    if bufloaded(low)
+      break
+    endif
+  endfor
+  call assert_equal(low, g:a1)
+  for up in range(bufnr('$'), 1, -1)
+    if bufloaded(up)
+      break
+    endif
+  endfor
+  call assert_equal(up, g:a2)
+
+  command! -addr=windows DoSomething  let g:a1 = <line1> | let g:a2 = <line2>
+  new
+  %DoSomething
+  call assert_equal(1, g:a1)
+  call assert_equal(winnr('$'), g:a2)
+  bwipe
+
+  command! -addr=tabs DoSomething  let g:a1 = <line1> | let g:a2 = <line2>
+  tabnew
+  %DoSomething
+  call assert_equal(1, g:a1)
+  call assert_equal(len(gettabinfo()), g:a2)
+  bwipe
+
+  command! -addr=other DoSomething  let g:a1 = <line1> | let g:a2 = <line2>
+  DoSomething
+  call assert_equal(line('.'), g:a1)
+  call assert_equal(line('.'), g:a2)
+  %DoSomething
+  call assert_equal(1, g:a1)
+  call assert_equal(line('$'), g:a2)
+
+  delcommand DoSomething
+endfunc
+
+func Test_nargs_underscore_fargs()
+  " -nargs=_ must behave like -nargs=1 for <f-args>/<q-args>:
+  " the whole argument is one token, whitespace is part of it.
+  let g:res = []
+  com! -nargs=1 DoCmd1 call add(g:res, [<f-args>])
+  com! -nargs=_ DoCmdU call add(g:res, [<f-args>])
+  DoCmd1 a b c
+  DoCmdU a b c
+  call assert_equal([['a b c'], ['a b c']], g:res)
+
+  let g:res = []
+  com! -nargs=_ DoCmdQ call add(g:res, <q-args>)
+  DoCmdQ a b c
+  call assert_equal(['a b c'], g:res)
+
+  delcom DoCmd1
+  delcom DoCmdU
+  delcom DoCmdQ
+  unlet g:res
+endfunc
+
+func Test_command_list()
+  command! DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0                        :",
+        \           execute('command DoCmd'))
+
+  " Test with various -range= and -count= argument values.
+  command! -range DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .                   :",
+        \           execute('command DoCmd'))
+  command! -range=% DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    %                   :",
+        \           execute('command! DoCmd'))
+  command! -range=2 DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    2                   :",
+        \           execute('command DoCmd'))
+  command! -count=2 DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    2c ?                :",
+        \           execute('command DoCmd'))
+
+  " Test with various -addr= argument values.
+  command! -addr=lines DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .                   :",
+        \           execute('command DoCmd'))
+  command! -addr=arguments DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  arg              :",
+        \           execute('command DoCmd'))
+  command! -addr=buffers DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  buf              :",
+        \           execute('command DoCmd'))
+  command! -addr=loaded_buffers DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  load             :",
+        \           execute('command DoCmd'))
+  command! -addr=windows DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  win              :",
+        \           execute('command DoCmd'))
+  command! -addr=tabs DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  tab              :",
+        \           execute('command DoCmd'))
+  command! -addr=other DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0    .  ?                :",
+        \           execute('command DoCmd'))
+
+  " Test with various -complete= argument values (non-exhaustive list)
+  command! -nargs=1 -complete=arglist DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             1            arglist     :",
+        \           execute('command DoCmd'))
+  command! -nargs=_ -complete=arglist DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             _            arglist     :",
+        \           execute('command DoCmd'))
+  command! -nargs=* -complete=augroup DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             *            augroup     :",
+        \           execute('command DoCmd'))
+  command! -nargs=? -complete=custom,CustomComplete DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             ?            custom      :",
+        \           execute('command DoCmd'))
+  command! -nargs=+ -complete=customlist,CustomComplete DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             +            customlist  :",
+        \           execute('command DoCmd'))
+
+  " Test with various -narg= argument values.
+  command! -nargs=0 DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0                        :",
+        \           execute('command DoCmd'))
+  command! -nargs=1 DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             1                        :",
+        \           execute('command DoCmd'))
+  command! -nargs=_ DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             _                        :",
+        \           execute('command DoCmd'))
+  command! -nargs=* DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             *                        :",
+        \           execute('command DoCmd'))
+  command! -nargs=? DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             ?                        :",
+        \           execute('command DoCmd'))
+  command! -nargs=+ DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             +                        :",
+        \           execute('command DoCmd'))
+
+  " Test with other arguments.
+  command! -bang DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n!   DoCmd             0                        :",
+        \           execute('command DoCmd'))
+  command! -bar DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n|   DoCmd             0                        :",
+        \           execute('command DoCmd'))
+  command! -register DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n\"   DoCmd             0                        :",
+        \           execute('command DoCmd'))
+  command! -buffer DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\nb   DoCmd             0                        :"
+        \        .. "\n\"   DoCmd             0                        :",
+        \           execute('command DoCmd'))
+  comclear
+
+  " Test with many args.
+  command! -bang -bar -register -buffer -nargs=+ -complete=environment -addr=windows -count=3 DoCmd :
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n!\"b|DoCmd             +    3c win  environment :",
+        \           execute('command DoCmd'))
+  comclear
+
+  " Test with special characters in command definition.
+  command! DoCmd :<cr><tab><c-d>
+  call assert_equal("\n    Name              Args Address Complete    Definition"
+        \        .. "\n    DoCmd             0                        :<CR><Tab><C-D>",
+        \           execute('command DoCmd'))
+
+  " Test output in verbose mode.
+  command! -nargs=+ -complete=customlist,SomeFunc DoCmd :ls
+  call assert_match("^\n"
+        \        .. "    Name              Args Address Complete    Definition\n"
+        \        .. "    DoCmd             +            customlist,SomeFunc :ls\n"
+        \        .. "\tLast set from .*/test_usercommands.vim line \\d\\+$",
+        \           execute('verbose command DoCmd'))
+
+  comclear
+  call assert_equal("\nNo user-defined commands found", execute(':command Xxx'))
+  call assert_equal("\nNo user-defined commands found", execute('command'))
+endfunc
+
+" Test for a custom user completion returning the wrong value type
+func Test_usercmd_custom()
+  func T1(a, c, p)
+    return "a\nb\n"
+  endfunc
+  command -nargs=* -complete=customlist,T1 TCmd1
+  call assert_fails('call feedkeys(":TCmd1 \<C-A>\<C-B>\"\<CR>", "xt")', 'E1303: Custom list completion function does not return a List but a string')
+  call assert_equal('"TCmd1 ', @:)
+  delcommand TCmd1
+  delfunc T1
+
+  func T2(a, c, p)
+    return {}
+  endfunc
+  command -nargs=* -complete=customlist,T2 TCmd2
+  call assert_fails('call feedkeys(":TCmd2 \<C-A>\<C-B>\"\<CR>", "xt")', 'E1303: Custom list completion function does not return a List but a dict')
+  call assert_equal('"TCmd2 ', @:)
+  delcommand TCmd2
+  delfunc T2
+endfunc
+
+" Test for a backslash line continuation in a :command replacement
+func Test_usercmd_line_continuation()
+  let lines =<< trim END
+      vim9script
+      def Bar(label: string, value: any): void
+        g:result = [label, value]
+      enddef
+      command! Foo call Bar('x', {
+            \ 'key': 'value',
+            \ })
+      Foo
+      assert_equal(['x', {'key': 'value'}], g:result)
+  END
+  call v9.CheckScriptSuccess(lines)
+  unlet g:result
+  delcommand Foo
+endfunc
+
+" Test for a {} block in a command nested in :command or :autocmd
+func Test_usercmd_nested_block()
+  command DefineIt command DoNested {
+        g:didnested = 'yes'
+      }
+  DefineIt
+  DoNested
+  call assert_equal('yes', g:didnested)
+  unlet g:didnested
+  delcommand DoNested
+  delcommand DefineIt
+
+  " a command defined by an autocmd
+  autocmd CursorHold * command DoFromAu {
+        g:didfromau = 'yes'
+      }
+  doautocmd CursorHold
+  DoFromAu
+  call assert_equal('yes', g:didfromau)
+  unlet g:didfromau
+  delcommand DoFromAu
+  au! CursorHold
+
+  " a trailing "{" that is an argument of the command is not a block
+  let lines =<< trim END
+      vim9script
+      command NoBlock normal! {
+      g:after_command = 'reached'
+  END
+  call writefile(lines, 'XcmdTrailingCurly', 'D')
+  source XcmdTrailingCurly
+  call assert_equal('reached', g:after_command)
+  unlet g:after_command
+  delcommand NoBlock
+endfunc
+
+func Test_usercmd_with_block()
+  command DoSomething {
+        g:didit = 'yes'  # comment
+        # comment line
+        g:didmore = 'more'
+      }
+  DoSomething
+  call assert_equal('yes', g:didit)
+  call assert_equal('more', g:didmore)
+  unlet g:didit
+  unlet g:didmore
+  delcommand DoSomething
+
+  command DoMap {
+	echo [1, 2, 3]->map((_, v) => v + 1)
+    }
+  DoMap
+  delcommand DoMap
+
+  let lines =<< trim END
+      command DoesNotEnd {
+         echo 'hello'
+  END
+  call v9.CheckScriptFailure(lines, 'E1026:')
+  delcommand DoesNotEnd
+
+  let lines =<< trim END
+      command HelloThere {
+         echo 'hello' | echo 'there'
+        }
+      HelloThere
+  END
+  call v9.CheckScriptSuccess(lines)
+  delcommand HelloThere
+
+  let lines =<< trim END
+      command EchoCond {
+          const test: string = true
+              ? 'true'
+              : 'false'
+          g:result = test
+      }
+      EchoCond
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal('true', g:result)
+  unlet g:result
+
+  call feedkeys(":EchoCond\<CR>", 'xt')
+  call assert_equal('true', g:result)
+
+  delcommand EchoCond
+  unlet g:result
+
+  let lines =<< trim END
+      command BadCommand {
+         echo  {
+         'key': 'value',
+          }
+          }
+      BadCommand
+  END
+  call v9.CheckScriptFailure(lines, 'E1128:')
+  delcommand BadCommand
+
+  let lines =<< trim END
+	  vim9script
+    command Cmd {
+        g:result = [1,
+        2]
+    }
+    Cmd
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal([1, 2], g:result)
+  delcommand Cmd
+	unlet! g:result
+
+  let lines =<< trim END
+		vim9script
+		command Cmd {
+			g:result = and(0x80,
+			0x80)
+    }
+    Cmd
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal(128, g:result)
+  delcommand Cmd
+	unlet! g:result
+
+endfunc
+
+" Regression test: inside_block() must check all cstack levels, not just the
+" top.  A :normal! inside an :if inside a {} block needs newline-based nextcmd
+" separation to work; the bug was that only cs_flags[cs_idx] was checked.
+func Test_usercmd_block_normal_in_nested_if()
+  let lines =<< trim END
+      vim9script
+      command TestCmd {
+          if true
+              normal! Ahello
+              g:result = 'works'
+          endif
+      }
+      new
+      TestCmd
+      bwipe!
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal('works', g:result)
+  delcommand TestCmd
+  unlet! g:result
+endfunc
+
+func Test_delcommand_buffer()
+  command Global echo 'global'
+  command -buffer OneBuffer echo 'one'
+  new
+  command -buffer TwoBuffer echo 'two'
+  call assert_equal(0, exists(':OneBuffer'))
+  call assert_equal(2, exists(':Global'))
+  call assert_equal(2, exists(':TwoBuffer'))
+  delcommand -buffer TwoBuffer
+  call assert_equal(0, exists(':TwoBuffer'))
+  call assert_fails('delcommand -buffer Global', 'E1237:')
+  call assert_fails('delcommand -buffer OneBuffer', 'E1237:')
+  bwipe!
+  call assert_equal(2, exists(':OneBuffer'))
+  delcommand -buffer OneBuffer
+  call assert_equal(0, exists(':OneBuffer'))
+  call assert_fails('delcommand -buffer Global', 'E1237:')
+  delcommand Global
+  call assert_equal(0, exists(':Global'))
+endfunc
+
+def Test_count_with_quotes()
+  command -count GetCount g:nr = <count>
+  execute("GetCount 1'2")
+  assert_equal(12, g:nr)
+  execute("GetCount 1'234'567")
+  assert_equal(1'234'567, g:nr)
+
+  execute("GetCount 1'234'567'890'123'456'789'012")
+  assert_equal(v:sizeoflong == 8 ? 9223372036854775807 : 2147483647, g:nr)
+
+  # TODO: test with negative number once this is supported
+
+  assert_fails("GetCount '12", "E488:")
+  assert_fails("GetCount 12'", "E488:")
+  assert_fails("GetCount 1''2", "E488:")
+
+  assert_fails(":1'2GetCount", 'E492:')
+  new
+  setline(1, 'text')
+  normal ma
+  execute(":1, 'aprint")
+  bwipe!
+
+  unlet g:nr
+  delcommand GetCount
+enddef
+
+func DefCmd(name)
+  if len(a:name) > 30
+    return
+  endif
+  exe 'command ' .. a:name .. ' call DefCmd("' .. a:name .. 'x")'
+  echo a:name
+  exe a:name
+endfunc
+
+func Test_recursive_define()
+  call DefCmd('Command')
+
+  let name = 'Command'
+  while len(name) <= 30
+    exe 'delcommand ' .. name
+    let name ..= 'x'
+  endwhile
+endfunc
+
+" Test for using buffer-local ambiguous user-defined commands
+func Test_buflocal_ambiguous_usercmd()
+  new
+  command -buffer -nargs=1 -complete=sign TestCmd1 echo "Hello"
+  command -buffer -nargs=1 -complete=sign TestCmd2 echo "World"
+
+  call assert_fails("call feedkeys(':TestCmd\<CR>', 'xt')", 'E464:')
+  call feedkeys(":TestCmd \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"TestCmd ', @:)
+
+  delcommand TestCmd1
+  delcommand TestCmd2
+  bw!
+endfunc
+
+" Test for using buffer-local user command from cmdwin.
+func Test_buflocal_usercmd_cmdwin()
+  new
+  command -buffer TestCmd edit Test
+  " This used to crash Vim
+  call assert_fails("norm q::TestCmd\<CR>", 'E11:')
+  bw!
+endfunc
+
+" Test for using a multibyte character in a user command
+func Test_multibyte_in_usercmd()
+  command SubJapanesePeriodToDot exe "%s/\u3002/./g"
+  new
+  call setline(1, "Hello\u3002")
+  SubJapanesePeriodToDot
+  call assert_equal('Hello.', getline(1))
+  bw!
+  delcommand SubJapanesePeriodToDot
+endfunc
+
+" Declaring a variable in a {} uses Vim9 script rules, even when defined in a
+" legacy script.
+func Test_block_declaration_legacy_script()
+  let lines =<< trim END
+      command -range Rename {
+                     var save = @a
+                     @a = 'something'
+                     g:someExpr = @a
+                     @a = save
+                }
+  END
+  call writefile(lines, 'Xlegacy', 'D')
+  source Xlegacy
+
+  let lines =<< trim END
+      let @a = 'saved'
+      Rename
+      call assert_equal('something', g:someExpr)
+      call assert_equal('saved', @a)
+
+      let g:someExpr = 'xxx'
+      let @a = 'also'
+      Rename
+      call assert_equal('something', g:someExpr)
+      call assert_equal('also', @a)
+  END
+  call writefile(lines, 'Xother', 'D')
+  source Xother
+
+  unlet g:someExpr
+  delcommand Rename
+endfunc
+
+func Test_comclear_while_listing()
+  call CheckRunVimInTerminal()
+
+  let lines =<< trim END
+      set nocompatible
+      comclear
+      for i in range(1, 999)
+        exe 'command ' .. 'Foo' .. i .. ' bar'
+      endfor
+      au CmdlineLeave : call timer_start(0, {-> execute('comclear')})
+  END
+  call writefile(lines, 'Xcommandclear', 'D')
+  let buf = RunVimInTerminal('-S Xcommandclear', {'rows': 10})
+
+  " this was using freed memory
+  call term_sendkeys(buf, ":command\<CR>")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "j")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "G")
+  call term_sendkeys(buf, "\<CR>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test for listing user commands.
+func Test_command_list_0()
+  " Check space padding of attribute and name in command list
+  set vbs&
+  command! ShortCommand echo "ShortCommand"
+  command! VeryMuchLongerCommand echo "VeryMuchLongerCommand"
+
+  redi @"> | com | redi END
+  pu
+
+  let bl = matchbufline(bufnr('%'), "^    ShortCommand      0", 1, '$')
+  call assert_false(bl == [])
+  let bl = matchbufline(bufnr('%'), "^    VeryMuchLongerCommand 0", 1, '$')
+  call assert_false(bl == [])
+
+  bwipe!
+  delcommand ShortCommand
+  delcommand VeryMuchLongerCommand
+endfunc
+
+" Test for a block of ":command" or ":autocmd" in a block that is not
+" executed: the lines up to the "}" are skipped, not parsed as commands.
+func Test_command_block_skipped()
+  let lines =<< trim END
+    vim9script
+    def Something(s: string)
+      echo s
+    enddef
+    if 0
+      command! -bar -nargs=? Xfoo {
+        Something(<q-args>)
+      }
+    endif
+    if 0
+      autocmd BufRead *.xyz {
+        Something(<q-args>)
+      }
+    endif
+    while 0
+      command! Xbar {
+        Something('x')
+      }
+    endwhile
+    g:skipped = 'all three'
+  END
+  call writefile(lines, 'Xcmdblock.vim', 'D')
+
+  let g:skipped = ''
+  source Xcmdblock.vim
+  call assert_equal('all three', g:skipped)
+  call assert_equal(0, exists(':Xfoo'))
+  call assert_equal(0, exists(':Xbar'))
+  call assert_notmatch('xyz', execute('autocmd BufRead'))
+
+  unlet g:skipped
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab
