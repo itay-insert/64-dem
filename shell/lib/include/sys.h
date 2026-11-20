@@ -14,6 +14,7 @@ u8 read_key(bool ascii, bool wait);
 void *malloc(u64 Size);
 void free(void *alloc);
 void *realloc(void *alloc, u64 old_size, u64 new_size);
+void sys_exit(int r);
 void sleep_ms(u64 ms);
 rtc_data get_dateAndTime(void);
 void print_mem(void);
