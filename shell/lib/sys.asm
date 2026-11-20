@@ -7,6 +7,7 @@ global read_key
 global malloc
 global free
 global realloc
+global sys_exit
 global sleep_ms
 global get_dateAndTime
 global print_mem
@@ -54,6 +55,10 @@ realloc:
     mov rax, 3 ; realloc
     syscall
     ret
+
+sys_exit:
+    mov rax, 4
+    syscall
 
 sleep_ms:
     mov rax, 5
