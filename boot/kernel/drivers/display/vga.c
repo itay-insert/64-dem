@@ -747,3 +747,10 @@ void delete_rows(int n) {
 
     cursor.row = row_org;
 }
+
+
+
+u64 getshellsize(void) {
+    u64 ret = ((u64)rows << 32) + (u64)coulmns;
+    return ret;
+}

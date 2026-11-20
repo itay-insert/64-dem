@@ -28,6 +28,7 @@ extern beep
 extern set_begin
 extern read_freq
 extern write
+extern getshellsize
 
 extern sys_exit
 
@@ -270,6 +271,12 @@ jne skip_write
 call write
 jmp exit
 skip_write:
+
+cmp rax, 22
+jne skip_getshell
+call getshellsize
+jmp exit
+skip_getshell:
 
 exit:
 

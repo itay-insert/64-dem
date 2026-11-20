@@ -1,8 +1,10 @@
 #pragma once
 
-// Absolute ASCII 8.3 file paths only, at most 4095 bytes excluding NUL.
+// Absolute or relative ASCII 8.3 paths, at most 4095 bytes excluding NUL.
 // On success, outputs are new[] allocations owned by the caller. The parent
-// contains slash-separated, padded 11-byte names and a trailing slash.
+// starts and ends with '/' and contains slash-separated, padded 11-byte names.
+// For a relative input, join the encoded parent to the current directory.
+// The filename is an 11-byte padded short name followed by NUL.
 // On failure, outputs are null. Output pointers must be distinct.
 bool fs_split_path(const char *path, char **parent_out, char **filename_out);
 

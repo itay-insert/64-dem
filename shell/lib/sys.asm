@@ -25,6 +25,7 @@ global beep
 global set_begin
 global read_freq
 global stdout_write
+global getshellsize
 
 kprintf:
     xor rax, rax ; kprintf
@@ -143,5 +144,10 @@ read_freq:
 
 stdout_write:
     mov rax, 21
+    syscall
+    ret
+
+getshellsize:
+    mov rax, 22
     syscall
     ret

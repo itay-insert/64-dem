@@ -54,26 +54,27 @@ char *fs_join_path(const char *parent, const char *son) {
 bool fs_split_path(const char *path, char **parent_out, char **filename_out) {
     if (parent_out) *parent_out = nullptr;
     if (filename_out) *filename_out = nullptr;
-    if (!parent_out || !filename_out || parent_out == filename_out ||
-        !path || path[0] != '/')
+    if (!parent_out || !filename_out || parent_out == filename_out || !path)
         return false;
 
     unsigned length = 0;
     while (length < 4096 && path[length])
         ++length;
-    if (length == 4096 || length < 2 || path[length - 1] == '/')
+    if (length == 4096 || length == 0 || path[length - 1] == '/')
         return false;
 
     // Each parent component occupies 11 bytes followed by a slash.
+    unsigned start = path[0] == '/' ? 1 : 0;
     unsigned separators = 0;
-    for (unsigned i = 1; i < length; ++i)
+    for (unsigned i = start; i < length; ++i)
         if (path[i] == '/') ++separators;
+    if (1 + separators * 12 > 4095)
+        return false;
     char *parent = new char[2 + separators * 12];
     unsigned used = 0;
     parent[used++] = '/';
 
-    unsigned start = 1;
-    for (unsigned end = 1; end <= length; ++end) {
+    for (unsigned end = start; end <= length; ++end) {
         if (end != length && path[end] != '/')
             continue;
         unsigned count = end - start;
@@ -193,11 +194,16 @@ extern "C" int fs_open(char *path, int flags, unsigned mode) {
 extern "C" i64 fs_read(int fd, void *buffer, u64 count) {
     file_id *id = &pid[current_proccess].files[fd];
 
-    if (count == 0)
-        return (i64)count;
+    if (count == 0 || id->file_offset >= id->file_size)
+        return 0;
+
+    u64 remaining = id->file_size - id->file_offset;
+    if (count > remaining)
+        count = remaining;
 
     fat32_fs->read_file(id->file_handle, id->file_offset, (u32)count, buffer);
 
+    id->file_offset += count;
     return (i64)count;
 }
 
@@ -210,6 +216,9 @@ extern "C" i64 fs_write(int fd, const void *buffer, u64 count) {
 
     fat32_fs->write_file(id->file_handle, id->file_offset, (u32)count, buffer);
 
+    id->file_offset += count;
+    if (id->file_offset > id->file_size)
+        id->file_size = id->file_offset;
     return (i64)count;
 }
 
