@@ -128,6 +128,7 @@ static inline void mch_write(unsigned char *s, int len) {
 }
 
 
+<<<<<<< HEAD
 static inline void mch_sleep(long ms, int busy) {
     sleep_ms((u64)ms);
 }
@@ -136,4 +137,6 @@ static inline void mch_exit(int r) {
     sys_exit(r);
 }
 
+=======
+>>>>>>> d9f5d48 (finished porting VIM to 64-dem with codex)
 #endif

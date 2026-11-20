@@ -36,6 +36,7 @@ void qemu_debug_print(const char *str);
 void qemu_debug_hex_u64(u64 value);
 void draw_char(char ch, int coulmn, int row);
 void draw_cursor(int color_index);
+void hide_cursor(void);
 
 typedef struct {
 	int coulmn;
@@ -43,7 +44,9 @@ typedef struct {
 } text_data;
 
 text_data printf(const char *str, ...);
-void move_cursor(int amt);
+void console_move_cursor(int columns, int lines);
+void console_put_char(unsigned char ch);
+void console_present(void);
 void cursor_Setpos(int coulmn, int row);
 u8 str_size(const char *str);
 void kprintf(const char *str);

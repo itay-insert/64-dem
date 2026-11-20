@@ -39,7 +39,10 @@ vimrc_flag: db "-u", 0
 vimrc_none: db "NONE", 0
 no_swap: db "-n", 0
 command_flag: db "--cmd", 0
-startup_options: db "set nobackup nowritebackup backspace=indent,eol,start ttimeout ttimeoutlen=50", 0
+startup_options:
+    db "set nobackup nowritebackup backspace=indent,eol,start ttimeout ttimeoutlen=50"
+    db " esckeys virtualedit=onemore | nnoremap <special> <BS> X"
+    db " | nnoremap <special> <C-H> X", 0
 end_options: db "--", 0
 
 section .data

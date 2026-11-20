@@ -63,84 +63,62 @@ int stdout_pc = 0;
 int stdout_wc = 0;
 
 
-static inline void stdout_exec(int arg0, int arg1, char ch) {
-    switch (ch) {
-        case 'H': {
-            cursor_Setpos(arg1-1, arg0-1);
-            return;
-        }
-
-
-        case 'C': {
-            move_cursor(arg0);
-            return;
-        }
-
-        case 'L': {
-            make_blank_rows(arg0);
-            return;
-        }
-
-        case 'M': {
-            delete_rows(arg0);
-            return;
-        }
-    }
-}
-
-
-static inline int stdout_parse(int index) {
-    index = (index + 1) % 4096;
-    if (stdout[index] == 'H') { // ESC [ H: set cursor top-left
-        set_start();
-        index = (index + 1) % 4096;
-        return index;
-    } else if (stdout[index] == 'K') { // ESC [ K: erase from cursor to the end of the line
-        erase_from_cursor();
-        index = (index + 1) % 4096;
-        return index;
-    } else if (stdout[index] == '7' && stdout[(index + 1) % 4096] == 'm') { // ESC [ 7 m: enable reverse video
-        enable_reverse_video();
-        index = (index + 2) % 4096;
-        return index;
-    } else if (stdout[index] == '0' && stdout[(index + 1) % 4096] == 'm') { // ESC [ 0 m: restore video defaults
-        reset_video();
-        index = (index + 2) % 4096;
-        return index;
-    } else if (stdout[index] == '2' && stdout[(index + 1) % 4096] == 'J') { // ESC [ 2 J: clear screen
-        clear_screen();
-        index = (index + 2) % 4096;
-        return index;
-    }
-
-
-    int arg_buffer[2] = {0};
-
-    for (int i = 0; i < 2; i++) {
-        int arg = 0;
-        unsigned int digit = ascii_to_digit(stdout[index]);
-        while (digit != 0xFFFFFFFF) {
-            arg = (arg * 10) + digit;
-            index = (index + 1) % 4096;
-            digit = ascii_to_digit(stdout[index]);
-        }
-
-        if (stdout[index] != ';') {
-            arg_buffer[i] = arg;
+static void stdout_exec(int row, int col, char command) {
+    int count = row ? row : 1;
+    switch (command) {
+        case 'H': case 'f': cursor_Setpos(col ? col - 1 : 0, count - 1); break;
+        case 'A': console_move_cursor(0, -count); break;
+        case 'B': console_move_cursor(0, count); break;
+        case 'C': console_move_cursor(count, 0); break;
+        case 'D': console_move_cursor(-count, 0); break;
+        case 'K': if (!row) erase_from_cursor(); break;
+        case 'J': if (row == 2) clear_screen(); break;
+        case 'L': make_blank_rows(count); break;
+        case 'M': delete_rows(count); break;
+        case 'm':
+            if (!row) reset_video();
+            else if (row == 7) enable_reverse_video();
             break;
-        }
-
-        arg_buffer[i] = arg;
-        index = (index + 1) % 4096;
     }
-
-
-    stdout_exec(arg_buffer[0], arg_buffer[1], stdout[index]);
-    index = (index + 1) % 4096;
-    return index;
 }
 
+// Leave an incomplete escape sequence queued until the next write.
+static bool stdout_parse(void) {
+    int index = (stdout_pc + 1) % sizeof(stdout);
+    if (index == stdout_wc)
+        return false;
+    if (stdout[index] != '[') {
+        stdout_pc = index;
+        return true;
+    }
 
+    int args[2] = {0};
+    int argument = 0;
+    bool supported = true;
+    for (index = (index + 1) % sizeof(stdout); index != stdout_wc;
+         index = (index + 1) % sizeof(stdout)) {
+        unsigned char ch = stdout[index];
+        if (ch >= 0x40 && ch <= 0x7e) {
+            if (supported)
+                stdout_exec(args[0], args[1], ch);
+            stdout_pc = (index + 1) % sizeof(stdout);
+            return true;
+        }
+        if (ch < 0x20 || ch > 0x3f) {
+            stdout_pc = index;
+            return true;
+        }
+        if (ch >= '0' && ch <= '9' && argument < 2) {
+            if (args[argument] < 10000)
+                args[argument] = args[argument] * 10 + ch - '0';
+        } else if (ch == ';' && argument == 0) {
+            ++argument;
+        } else {
+            supported = false;
+        }
+    }
+    return false;
+}
 
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
@@ -152,20 +130,27 @@ void timer_handler(u64 cs, u64 rip) {
             draw_cursor(LightGray);
             blink = true;
         } else if (blink) {
-            draw_cursor(Black);
+            hide_cursor();
             blink = false;
         }
     }
 
     usb_background_tick(cs, rip);
 
-    while (stdout_pc != stdout_wc) {
-        if (stdout[stdout_pc] == '\x1b') {
-            stdout_pc = stdout_parse((stdout_pc + 1) % sizeof(stdout));
-        } else {
-            printf("%c", stdout[stdout_pc]);
-            stdout_pc = (stdout_pc + 1) % sizeof(stdout);
+    if (stdout_pc != stdout_wc) {
+        hide_cursor();
+        while (stdout_pc != stdout_wc) {
+            if (stdout[stdout_pc] == '\x1b') {
+                if (!stdout_parse())
+                    break;
+            } else {
+                console_put_char((unsigned char)stdout[stdout_pc]);
+                stdout_pc = (stdout_pc + 1) % sizeof(stdout);
+            }
         }
+        console_present();
+        if (blink)
+            draw_cursor(LightGray);
     }
 
 	lapic_write(0xB0, 0);

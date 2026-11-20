@@ -222,7 +222,7 @@ void draw_char(char ch, int coulmn, int row) {
 
     coulmn = coulmn << 3;
     row = row << 4;
-    int font_index = (int)ch << 4;
+    int font_index = (unsigned char)ch * 16;
     for (int i = 0; i < 16; i++) {
         u8 byte = font_data[font_index+i];
         for (u8 j = 0; j < 8; j++) {
@@ -247,9 +247,30 @@ struct Cursor {
 struct Cursor cursor = {0, 0};
 
 
+static struct Cursor drawn_cursor;
+static bool cursor_visible;
+
+void hide_cursor(void) {
+    if (!cursor_visible)
+        return;
+    int x = drawn_cursor.coulmn * 8;
+    int y = drawn_cursor.row * 16;
+    u32 *front = (u32 *)fb_phys;
+    const u32 *back = (const u32 *)fb_addr;
+    for (int row = y + 14; row < y + 16 && row < ver_res; ++row)
+        for (int col = x; col < x + 8 && col < hor_res; ++col)
+            front[row * p_scanln + col] = back[row * p_scanln + col];
+    cursor_visible = false;
+}
+
 void draw_cursor(int color_index) {
-    int x = cursor.coulmn << 3;
-    int y = cursor.row << 4;
+    hide_cursor();
+    int x = cursor.coulmn * 8;
+    int y = cursor.row * 16;
+    if (x < 0 || y < 0 || x >= hor_res || y >= ver_res)
+        return;
+    drawn_cursor = cursor;
+    cursor_visible = true;
 
     for (int i = 14; i < 16; i++) {
         for (int j = 0; j < 8; j++) {
@@ -528,30 +549,49 @@ text_data printf(const char *str, ...) {
 	return td;
 }
 
-void move_cursor(int amt) {
-	int cols = p_scanln >> 3;
-
-	int pos = cursor.row * cols + cursor.coulmn;
-
-	pos += amt;
-
-	if (pos < 0)
-        pos = 0;
-
-    cursor.row = pos / cols;
-    cursor.coulmn = pos % cols;
+static int clamp_coordinate(int value, int limit) {
+    if (value < 0 || limit <= 0)
+        return 0;
+    return value >= limit ? limit - 1 : value;
 }
 
 void cursor_Setpos(int coulmn, int row) {
-	int cols = p_scanln >> 3;
+    cursor.coulmn = clamp_coordinate(coulmn, coulmns);
+    cursor.row = clamp_coordinate(row, rows);
+}
 
-	int pos = row * cols + coulmn;
-	
-	if (pos < 0)
-		pos = 0;
-	
-	cursor.coulmn = pos % cols;
-	cursor.row = pos / cols;
+void console_move_cursor(int columns, int lines) {
+    cursor_Setpos(cursor.coulmn + columns, cursor.row + lines);
+}
+
+void console_put_char(unsigned char ch) {
+    switch (ch) {
+        case '\b': console_move_cursor(-1, 0); return;
+        case '\r': cursor.coulmn = 0; return;
+        case '\t': console_move_cursor(8 - cursor.coulmn % 8, 0); return;
+        case '\n':
+            qemu_debug_putc('\n');
+            if (cursor.row + 1 < rows)
+                ++cursor.row;
+            else
+                scroll((text_data){0});
+            return;
+    }
+
+    if (ch < ' ' || ch == 0x7f)
+        return;
+    draw_char((char)ch, cursor.coulmn, cursor.row);
+    if (++cursor.coulmn == coulmns) {
+        cursor.coulmn = 0;
+        if (cursor.row + 1 < rows)
+            ++cursor.row;
+        else
+            scroll((text_data){0});
+    }
+}
+
+void console_present(void) {
+    present();
 }
 
 
@@ -593,7 +633,7 @@ void kprintf(const char *str) {
 
 
 void backspace(void) {
-    draw_cursor(Black);
+    hide_cursor();
     cursor_dec();
     printf(" ");
     cursor_dec();
@@ -614,15 +654,8 @@ void set_start(void) {
 const char *digits = "0123456789";
 
 void erase_from_cursor(void) {
-    if (cursor.coulmn >= (coulmns-1))
-        return;
-
-    while (cursor.coulmn < coulmns) {
-        draw_char(' ', cursor.coulmn, cursor.row);
-        cursor.coulmn++;
-    }
-
-    present();
+    for (int col = cursor.coulmn; col < coulmns; ++col)
+        draw_char(' ', col, cursor.row);
 }
 
 
