@@ -787,3 +787,16 @@ u64 getshellsize(void) {
     u64 ret = ((u64)rows << 32) + (u64)coulmns;
     return ret;
 }
+
+
+void move_cursor(int amt) {
+    int cols = p_scanln >> 3;
+    int pos = cursor.row * cols + cursor.coulmn;
+
+    pos += amt;
+    if (pos < 0)
+        pos = 0;
+
+    cursor.row = pos / cols;
+    cursor.coulmn = pos % cols;
+}

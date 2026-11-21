@@ -44,6 +44,7 @@ typedef struct {
 } text_data;
 
 text_data printf(const char *str, ...);
+void move_cursor(int amt);
 void console_move_cursor(int columns, int lines);
 void console_put_char(unsigned char ch);
 void console_present(void);

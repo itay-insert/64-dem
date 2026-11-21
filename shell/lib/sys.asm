@@ -27,6 +27,9 @@ global set_begin
 global read_freq
 global stdout_write
 global getshellsize
+global cursor_Setpos
+global move_cursor
+
 
 kprintf:
     xor rax, rax ; kprintf
@@ -155,5 +158,15 @@ getshellsize:
 
 fs_stat:
     mov rax, 23
+    syscall
+    ret
+
+cursor_Setpos:
+    mov rax, 24
+    syscall
+    ret
+
+move_cursor:
+    mov rax, 25
     syscall
     ret

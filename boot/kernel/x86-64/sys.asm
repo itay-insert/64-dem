@@ -30,6 +30,8 @@ extern set_begin
 extern read_freq
 extern write
 extern getshellsize
+extern cursor_Setpos
+extern move_cursor
 
 extern sys_exit
 
@@ -268,22 +270,36 @@ skip_readfreq:
 
 
 cmp rax, 21
-jne skip_write
+jne skip_write ; sys_write to stdout
 call write
 jmp exit
 skip_write:
 
 cmp rax, 22
 jne skip_getshell
-call getshellsize
+call getshellsize ; get rows and coulmns
 jmp exit
 skip_getshell:
 
 cmp rax, 23
-jne skip_fs_stat
+jne skip_fs_stat ; get stat of file
 call stat
 jmp exit
 skip_fs_stat:
+
+
+cmp rax, 24
+jne skip_cursor_setpos
+call cursor_Setpos ; syscall to set up the cursor position
+jmp exit
+skip_cursor_setpos:
+
+
+cmp rax, 25
+jne skip_move_cursor
+call move_cursor ; syscall to move the cursor
+jmp exit
+skip_move_cursor:
 
 exit:
 

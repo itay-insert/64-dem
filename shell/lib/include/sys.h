@@ -42,5 +42,8 @@ void set_begin(void);
 u64 read_freq();
 void stdout_write(char *buff, int len);
 u64 getshellsize(void);
+void cursor_Setpos(int coulmn, int row);
+void move_cursor(int amt);
+
 
 #endif
