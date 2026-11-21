@@ -158,15 +158,20 @@ void draw_pixel(int x, int y, u32 color) {
         return;
     u32 *vga = (u32 *)fb_addr;
     int addr = (y * p_scanln) + x;
-    update_diff(x, y);
     if (addr < size) {
 		if (p_format == BGR) {
 			u32 BgrColor = (color & MaskBlue) << 16;
 			BgrColor += color & MaskGreen;
 			BgrColor += (color & MaskRed) >> 16; 
-			vga[addr] = BgrColor;
+            if (vga[addr] != BgrColor) {
+			    vga[addr] = BgrColor;
+                update_diff(x, y);
+            }
 		} else if (p_format == RGB) {
-			vga[addr] = color;
+            if (vga[addr] != color) {
+			    vga[addr] = color;
+                update_diff(x, y);
+            }
 		}
     }
 }
@@ -177,15 +182,20 @@ void draw_16color(int x, int y, int color_index) {
     u32 *vga = (u32 *)fb_addr;
     int addr = (y * p_scanln) + x;
     u32 color = vga16_color[color_index];
-    update_diff(x, y);
     if (addr < size) {
 		if (p_format == BGR) {
 			u32 BgrColor = (color & MaskBlue) << 16;
 			BgrColor += color & MaskGreen;
 			BgrColor += (color & MaskRed) >> 16;
-			vga[addr] = BgrColor; 
+            if (vga[addr] != BgrColor) {
+			    vga[addr] = BgrColor;
+                update_diff(x, y);
+            } 
 		} else if (p_format == RGB) {
-			vga[addr] = color;
+            if (vga[addr] != color) {
+                vga[addr] = color;
+                update_diff(x, y);
+            }
 		}
     }
 }
@@ -800,3 +810,5 @@ void move_cursor(int amt) {
     cursor.row = pos / cols;
     cursor.coulmn = pos % cols;
 }
+
+

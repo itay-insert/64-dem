@@ -23,7 +23,7 @@ static inline int get_size(char *str) {
 }
 
 
-void *memcpy(const void *dest, const void *src, unsigned long size) {
+static inline void *memcpy(const void *dest, const void *src, unsigned long size) {
     unsigned char *destination = (unsigned char *)dest;
     unsigned char *source = (unsigned char *)src;
 
@@ -35,7 +35,7 @@ void *memcpy(const void *dest, const void *src, unsigned long size) {
 
 
 
-int memcmp(const void *ptr0, const void *ptr1, unsigned long size) {
+static inline int memcmp(const void *ptr0, const void *ptr1, unsigned long size) {
     unsigned char *first = (unsigned char *)ptr0;
     unsigned char *second = (unsigned char *)ptr1;
 
@@ -49,7 +49,7 @@ int memcmp(const void *ptr0, const void *ptr1, unsigned long size) {
 
 
 
-int str_cmp(const char *ptr0, const char *ptr1) {
+static inline int str_cmp(const char *ptr0, const char *ptr1) {
     while (*ptr0 != '\0' || *ptr1 != '\0') {
         if (*ptr0 != *ptr1)
             return (unsigned char)(*ptr0 - *ptr1);
@@ -62,7 +62,7 @@ int str_cmp(const char *ptr0, const char *ptr1) {
 }
 
 
-void *memset(const void *ptr, int value, unsigned long size) {
+static inline void *memset(const void *ptr, int value, unsigned long size) {
     unsigned char val = (unsigned char)value;
     unsigned char *buff = (unsigned char *)ptr;
     
@@ -75,7 +75,7 @@ void *memset(const void *ptr, int value, unsigned long size) {
 
 extern const char *digits;
 
-unsigned int ascii_to_digit(char ch) {
+static inline unsigned int ascii_to_digit(char ch) {
     for (int i = 0; i < 10; i++) {
         if (ch == digits[i])
             return i;
@@ -86,7 +86,7 @@ unsigned int ascii_to_digit(char ch) {
 
 
 
-int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb_change_cnt) {
+static inline int mch_inchar(unsigned char *buff, int maxlen, long wtime, int tb_change_cnt) {
     if (maxlen > 256)
         return 0;
 
@@ -128,7 +128,6 @@ static inline void mch_write(unsigned char *s, int len) {
 }
 
 
-<<<<<<< HEAD
 static inline void mch_sleep(long ms, int busy) {
     sleep_ms((u64)ms);
 }
@@ -137,6 +136,5 @@ static inline void mch_exit(int r) {
     sys_exit(r);
 }
 
-=======
->>>>>>> d9f5d48 (finished porting VIM to 64-dem with codex)
+
 #endif

@@ -41,6 +41,14 @@ void write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool 
 }
 
 
+void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
+    if (buffer == NULL || *size_ptr == 0 || *index_ptr == 0)
+        return;
+
+    buffer[*index_ptr] = ' ';
+    *index_ptr--;
+}
+
 
 int open_file(void) {
     char *file = (char *)arg;
@@ -77,15 +85,27 @@ int main() {
     index = 0;
     file_buffer = NULL;
 
-    u8 key = read_key(true, false);
-    if (key >= ' ' && key < 0x7f) {
-       
-    } else if (key == '\b') {
-       
-    }
+    cursor_Setpos(0, 0);
 
-    if (key == 0x1b)
-        return 0;
+    int user_coulmn = 0;
+    int user_row = 0;
+
+
+    while (1) {
+        u8 key = read_key(true, false);
+        if (key >= ' ' && key < 0x7f) {
+            write_to_buffer(key, file_buffer, &size, &index, true);
+            if (!((user_row == (rows-1)) && (user_coulmn == coulmns))) { // have no idea what i did here
+                diff[(user_row * coulmns) + user_coulmn] = true;
+                move_cursor(1);
+            }
+        } else if (key == '\b') {
+            erase_from_buffer(file_buffer)
+        }
+
+        if (key == 0x1b)
+            return 0;
    
+    }
     
 }
