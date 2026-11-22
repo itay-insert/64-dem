@@ -812,3 +812,7 @@ void move_cursor(int amt) {
 }
 
 
+u64 Cursor_Getpos(void) {
+    u64 Cursor_pos = ((u64)cursor.row << 32) + (u64)cursor.coulmn;
+    return Cursor_pos;
+}

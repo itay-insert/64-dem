@@ -29,6 +29,7 @@ global stdout_write
 global getshellsize
 global cursor_Setpos
 global move_cursor
+global Cursor_Getpos
 
 
 kprintf:
@@ -168,5 +169,10 @@ cursor_Setpos:
 
 move_cursor:
     mov rax, 25
+    syscall
+    ret
+
+Cursor_Getpos:
+    mov rax, 26
     syscall
     ret

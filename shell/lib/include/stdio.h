@@ -137,4 +137,11 @@ static inline void mch_exit(int r) {
 }
 
 
+
+static inline void CursorGet(int *row, int *coulmn) {
+    u64 pos = Cursor_Getpos();
+    *coulmn = (int)(pos &  0xFFFFFFFF);
+    *row = (int)(pos >> 32);
+}
+
 #endif

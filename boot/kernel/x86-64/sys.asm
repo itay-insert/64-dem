@@ -32,6 +32,8 @@ extern write
 extern getshellsize
 extern cursor_Setpos
 extern move_cursor
+extern Cursor_Getpos
+
 
 extern sys_exit
 
@@ -300,6 +302,15 @@ jne skip_move_cursor
 call move_cursor ; syscall to move the cursor
 jmp exit
 skip_move_cursor:
+
+
+cmp rax, 26
+jne skip_Getpos
+call Cursor_Getpos ; syscall to get current cursor row and coulmn as a single 64-bit qword
+jmp exit
+skip_Getpos:
+
+
 
 exit:
 
