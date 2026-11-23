@@ -50,7 +50,7 @@ static void increase_cache(u64 index) {
 
 
 
-void write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool max) {
+char *write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool max) {
     if (buffer == NULL || *size_ptr == 0) {
         *size_ptr = (rows - 1) * coulmns;
         buffer = (char *)malloc(*size_ptr);
@@ -61,13 +61,13 @@ void write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool 
             increase_cache(*index_ptr);
         }
 
-        *index_ptr++;
-        return;
+        *index_ptr += 1;
+        return buffer;
     }
 
     if (*index_ptr == *size_ptr) {
         if (max)
-            return;
+            return buffer;
 
         u64 new_size = *size_ptr + ((rows-1) * coulmns);
         buffer = (char *)realloc(buffer, *size_ptr, new_size);
@@ -80,7 +80,9 @@ void write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool 
         if (!diff[*index_ptr-1])
             increase_cache(*index_ptr);
     }
-    *index_ptr++;
+    *index_ptr += 1;
+
+    return buffer;
 }
 
 
@@ -96,7 +98,7 @@ void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
     }
 
     if (*index_ptr > 0)
-        *index_ptr--;
+        *index_ptr -= 1;
 }
 
 
@@ -138,6 +140,27 @@ u64 get_Drawindex(void) {
 }
 
 
+static inline char *make_str(u64 drawindex) {
+    int count = 0;
+    u64 countindex = drawindex;
+
+    while (diff[countindex]) {
+        diff[countindex] = false;
+        countindex++;
+        count++;
+    }
+
+    if (count != 0) {
+        char *str = (char *)malloc(count+1);
+        for (int i = 0; i < count; i++) 
+            str[i] = file_buffer[drawindex+i];
+
+        str[count] = '\0'; // null terminator
+        return str;
+    } else
+        return NULL; // for failure
+}
+
 
 void draw_screen(void) {
     char buffer[2] = {0};
@@ -146,23 +169,33 @@ void draw_screen(void) {
     int old_row = 0;
     CursorGet(&old_row, &old_coulmn); // save old cursor coulmn and row
 
-    Cursor_Setpos(0, 0); // set cursor position to the start
-    u64 cursor_pos = 0;
+    cursor_Setpos(0, 0); // set cursor position to the start
 
-    while (cursor_pos < index) {
+    while (1) {
         u64 draw_index = get_Drawindex();
         if (draw_index == 0xFFFFFFFF)
             break;
             
-        
+        int coulmn;
+        int row;
+        Get(&row, &coulmn, draw_index); // convert draw_index to cursor row and coulmn
+        cursor_Setpos(coulmn, row);
+
+        char *str = make_str(draw_index);
+        if (str != NULL) {
+            printf(str);
+            free(str);
+        }
     }
 
-    Cursor_Setpos(old_coulmn, old_row);
+    cursor_Setpos(old_coulmn, old_row);
 
 }
 
 int main() {
-    u64 shellsize = getshellsize(void);
+    clear_screen();
+
+    u64 shellsize = getshellsize();
 
     rows = (int)(shellsize >> 32);
     coulmns = (int)shellsize;
@@ -184,19 +217,26 @@ int main() {
     while (1) {
         u8 key = read_key(true, false);
         if (key >= ' ' && key < 0x7f) {
-            write_to_buffer(key, file_buffer, &size, &index, true);
-            if (!((user_row == (rows-1)) && (user_coulmn == coulmns)))  // have no idea what i did here
+            file_buffer = write_to_buffer(key, file_buffer, &size, &index, true);
+            int row;
+            int coulmn;
+            CursorGet(&row, &coulmn);
+            if (!((row == (rows-1)) && (coulmn == coulmns)))  // have no idea what i did here
                 move_cursor(1);
             
         } else if (key == '\b') {
-            erase_from_buffer(file_buffer)
-            move_cursor(-1);
+            erase_from_buffer(file_buffer, &size, &index);
+            int row;
+            int coulmn;
+            CursorGet(&row, &coulmn);
+            if (!((row == 0) && (coulmn == 0)))
+                move_cursor(-1);
         }
 
         if (key == 0x1b)
             return 0;
    
-        
+        draw_screen();
     }
     
 }

@@ -144,4 +144,11 @@ static inline void CursorGet(int *row, int *coulmn) {
     *row = (int)(pos >> 32);
 }
 
+
+static inline void Get(int *row, int *coulmn, u64 pos) {
+    *coulmn = (int)(pos &  0xFFFFFFFF);
+    *row = (int)(pos >> 32);
+}
+
+
 #endif

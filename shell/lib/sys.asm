@@ -30,7 +30,7 @@ global getshellsize
 global cursor_Setpos
 global move_cursor
 global Cursor_Getpos
-
+global clear_screen
 
 kprintf:
     xor rax, rax ; kprintf
@@ -174,5 +174,10 @@ move_cursor:
 
 Cursor_Getpos:
     mov rax, 26
+    syscall
+    ret
+
+clear_screen:
+    mov rax, 27
     syscall
     ret

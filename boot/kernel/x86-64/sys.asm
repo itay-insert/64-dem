@@ -33,7 +33,7 @@ extern getshellsize
 extern cursor_Setpos
 extern move_cursor
 extern Cursor_Getpos
-
+extern clear_screen
 
 extern sys_exit
 
@@ -310,6 +310,12 @@ call Cursor_Getpos ; syscall to get current cursor row and coulmn as a single 64
 jmp exit
 skip_Getpos:
 
+    
+cmp rax, 27
+jne skip_clear
+call clear_screen
+jmp exit
+skip_clear:
 
 
 exit:

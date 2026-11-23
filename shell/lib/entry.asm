@@ -1,5 +1,6 @@
 BITS 64
 global _start
+global arg
 extern main
 section .text.start
 

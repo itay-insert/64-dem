@@ -45,6 +45,6 @@ u64 getshellsize(void);
 void cursor_Setpos(int coulmn, int row);
 void move_cursor(int amt);
 u64 Cursor_Getpos(void);
-
+void clear_screen(void);
 
 #endif
