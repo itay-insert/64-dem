@@ -411,7 +411,7 @@ void print_kernel(const char *status, u64 start, u64 end, bool bit) {
 #define MALLOC_END 0x7FFFFFFFFFFF
 
 #define KMALLOC_ST 0xFFFFC00000000000 
-#define KMALLOC_END 0xFFFFFFFFFFFFFFFF
+#define KMALLOC_END 0xFFFFFFFFFFFFEFFF
 
 void print_kernel_memory_hardware(bool cons) {
     memory_console = cons;

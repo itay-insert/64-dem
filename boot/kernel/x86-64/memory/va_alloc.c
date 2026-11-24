@@ -15,7 +15,7 @@ extern u64 Kernel_end;
 #define END 0xFFFF8FFFFFFFFFFF
 #define KERNEL_SPACE 0xFFFFC00000000000
 
-#define SPACE_END 0xFFFFFFFFFFFFFFFF
+#define SPACE_END 0xFFFFFFFFFFFFEFFF
 
 #define USR (attributes & 0x04)
 
