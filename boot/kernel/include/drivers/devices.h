@@ -33,7 +33,6 @@ typedef struct {
     u16 endpoint;
     pci_address_t *controller_address;
     io_device *controller;
-    void *context;
 } usb_interface;
 
     
