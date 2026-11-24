@@ -5,6 +5,8 @@
 #include "x86-64/memory/dma.h"
 #include "x86-64/memory/memory_helpers.h"
 #include "x86-64/spinlock.h"
+#include "drivers/devices.hpp"
+
 
 namespace {
 
@@ -243,6 +245,17 @@ bool initialize(controller &ctrl, const PCI_ret &device, TimerSource &timer) {
     u64 page = bar.address & ~4095ULL;
     u64 offset = bar.address - page;
     u64 initial_pages = (offset + 0x1000 + 4095) / 4096;
+
+    io_device Device = {0};
+    Device.io = false;
+    Device.io_base = page + BASE;
+    Device.pci = true;
+    Device.pci_address = ctrl.pci;
+    Device.size = initial_pages << 12;
+    Device.type = DEVICE_TYPE_DISK;
+    Device.vendor = "NVMe";
+    increase_iodevices(Device);
+
     create_mapping(page + BASE, page, initial_pages, 0x13, KernelPML4);
     flush_pages(page + BASE, initial_pages);
     ctrl.mmio = (volatile u8 *)(bar.address + BASE);

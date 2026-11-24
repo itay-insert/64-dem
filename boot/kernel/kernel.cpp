@@ -76,6 +76,8 @@ BootFileSystem *fat32_fs = nullptr;
 
 bool bios_boot = false;
 
+bool ps2_status = false;
+
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
 
@@ -268,7 +270,9 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
     // HIDK::init needs USB discovery and both global addresses to be ready.
     globalkeyboard = new GlobalKeyboard;
 
-    printf("ps/2 controller init status: 0x%b\n", ps2_controller_init());
+
+    ps2_status = ps2_controller_init();
+    printf("ps/2 controller init status: 0x%b\n", ps2_status);
 
     u32 low = ioapic_read_register(0x12);
     u32 high = ioapic_read_register(0x13);

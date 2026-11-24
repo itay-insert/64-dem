@@ -46,5 +46,7 @@ void cursor_Setpos(int coulmn, int row);
 void move_cursor(int amt);
 u64 Cursor_Getpos(void);
 void clear_screen(void);
+void get_memcons(void *buffer);
+u64 get_memcons_size(void);
 
 #endif

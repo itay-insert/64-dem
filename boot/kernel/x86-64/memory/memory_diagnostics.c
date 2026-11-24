@@ -22,6 +22,8 @@ extern u64 Kernel_end;
 
 extern bool bios_boot;
 
+extern void print_devices(void);
+
 static void print_size(u64 bytes) {
     static const u64 kib = 1024ULL;
     static const u64 mib = 1024ULL * 1024ULL;
@@ -354,7 +356,6 @@ extern bool memory_console;
 
 extern u64 kernel_phys_st;
 extern u64 kernel_phys_end;
-extern u64 kernel_end;
 extern u64 kernel_virt;
 
 extern u64 stack_index;
@@ -412,7 +413,7 @@ void print_kernel(const char *status, u64 start, u64 end, bool bit) {
 #define KMALLOC_ST 0xFFFFC00000000000 
 #define KMALLOC_END 0xFFFFFFFFFFFFFFFF
 
-void print_kernel_memory_regions(bool cons) {
+void print_kernel_memory_hardware(bool cons) {
     memory_console = cons;
     printf("Physical Mapped Memory: \n");
     printf("Legacy region (0x00000 - 0xFFFFF): (");
@@ -445,9 +446,18 @@ void print_kernel_memory_regions(bool cons) {
     print_region("0x40000000 to 0x40000028", 0x40000000, 0x40000028, "64-dem user program header");
     print_region("0x40000028 to 0x1FFFFFFFFFFF", 0x40000028, 0x1FFFFFFFFFFF, "userspace");
     print_region("0x200000000000 to 0x7FFFFFFFFFFF", MALLOC_START, MALLOC_END, "malloc region");
-    print_region_special64((kernel_end + 0x1000) & ~0xFFFULL, 0xFFFF8FFFFFFFFFFF, "kmalloc region 1");
+    print_region_special64((Kernel_end + 0x1000) & ~0xFFFULL, 0xFFFF8FFFFFFFFFFF, "kmalloc region 1");
     print_region_special64(BASE, KMALLOC_ST-1, "MMIO region");
     print_region_special64(KMALLOC_ST, KMALLOC_END, "kmalloc region 2");
 
+    printf("Virtual memory stats: \n");
+    print_virtual_memory_stats();
+    printf("Memory Usage:\n");
+    print_physical_memory_stats();
 
+    printf("Hardware devices: \n");
+    print_devices();
+
+
+    memory_console = false;
 }

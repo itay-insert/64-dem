@@ -9,6 +9,7 @@
 #include "drivers/pci/path.h"
 #include "drivers/pci/pci_names.h"
 #include "drivers/dev.h"
+#include "drivers/devices.h"
 
 #define PCI_MAX_ECAM_REGIONS 32
 #define PCI_CONFIG_LEGACY_SIZE 256
@@ -589,6 +590,15 @@ void pci_init(void) {
                        (unsigned int)region->segment,
                        (unsigned int)region->start_bus,
                        (unsigned int)region->end_bus, region->virtual_base);
+
+                io_device device = {0};
+                device.io = false;
+                device.io_base = region->virtual_base;
+                device.pci = false;
+                device.size = pages << 12;
+                device.type = DEVICE_TYPE_PCI;
+                device.vendor = "PCIe";
+                increase_iodevices(device);
             }
         }
     }
@@ -597,6 +607,14 @@ void pci_init(void) {
     if (!Express_enabled) {
         BusCount = 256;
         printf("No PCIe ECAM detected; using PCI config ports 0xCF8/0xCFC\n");
+        io_device device = {0};
+        device.io = true;
+        device.io_base = 0xCF8;
+        device.pci = false;
+        device.size = 4;
+        device.type = DEVICE_TYPE_PCI;
+        device.vendor = "PCI legacy";
+        increase_iodevices(device);
     }
     printf("%d PCI devices detected\n", PCI_list());
 }

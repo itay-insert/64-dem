@@ -12,6 +12,8 @@
 #include "drivers/keyboard/hid.hpp"
 #include "drivers/keyboard/keyboard.hpp"
 #include "x86-64/memory/kmalloc.h"
+#include "drivers/devices.hpp"
+
 
 #define config_case 0x02
 #define interface_case 0x04
@@ -174,6 +176,16 @@ void usb_controller::MapController(usb_controller_t *controller, u8 type) {
             flush_pages(phys_start+BASE, pages); // flush the mapped pages
             addr = addr + BASE; // pass the virtual address to controller->io_base instead of the physical one
             
+            io_device io = {0};
+            io.io = false;
+            io.io_base = phys_start + BASE;
+            io.pci = true;
+            io.pci_address = controller->pci_address;
+            io.size = pages << 12;
+            io.type = DEVICE_TYPE_USB;
+            io.vendor = vendor;
+            increase_iodevices(io);
+
             controller->io_base = addr; // else, pass the physical IO address to controller->io_base
             controller->bar = bar; // save the pci bar to controller->bar          
             return;
@@ -442,13 +454,36 @@ usb_device usb_controller::get_device(u8 port, TimerSource &timer) {
                     if (iprotocol == 0x01) {
                         printf("USB.%s.%u:%u:%u.%u: HID keyboard found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
-                    } else if (iprotocol == 0x02)
+                        usb_interface_endpoint usb_dev = {0};
+                        usb_dev.cap = "USB HID";
+                        usb_dev.controller_address = pci_address;
+                        usb_dev.port = port;
+                        usb_dev.interface = i;
+                        usb_dev.type = DEVICE_TYPE_KEYBOARD;
+                        increase_usbdevices(usb_dev);
+                    } else if (iprotocol == 0x02) {
                         printf("USB.%s.%u:%u:%u.%u: HID mouse found at the device in port 0x%b, interface 0x%w\n", vendor,
                             segment, bus, device, function, port, i);
+                        usb_interface_endpoint usb_dev = {0};
+                        usb_dev.cap = "USB HID";
+                        usb_dev.controller_address = pci_address;
+                        usb_dev.port = port;
+                        usb_dev.interface = i;
+                        usb_dev.type = DEVICE_TYPE_MOUSE;
+                        increase_usbdevices(usb_dev);
+                    }
 
-                } else if (iclass == 0x08)
+                } else if (iclass == 0x08) {
                     printf("USB.%s.%u:%u:%u.%u: USB Mass Storage device found at the device in port 0x%b, interface 0x%w\n", vendor,
                         segment, bus, device, function, port, i);
+                    usb_interface_endpoint usb_dev = {0};
+                    usb_dev.cap = "USB Mass Storage";
+                    usb_dev.controller_address = pci_address;
+                    usb_dev.port = port;
+                    usb_dev.interface = i;
+                    usb_dev.type = DEVICE_TYPE_DISK;
+                    increase_usbdevices(usb_dev);
+                }
             }
             // xHCI must accept the endpoint contexts before the device request.
             if (is_xhci && configure_endpoints(Device, Device.config.bConfigurationValue,

@@ -4,6 +4,7 @@
 #include "drivers/pci/pci.h"
 #include "drivers/display/vga.h"
 #include "x86-64/memory/memory.h"
+#include "drivers/devices.hpp"
 
 extern u16 Primary;
 extern u16 Secondary;
@@ -19,6 +20,9 @@ bool ata_end = false;
 
 ata_channel_t primary_channel = {};
 ata_channel_t secondary_channel = {};
+
+pci_address_t ata_pci = {0};
+bool pci = false;
 
 void ata_find_callback(const PCI_ret *device, void *context) {
 
@@ -37,6 +41,8 @@ void ata_find_callback(const PCI_ret *device, void *context) {
         .function = device->Function
     };
 
+    ata_pci = pci_address;
+
     pci_bar_t bar0; 
     pci_read_bar(pci_address, 0, 0, &bar0);
     pci_bar_t bar1; 
@@ -47,6 +53,9 @@ void ata_find_callback(const PCI_ret *device, void *context) {
     pci_read_bar(pci_address, 3, 0, &bar3);
 
     // if ata is in pci native mode, use i/o bases from bars otherwise use legacy i/o bases
+
+
+    pci = (prog_if & 0x01);
 
     Primary = (prog_if & 0x01) ? (u16)bar0.address : 0x1F0;
     PB = (prog_if & 0x01) ? (u16)bar1.address : 0x3F4;
@@ -84,8 +93,11 @@ static ata_drive Search_bitmap(void) {
 }
 
 void ATA_drive::init() {
+
     memcpy(vendor, "ATA ", sizeof("ATA "));
     if (!ata_discovered) {
+        pci = false;
+        io_device device = {0};
         pci_enumerate(ata_find_callback, nullptr);
         if (!ata_discovered) {
             printf("ATA: no ide device found on pci\n");
@@ -93,6 +105,15 @@ void ATA_drive::init() {
             initialized = false;
             return;
         } 
+
+        device.pci_address = ata_pci;
+        device.type = DEVICE_TYPE_DISK;
+        device.pci = pci;
+        device.io = true;
+        device.vendor = "ATA IDE";
+        device.io_base = Primary;
+        device.size = 40;
+        increase_iodevices(device);
     }
 
     drive = Search_bitmap();

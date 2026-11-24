@@ -7,19 +7,33 @@
 #include "drivers/timers/timer.hpp"
 #include "drivers/timers/pm.hpp"
 #include "drivers/timers/hpet.hpp"
+#include "drivers/devices.hpp"
 
 extern u64 timeradd;
 
 void SimpleTimer::Timer_init(PM_ret desc, const char *name, const char *sign) {
+    io_device device = {0};
+    device.pci = false;
+    device.pci_address = {0};
+    device.size = 0x1000;
+    device.type = DEVICE_TYPE_TIMER;
+    device.vendor = name;
+
     u64 addr = desc.io_base;
     Mode = desc.code;
     if (Mode == MMIO) {
+        device.io = false;
         Timer_base = addr + BASE;
+        device.io_base = Timer_base;
+        increase_iodevices(device);
         create_mapping(Timer_base, addr, 1, 0x13, KernelPML4);
         flush_pages(Timer_base, 1);
         printf("Kernel: %s is MMIO, mapped to virtual address: 0x%lx\n", name, Timer_base);
     } else {
         Timer_base = addr;
+        device.io = true;
+        device.io_base = Timer_base;
+        increase_iodevices(device);
         printf("Kernel: %s is port IO, starts at IO address: 0x%w\n", name, (u16)Timer_base);
     }
     strcpy(signature, sign);

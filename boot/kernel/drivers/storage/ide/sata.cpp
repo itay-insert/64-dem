@@ -7,6 +7,8 @@
 #include "drivers/timers/timer.hpp"
 #include "x86-64/memory/kmalloc.h"
 #include "drivers/storage/ide/sata.hpp"
+#include "drivers/devices.hpp"
+
 
 #define CAP_NP 0x1f
 #define CAP_NCS(x) (((x) & 0x1fff) >> 8)
@@ -192,6 +194,16 @@ static bool discover_ahci(void) {
     u64 offset = addr - page_phys;
 
     u64 pages = (offset + bar.size + 4095) >> 12;
+
+    io_device device = {0};
+    device.io = false;
+    device.io_base = desc->io_virt;
+    device.pci = true;
+    device.pci_address = desc->address;
+    device.size = pages << 12;
+    device.type = DEVICE_TYPE_DISK;
+    device.vendor = "AHCI/SATA";
+    increase_iodevices(device);
 
     // map the address to the MMIO region
     create_mapping(page_phys+BASE, page_phys, pages, 0x13, KernelPML4);

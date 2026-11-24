@@ -31,6 +31,9 @@ global cursor_Setpos
 global move_cursor
 global Cursor_Getpos
 global clear_screen
+global get_memcons
+global get_memcons_size
+
 
 kprintf:
     xor rax, rax ; kprintf
@@ -179,5 +182,15 @@ Cursor_Getpos:
 
 clear_screen:
     mov rax, 27
+    syscall
+    ret
+
+get_memcons:
+    mov rax, 28
+    syscall
+    ret
+
+get_memcons_size:
+    mov rax, 29
     syscall
     ret

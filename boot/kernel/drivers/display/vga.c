@@ -69,6 +69,7 @@ void qemu_debug_hex_u64(u64 value) {
 #define STDOUT 0
 #define FB 1
 
+extern void print_kernel_memory_hardware(bool cons);
 
 u32 vga16_color[16] = {
     0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 
@@ -77,7 +78,7 @@ u32 vga16_color[16] = {
     0xff5555, 0xff55ff, 0xffff55, 0xffffff
 };
 
-u64 fb_phys = 0;
+static u64 front_buffer_addr = 0;
 u64 fb_addr = 0;
 
 bool *diff = NULL;
@@ -94,11 +95,13 @@ int size = 0;
 
 int mode = STDOUT;
 
-char memcons[4096] = {0};
+char memcons[16384] = {0};
 int memcons_index = 0;
 
+static const u64 memcons_size = sizeof memcons;
+
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
-    fb_phys = fb_base;
+    front_buffer_addr = fb_base;
     size = p_scan * vres;
     fb_addr = (u64)kmalloc(size<<2);
 
@@ -138,7 +141,7 @@ static inline void update_diff(int x, int y) {
 } 
 
 static void present(void) {
-    u32 *real = (u32 *)fb_phys;
+    u32 *real = (u32 *)front_buffer_addr;
     u32 *back = (u32 *)fb_addr;
     for (u64 i = 0; i < diff_size; i++) {
         if (diff[i]) {
@@ -208,7 +211,7 @@ void draw_16color(int x, int y, int color_index) {
 void draw_16color_phys(int x, int y, int color_index) {
     if (x < 0 || x >= hor_res || y < 0 || y >= ver_res)
         return;
-    u32 *vga = (u32 *)fb_phys;
+    u32 *vga = (u32 *)front_buffer_addr;
     int addr = (y * p_scanln) + x;
     u32 color = vga16_color[color_index];
     if (addr < size) {
@@ -274,7 +277,7 @@ void hide_cursor(void) {
         return;
     int x = drawn_cursor.coulmn * 8;
     int y = drawn_cursor.row * 16;
-    u32 *front = (u32 *)fb_phys;
+    u32 *front = (u32 *)front_buffer_addr;
     const u32 *back = (const u32 *)fb_addr;
     for (int row = y + 14; row < y + 16 && row < ver_res; ++row)
         for (int col = x; col < x + 8 && col < hor_res; ++col)
@@ -465,10 +468,21 @@ text_data print_dword_hex(u32 d, text_data td)
 text_data print_qword_hex(u64 q, text_data td)
 {
     td = print_dword_hex((u32)(q >> 32), td);
-    td =print_dword_hex((u32)(q & 0xFFFFFFFFULL), td);
+    td = print_dword_hex((u32)(q & 0xFFFFFFFFULL), td);
     return td;
 }
 
+static int clamp_coordinate(int value, int limit) {
+    if (value < 0 || limit <= 0)
+        return 0;
+    return value >= limit ? limit - 1 : value;
+}
+
+
+void cursor_Setpos(int coulmn, int row) {
+    cursor.coulmn = clamp_coordinate(coulmn, coulmns);
+    cursor.row = clamp_coordinate(row, rows);
+}
 
 text_data printf(const char *str, ...) {
 	va_list args;
@@ -563,21 +577,15 @@ text_data printf(const char *str, ...) {
 		p_str++;
     }
 
+    if (memory_console) {
+        cursor_Setpos(td.coulmn, td.row);
+    }
+
     present();
 	va_end(args);
 	return td;
 }
 
-static int clamp_coordinate(int value, int limit) {
-    if (value < 0 || limit <= 0)
-        return 0;
-    return value >= limit ? limit - 1 : value;
-}
-
-void cursor_Setpos(int coulmn, int row) {
-    cursor.coulmn = clamp_coordinate(coulmn, coulmns);
-    cursor.row = clamp_coordinate(row, rows);
-}
 
 void console_move_cursor(int columns, int lines) {
     cursor_Setpos(cursor.coulmn + columns, cursor.row + lines);
@@ -824,4 +832,17 @@ void move_cursor(int amt) {
 u64 Cursor_Getpos(void) {
     u64 Cursor_pos = ((u64)cursor.row << 32) + (u64)cursor.coulmn;
     return Cursor_pos;
+}
+
+
+void cpy_memcons(void *buffer) {
+    memset(memcons, 0, memcons_size);
+    memcons_index = 0;
+    print_kernel_memory_hardware(true);
+    memcpy(buffer, memcons, memcons_size);
+}
+
+
+u64 get_memcons_size(void) {
+    return memcons_size;
 }

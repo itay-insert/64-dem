@@ -34,6 +34,8 @@ extern cursor_Setpos
 extern move_cursor
 extern Cursor_Getpos
 extern clear_screen
+extern cpy_memcons
+extern get_memcons_size
 
 extern sys_exit
 
@@ -313,10 +315,23 @@ skip_Getpos:
     
 cmp rax, 27
 jne skip_clear
-call clear_screen
+call clear_screen ; syscall to clear screen
 jmp exit
 skip_clear:
 
+
+cmp rax, 28
+jne skip_memcons
+call cpy_memcons ; syscall to initialize and get the memory console buffer
+jmp exit
+skip_memcons:
+
+
+cmp rax, 29
+jne skip_memcons_size
+call get_memcons_size ; syscall to get memcons_size
+jmp exit
+skip_memcons_size:
 
 exit:
 
