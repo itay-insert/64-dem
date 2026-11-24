@@ -443,6 +443,11 @@ void print_kernel_memory_regions(bool cons) {
 
     print_region("0x00000000 to 0x40000000", 0, 0x40000000, "Reserved for Physical Mapping");
     print_region("0x40000000 to 0x40000028", 0x40000000, 0x40000028, "64-dem user program header");
-    print_region("0x40000028 to 0x1FFFFFFFFFFF", )
+    print_region("0x40000028 to 0x1FFFFFFFFFFF", 0x40000028, 0x1FFFFFFFFFFF, "userspace");
+    print_region("0x200000000000 to 0x7FFFFFFFFFFF", MALLOC_START, MALLOC_END, "malloc region");
+    print_region_special64((kernel_end + 0x1000) & ~0xFFFULL, 0xFFFF8FFFFFFFFFFF, "kmalloc region 1");
+    print_region_special64(BASE, KMALLOC_ST-1, "MMIO region");
+    print_region_special64(KMALLOC_ST, KMALLOC_END, "kmalloc region 2");
+
 
 }
