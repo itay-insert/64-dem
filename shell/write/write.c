@@ -12,6 +12,8 @@ u8 *buff = NULL;
 bool *diff = NULL;
 
 u8 *file_buffer = NULL;
+char *buff = NULL;
+
 
 extern u64 arg;
 
@@ -64,6 +66,7 @@ void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
     }
 }
 
+u64 file_size = 0;
 
 int open_file(void) {
     char *file = (char *)arg;
@@ -72,13 +75,28 @@ int open_file(void) {
 
     if (fd < 0) {
         printf("Write: failed to open file %s\n", file);
-        return 1;
+        return -1;
     }
 
     struct fs_stat st;
     if (!fs_stat(file, &st)) {
         printf("write: failed to get stat for file %s\n", file);
-        return 1;
+        return -1;
+    }
+
+    if (st.size > 0) {
+        buff = (char *)malloc(st.size);
+        fs_read(fd, buff, st.size);
+        size = (rows - 1) * coulmns;
+        file_buffer = (char *)malloc(size);
+        memcpy(file_buffer, buff, st.size);
+        file_size = st.size;
+        return fd;
+    } else {
+        size = (rows - 1) * coulmns;
+        file_buffer = (char *)malloc(size);
+        memset(file_buffer, 0, size);
+        return fd;
     }
 }
 
@@ -118,23 +136,33 @@ int main() {
     rows = (int)(shellsize >> 32);
     coulmns = (int)shellsize;
 
-    buff = (u8 *)malloc((rows-1)*coulmns);
-    memset(buff, 0, (rows-1)*coulmns);
-
-    diff = (bool *)malloc((rows-1)*coulmns);
-
-    memset(diff, 0, (rows-1)*coulmns);
 
     size = 0;
     index = 0;
     file_buffer = NULL;
 
-    cursor_Setpos(0, 0);
 
+    int fd = open_file();
+    if (fd < 0) {
+        printf("WRITE.ELF: failed to open file %s\n", (char *)arg);
+        return 1;
+    }
+
+    cursor_Setpos(0, rows-1);
+    const char *cases[] = {
+        "('New file') ",
+        "('file') "
+    };
+
+
+
+    bool index = (file_size > 0);
+    printf("%s %s exit: Ctrl+X  save: Ctrrl+S");
+    cursor_Setpos(0, 0);
 
     while (1) {
         u8 key = read_key(true, false);
-        if (key >= ' ' && key < 0x7f) {
+        if (key > 0 && key < 0x7f) {
             printed = false;
             file_buffer = write_to_buffer(key, file_buffer, &size, &index, true);
             int row;
@@ -156,6 +184,7 @@ int main() {
         if (key == 0x1b)
             return 0;
    
+        
         if (!printed) {
             draw_screen();
             printed = true;
