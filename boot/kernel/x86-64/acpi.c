@@ -155,6 +155,7 @@ typedef struct {
 
 u64 rsdp_address = 0;
 
+
 typedef struct {
     u64 io_base;
     int code;

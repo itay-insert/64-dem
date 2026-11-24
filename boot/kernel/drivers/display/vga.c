@@ -14,6 +14,8 @@
 
 #define QEMU_DEBUGCON_PORT 0xE9
 
+bool memory_console = false;
+
 void qemu_debug_putc(char ch) {
 #if VGA_MIRROR_TO_QEMU_DEBUGCON
     outb(QEMU_DEBUGCON_PORT, (u8)ch);
@@ -92,6 +94,8 @@ int size = 0;
 
 int mode = STDOUT;
 
+char memcons[4096] = {0};
+int memcons_index = 0;
 
 void vga_init(u64 fb_base, int hres, int vres, int p_scan, int p_mode) {
     fb_phys = fb_base;
@@ -229,6 +233,11 @@ void Set_GlobalTextColor(int color_index) {
 
 void draw_char(char ch, int coulmn, int row) {
     qemu_debug_putc(ch);
+    if (memory_console) {
+        memcons[memcons_index] = ch;
+        memcons_index++;
+        return;
+    }
 
     coulmn = coulmn << 3;
     row = row << 4;

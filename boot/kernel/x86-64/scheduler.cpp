@@ -215,7 +215,7 @@ void resume_proccess(int index) {
 
 
 
-void terminate_procces(int index) {
+extern "C" void terminate_procces(int index) {
     if (pid == nullptr || index < 0 || index >= active_proccesses)
         return;
 
@@ -255,3 +255,5 @@ extern "C" void sys_exit() {
     terminate_procces(current_proccess);
     clock();
 }
+
+

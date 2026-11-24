@@ -57,26 +57,48 @@ u64 usb_addr = 0;
 u64 kernel_stack = 0;
 u64 storage_addr = 0;
 
+u64 kernel_phys_st = 0;
+u64 kernel_virt = 0;
+u64 kernel_phys_end = 0;
+u64 rsdp = 0;
+u64 bitmap_size = 0;
+u64 fb_phys = 0;
+u64 fb_virt = 0;
+
+u64 stack_index = 0;
+u64 fb_size = 0;
+
 extern volatile u64 keyboard_irq_count;
 
 GlobalKeyboard *globalkeyboard = NULL;
 
 BootFileSystem *fat32_fs = nullptr;
 
+bool bios_boot = false;
 
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
 
     qemu_debug_print("[kernel] entered kernel_main\n");
 
+    rsdp = info64->rsdp;
     if (paging_enabled == 0) {
         qemu_debug_print("[kernel] starting paging setup\n");
         paging_enabled = 1;
+        kernel_phys_st = info64->kernel_start;
+        kernel_phys_end = info64->kernel_end;
+        fb_phys = info64->framebuffer_base;
         u8 *bitmap = (u8 *)stack;
         PAGING_SETUP_DESCRIPTOR ps = {info64, info32, bitmap, memory_map};
         SetupPaging(ps);
     }
+    kernel_virt = info64->kernel_start;
     Kernel_end = info64->kernel_end;
+    stack_index = stack - kernel_virt;
+    bitmap_size = info64->bitmap_size;
+    fb_virt = info64->framebuffer_base;
+    fb_size = info32->pixels_per_scanline * info32->vertical_resolution;
+
     qemu_debug_print("[kernel] paging setup complete\n");
     vga_init(info64->framebuffer_base, info32->horizontal_resolution, info32->vertical_resolution, info32->pixels_per_scanline, info32->pixel_mode);
     qemu_debug_print("[kernel] VGA initialized\n");
@@ -298,7 +320,8 @@ extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack,
                    boot_path.PCI_status,
                 (unsigned int)boot_path.DeviceCount);
         }
-    }
+    } else
+        bios_boot = true;
 
     printf("Timer signature: %s\n", timer.Src->hw.signature);
     printf("Timer IO base: 0x%lx\n", timer.Src->hw.Timer_base);

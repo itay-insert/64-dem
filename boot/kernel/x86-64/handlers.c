@@ -30,6 +30,9 @@ static char exception_names[32][24] = {
 };
 
 static char unknown_exception[] = "Unknown";
+extern void terminate_procces(int index);
+extern int active_proccesses;
+extern int current_proccess;
 
 __attribute__((noreturn))
 void exception_handler(u64 vector, u64 error_code, u64 rip, u64 cs,
@@ -45,6 +48,10 @@ void exception_handler(u64 vector, u64 error_code, u64 rip, u64 cs,
         printf("cr2=0x%lx\n", cr2);
 
     printf("former_ss=0x%lx  former_cs=0x%lx  former_rip=0x%lx  former_rsp=0x%lx  former_rflags=0x%lx\n", former_ss, former_cs, former_rip, former_rsp, former_rflags);
+    if (active_proccesses > 0) {
+        __asm__ volatile ("sti");
+        terminate_procces(current_proccess);
+    }
     for (;;) {
         __asm__ volatile ("cli; hlt");
     }

@@ -20,6 +20,8 @@
 extern spinlock_t bitmap_lock;
 extern u64 Kernel_end;
 
+extern bool bios_boot;
+
 static void print_size(u64 bytes) {
     static const u64 kib = 1024ULL;
     static const u64 mib = 1024ULL * 1024ULL;
@@ -39,7 +41,7 @@ static void print_size(u64 bytes) {
     }
 
     if (unit == 1) {
-        printf("%lu B", bytes);
+        printf("%lu Bytes", bytes);
     } else {
         u64 whole = bytes / unit;
         u64 decimal = ((bytes % unit) * 10ULL) / unit;
@@ -346,4 +348,101 @@ void print_compressed_memory_map(const BOOT_INFO64 *info64,
     printf("Physical memory map (compressed):\n");
     print_physical_map(info64, memory_map);
     print_virtual_map(info64, info32, bitmap_address, memory_map);
+}
+
+extern bool memory_console;
+
+extern u64 kernel_phys_st;
+extern u64 kernel_phys_end;
+extern u64 kernel_end;
+extern u64 kernel_virt;
+
+extern u64 stack_index;
+extern u64 fb_phys;
+extern u64 fb_virt;
+extern u64 rsdp;
+extern u64 fb_size;
+extern u64 bitmap_size;
+
+extern u64 rsdp_size;
+
+static void print_region(const char *str, u64 start, u64 end, const char *status) {
+    u64 size = end - start + 1;
+    printf("%s %s (", str, status);
+    print_size(size);
+    printf(")\n");
+}
+
+static void print_region_special32(u64 start, u64 end, const char *status) {
+    u64 size = end - start + 1;
+    printf("%ux to %ux: %s (", (u32)start, (u32)end, status);
+    print_size(size);
+    printf(")\n"); 
+}
+
+static void print_region_special64(u64 start, u64 end, const char *status) {
+    u64 size = end - start + 1;
+    printf("%lx to %lx: %s (", start, end, status);
+    print_size(size);
+    printf(")\n"); 
+}
+
+static void print_region_special(u64 start, u64 end, const char *status, bool bit) {
+    if (bit) {
+        print_region_special32(start, end, status);
+    } else {
+        print_region_special64(start, end, status);
+    }
+}
+
+void print_kernel(const char *status, u64 start, u64 end, bool bit) {
+    printf("Kernel %s Mapping: \n", status);
+    print_region_special(start, start+stack_index-0x41000, "Kernel", bit);
+    print_region_special(start+stack_index-0x41000, start+stack_index, "Kernel Stack", bit);
+    print_region_special(start+stack_index, start+stack_index+bitmap_size, "Bitmap", bit);
+    print_region_special(start+stack_index+bitmap_size, end, "Memory map", bit);
+}
+
+
+#define USER_SPACE 0x40000028
+#define USER_END 0x1FFFFFFFFFFF
+#define MALLOC_START 0x200000000000
+#define MALLOC_END 0x7FFFFFFFFFFF
+
+#define KMALLOC_ST 0xFFFFC00000000000 
+#define KMALLOC_END 0xFFFFFFFFFFFFFFFF
+
+void print_kernel_memory_regions(bool cons) {
+    memory_console = cons;
+    printf("Physical Mapped Memory: \n");
+    printf("Legacy region (0x00000 - 0xFFFFF): (");
+    print_size(0x100000);
+    printf("):\n");
+    printf("0x0000 to 0x7C00: reserved (");
+    print_size(0x7C01);
+    printf(")\n");
+    print_region("0x7C00 to 0x9BFFF:", 0x7c00, 0x9bfff, "free space");
+    print_region("0xA0000 to 0xBFFFF:", 0xa0000, 0xbffff, "legacy vga memory");
+    print_region("0xE0000 to 0xFFFFF:", 0xe0000, 0xfffff, "reserved bios memory");
+
+    if (bios_boot) {
+        print_region("0x7C00 to 0x7DB8", 0x7c00, 0x7db8, "bios bootloader stage 1");
+        print_region("0x8000 to 0x81FF:", 0x8000, 0x81ff, "bios bootloader stage 2");
+        print_region("0x10000 to 0x18000:", 0x10000, 0x18000, "bios bootloader stage 3");
+        print_region("0x18000 to 0x1E000:", 0x18000, 0x1e000, "bios bootloader stage 4");
+        
+
+        print_region("0x80000 to 0x9BFFF:", 0x80000, 0x9bfff, "special bios boot data");
+    }
+
+    print_kernel("Physical", kernel_phys_st, kernel_phys_end, true);
+
+    print_region_special32(fb_phys, fb_phys+fb_size, "Frambuffer");
+
+    printf("Virtual Mapped Memory:\n");
+
+    print_region("0x00000000 to 0x40000000", 0, 0x40000000, "Reserved for Physical Mapping");
+    print_region("0x40000000 to 0x40000028", 0x40000000, 0x40000028, "64-dem user program header");
+    print_region("0x40000028 to 0x1FFFFFFFFFFF", )
+
 }

@@ -19,5 +19,9 @@ int main() {
     printf("Second allocation: 0x%lx\n", (u64)nums);
     free(nums);
     free(str);
+
+    int a = 5;
+    int *a_ptr = &a;
+    printf("A: %d  address of A: 0x%lx\n", *a_ptr, (u64)a_ptr);
     sleep_ms(5000);
 }

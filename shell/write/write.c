@@ -8,8 +8,6 @@
 int rows = 0;
 int coulmns = 0;
 
-u8 *buff = NULL;
-bool *diff = NULL;
 
 u8 *file_buffer = NULL;
 char *buff = NULL;
@@ -52,6 +50,9 @@ char *write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool
 }
 
 bool erased = false;
+u64 file_size = 0;
+u64 file_top = 0;
+
 
 void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
     if (buffer == NULL || *size_ptr == 0)
@@ -64,9 +65,15 @@ void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
     else {
         buffer[*index_ptr-1] = ' ';
     }
+
+    if (*index_ptr < file_top) {
+        for (u64 i = (*index_ptr-1); i < (file_top-1); i++) 
+            buffer[i] = buffer[i+1];
+        
+        file_top--;
+    }
 }
 
-u64 file_size = 0;
 
 int open_file(void) {
     char *file = (char *)arg;
@@ -79,8 +86,9 @@ int open_file(void) {
     }
 
     struct fs_stat st;
-    if (!fs_stat(file, &st)) {
+    if (fs_stat(file, &st) != 0) {
         printf("write: failed to get stat for file %s\n", file);
+        fs_close(fd);
         return -1;
     }
 
@@ -90,7 +98,9 @@ int open_file(void) {
         size = (rows - 1) * coulmns;
         file_buffer = (char *)malloc(size);
         memcpy(file_buffer, buff, st.size);
+        index = st.size;
         file_size = st.size;
+        file_top = index;
         return fd;
     } else {
         size = (rows - 1) * coulmns;
@@ -113,7 +123,7 @@ void draw_screen(void) {
     cursor_Setpos(0, 0); // set cursor position to the start
 
     u64 cursor_pos = 0;
-    while (cursor_pos < index) {
+    while (cursor_pos < file_top) {
         buffer[0] = file_buffer[cursor_pos];
         buffer[1] = '\0';
         printf(buffer);
@@ -127,6 +137,13 @@ void draw_screen(void) {
     }
 
 }
+
+#define UP 0x48
+#define LEFT 0x4B
+#define RIGHT 0x4D
+#define DOWN 0x50
+
+
 
 int main() {
     clear_screen();
@@ -150,21 +167,95 @@ int main() {
 
     cursor_Setpos(0, rows-1);
     const char *cases[] = {
-        "('New file') ",
-        "('file') "
+        "('New file')",
+        "('file')"
     };
 
 
 
-    bool index = (file_size > 0);
-    printf("%s %s exit: Ctrl+X  save: Ctrrl+S");
-    cursor_Setpos(0, 0);
+    bool case_index = (file_size > 0);
+    printf("%s %s exit: Ctrl+X  save: Ctrl+S", cases[(u8)case_index], (char *)arg);
+    if (file_size > 0) {
+        cursor_Setpos(0, 0);
+        draw_screen();
+    }
+
+    cursor_Setpos((index % coulmns), (index / coulmns));
 
     while (1) {
+        u8 scancode = read_key(false, false);
         u8 key = read_key(true, false);
+
+
+        // arrow key cursor movement
+        switch (scancode) {
+            case LEFT: {
+                if (index > 0) {
+                    index--;
+                    int row;
+                    int coulmn;
+                    CursorGet(&row, &coulmn); // get cursor row and coulmn
+                    if (!((row == 0) && (coulmn == 0)))
+                        move_cursor(-1); // move cursor too and make sure it doesn't go past the left border
+                }
+
+                goto exit;
+            }
+
+
+            case RIGHT: {
+                if (index < size) {
+                    index++;
+                    int row;
+                    int coulmn;
+                    CursorGet(&row, &coulmn); // get cursor row and coulmn
+                    if (!((row == (rows-1)) && (coulmn == coulmns)))  // move cursor too but make sure it doesn't go past the screen
+                        move_cursor(1);
+                }
+                
+                goto exit;
+            }
+
+
+            case UP: {
+                int row;
+                int coulmn;
+                CursorGet(&row, &coulmn); // get current cursor row and coulmn
+
+                if (row > 0) {
+                    row--;
+                    cursor_Setpos(coulmn, row);
+                }
+
+                goto exit;
+            }
+
+
+            case DOWN: {
+                int row;
+                int coulmn;
+                CursorGet(&row, &coulmn); // get current cursor row and coulmn
+                
+                if (row < (rows-2)) {
+                    row++;
+                    cursor_Setpos(coulmn, row);
+                }
+
+                goto exit;
+            }
+
+
+            default: {
+                break;
+            }
+        }
+
         if (key > 0 && key < 0x7f) {
             printed = false;
             file_buffer = write_to_buffer(key, file_buffer, &size, &index, true);
+            u64 cursor_pos = Cursor_Getpos();
+            if (cursor_pos >= file_top)
+                file_top = cursor_pos; // distinguish current index/cursor_pos from top char 
             int row;
             int coulmn;
             CursorGet(&row, &coulmn);
@@ -185,6 +276,8 @@ int main() {
             return 0;
    
         
+        exit:
+
         if (!printed) {
             draw_screen();
             printed = true;

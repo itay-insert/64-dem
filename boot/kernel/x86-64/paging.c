@@ -27,6 +27,7 @@ typedef struct {
 int GbPageSupport = 0;
 u64 paging_allocated_pages = 0;
 
+u64 rsdp_size = 0;
 
 PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
     PAGING_LOOKUP_DESCRIPTOR ret = {0};
@@ -344,6 +345,7 @@ typedef struct {
 } PAGING_SETUP_DESCRIPTOR;
 
 u64 *KernelPML4 = 0;
+extern u64 rsdp;
 
 #define IA32_PAT 0x277
 
@@ -381,6 +383,9 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
         } else if (desc->Type == EfiReservedMemoryType) {
             create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, KernelPML4);
         } else if (desc->Type == EfiACPIReclaimMemory || desc->Type == EfiACPIMemoryNVS) {
+            u64 end = desc->PhysicalStart + (desc->NumberOfPages << 12);
+            if (desc->PhysicalStart <= rsdp && rsdp < end) 
+                rsdp_size = end - rsdp;
             create_mapping(BASE+desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages, 0x03, KernelPML4);
         }
     }
