@@ -5,6 +5,11 @@
 #include "x86-64/io.h"
 #include "drivers/pci/pci.h"
 
+
+#include "c_compat.h"
+KERNEL_EXTERN_C_BEGIN 
+
+
 #define SPKR 0
 #define KEYBOARD 1
 #define DISK 2
@@ -32,6 +37,6 @@ typedef struct {
 } usb_interface;
 
     
-    
+KERNEL_EXTERN_C_END 
 
 #endif
