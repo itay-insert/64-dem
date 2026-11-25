@@ -33,6 +33,8 @@ global Cursor_Getpos
 global clear_screen
 global get_memcons
 global get_memcons_size
+global draw_cursor
+global clear_row
 
 
 kprintf:
@@ -192,5 +194,15 @@ get_memcons:
 
 get_memcons_size:
     mov rax, 29
+    syscall
+    ret
+
+draw_cursor:
+    mov rax, 30
+    syscall
+    ret
+
+clear_row:
+    mov rax, 32
     syscall
     ret

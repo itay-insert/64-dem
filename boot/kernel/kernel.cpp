@@ -78,8 +78,16 @@ bool bios_boot = false;
 
 bool ps2_status = false;
 
+EFI_MEMORY_DESCRIPTOR *bios_map = nullptr;
+BOOT_INFO64 *info0 = nullptr;
+BOOT_INFO32 *info1 = nullptr;
+
 extern "C" void kernel_main(BOOT_INFO64 *info64, BOOT_INFO32 *info32, u64 stack, EFI_MEMORY_DESCRIPTOR *memory_map) {
     wait_secs(1);
+
+    bios_map = memory_map;
+    info1 = info32;
+    info0 = info64;
 
     qemu_debug_print("[kernel] entered kernel_main\n");
 

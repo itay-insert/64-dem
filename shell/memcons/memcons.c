@@ -56,7 +56,7 @@ static char *make_str(int index) {
     int count = 0;
     for (int i = index; i < (index+coulmns); i++) {
         row_str[count] = memcons[i];
-        if (row_str[i] == '\n') {
+        if (row_str[count] == '\n') {
             row_str[count+1] = '\0';
             return row_str;
         }
@@ -69,7 +69,7 @@ static char *make_str(int index) {
 
 
 static inline void display_row(int row) {
-    if (row >= rows_count)
+    if (row >= (rows_count-1))
         return;
 
     int index = row_lines[row].index;
@@ -81,11 +81,14 @@ int pos = 0;
 
 static void display_rows(void) {
     cursor_Setpos(0, 0); // start to print at 0, 0
+    int current_row = 0;
     for (int i = row_start; i < row_end; i++) {
-        if (i >= rows_count)
+        if (i >= (rows_count-1))
             return;
 
+        clear_row(current_row);
         display_row(i);
+        current_row++;
     }
 
     cursor_Setpos(pos % coulmns, pos / coulmns); // restore cursor coordinates
@@ -115,7 +118,7 @@ static int viewer(void) {
 
             // move cursor left if above first coulmn
             if (pos > 0) {
-                move_cursor(-1);
+                MoveCursor(-1, 7);
                 pos--;
             } else {
                 if (row_start > 0) {
@@ -132,7 +135,7 @@ static int viewer(void) {
         case RIGHT: {
             
             if (pos < ((rows*coulmns) - 1)) {
-                move_cursor(1);
+                MoveCursor(1, 7);
                 pos++;
             } else {
                 if (row_end < rows_count) {
@@ -149,7 +152,7 @@ static int viewer(void) {
         case UP: {
             
             if ((pos / coulmns) > 0) {
-                move_cursor(-coulmns); // if row larger than 0, move cursor row back by one row
+                MoveCursor(-coulmns, 7); // if row larger than 0, move cursor row back by one row
                 pos -= coulmns;
             } else {
                 if (row_start > 0) {
@@ -166,7 +169,7 @@ static int viewer(void) {
         case DOWN: {
             
             if ((pos / coulmns) < (rows-1)) { // if row smaller than last row, move cursor row forwards by one row
-                move_cursor(coulmns);
+                MoveCursor(coulmns, 7);
                 pos += coulmns;
             } else {
                 if (row_end < rows_count) {

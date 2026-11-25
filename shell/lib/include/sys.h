@@ -48,5 +48,7 @@ u64 Cursor_Getpos(void);
 void clear_screen(void);
 void get_memcons(void *buffer);
 u64 get_memcons_size(void);
+void draw_cursor(int color);
+void clear_row(int row);
 
 #endif

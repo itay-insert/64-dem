@@ -190,14 +190,7 @@ int main() {
         // arrow key cursor movement
         switch (scancode) {
             case LEFT: {
-                if (index > 0) {
-                    index--;
-                    int row;
-                    int coulmn;
-                    CursorGet(&row, &coulmn); // get cursor row and coulmn
-                    if (!((row == 0) && (coulmn == 0)))
-                        move_cursor(-1); // move cursor too and make sure it doesn't go past the left border
-                }
+                
 
                 goto exit;
             }
@@ -253,9 +246,6 @@ int main() {
         if (key > 0 && key < 0x7f) {
             printed = false;
             file_buffer = write_to_buffer(key, file_buffer, &size, &index, true);
-            u64 cursor_pos = Cursor_Getpos();
-            if (cursor_pos >= file_top)
-                file_top = cursor_pos; // distinguish current index/cursor_pos from top char 
             int row;
             int coulmn;
             CursorGet(&row, &coulmn);
@@ -279,7 +269,7 @@ int main() {
             if (buff != NULL)
                 free(buff);
 
-                
+
             return 0;
         }
    

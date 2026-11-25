@@ -9,6 +9,8 @@ KERNEL_EXTERN_C_BEGIN
 
 void print_physical_memory_stats(void);
 void print_virtual_memory_stats(void);
+void print_memory_map_full(const BOOT_INFO64 *info64,
+                           const EFI_MEMORY_DESCRIPTOR *memory_map);
 void print_core_kernel_buffers(const BOOT_INFO64 *info64,
                                const BOOT_INFO32 *info32,
                                u64 bitmap_address,

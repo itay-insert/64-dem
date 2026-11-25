@@ -84,6 +84,7 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
 }
 
 
+
 u64 alloc_pages(u64 pages) {
     if (pages == 0) {
         return 0;
@@ -420,8 +421,9 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
 
     create_mapping(kernel_virtual+(mmp-ps.info64->kernel_start), mmp, (((ps.info64->memory_map_size+ps.info32->info_size) + 4095)>>12), 0x03, KernelPML4);
 
-    ps.info64->device_path =
-        kernel_virtual + (ps.info64->device_path - ps.info64->kernel_start);
+    if (ps.info64->device_path != 1)
+        ps.info64->device_path =
+            kernel_virtual + (ps.info64->device_path - ps.info64->kernel_start);
     ps.info64->kernel_end = kernel_virtual + (ps.info64->kernel_end - ps.info64->kernel_start);
     ps.info64->kernel_entry = kernel_virtual + (ps.info64->kernel_entry - ps.info64->kernel_start);
     u64 ib_addr = (u64)ps.info32;

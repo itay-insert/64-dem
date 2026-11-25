@@ -249,6 +249,63 @@ static const EFI_MEMORY_DESCRIPTOR *descriptor_at(
         ((const u8 *)memory_map + descriptor_size * index);
 }
 
+static const char *descriptor_type_name(u32 type) {
+    static const char *const names[EfiMaxMemoryType] = {
+        [EfiReservedMemoryType] = "Reserved memory",
+        [EfiLoaderCode] = "Boot loader code",
+        [EfiLoaderData] = "Boot loader data",
+        [EfiBootServicesCode] = "UEFI boot services code",
+        [EfiBootServicesData] = "UEFI boot services data",
+        [EfiRuntimeServicesCode] = "UEFI runtime services code",
+        [EfiRuntimeServicesData] = "UEFI runtime services data",
+        [EfiConventionalMemory] = "Conventional RAM",
+        [EfiUnusableMemory] = "Unusable memory",
+        [EfiACPIReclaimMemory] = "ACPI reclaimable memory",
+        [EfiACPIMemoryNVS] = "ACPI nonvolatile storage",
+        [EfiMemoryMappedIO] = "Memory-mapped I/O",
+        [EfiMemoryMappedIOPortSpace] = "Memory-mapped I/O port space",
+        [EfiPalCode] = "Processor abstraction layer code",
+        [EfiPersistentMemory] = "Persistent memory",
+        [EfiUnacceptedMemoryType] = "Unaccepted memory",
+    };
+
+    return type < EfiMaxMemoryType && names[type] != NULL ?
+        names[type] : "Unknown memory type";
+}
+
+void print_memory_map_full(const BOOT_INFO64 *info64,
+                           const EFI_MEMORY_DESCRIPTOR *memory_map) {
+    if (info64 == NULL || memory_map == NULL ||
+        info64->descriptor_size < sizeof(EFI_MEMORY_DESCRIPTOR) ||
+        info64->memory_map_size % info64->descriptor_size != 0) {
+        printf("Physical memory map: [ERR invalid boot memory map]\n");
+        return;
+    }
+
+    u64 count = info64->memory_map_size / info64->descriptor_size;
+    printf("Physical memory map (%lu boot descriptors):\n", count);
+    for (u64 i = 0; i < count; i++) {
+        const EFI_MEMORY_DESCRIPTOR *desc =
+            descriptor_at(memory_map, info64->descriptor_size, i);
+        u64 start = desc->PhysicalStart;
+        u64 pages = desc->NumberOfPages;
+        printf("  [%lu] %s (type %u)\n", i, descriptor_type_name(desc->Type),
+               desc->Type);
+
+        if (pages == 0 || pages > (~0ULL / PAGE_SIZE) ||
+            pages * PAGE_SIZE - 1 > ~0ULL - start) {
+            printf("    Start 0x%lx, %lu pages [invalid range], attributes 0x%lx\n",
+                   start, pages, desc->Attribute);
+            continue;
+        }
+
+        u64 bytes = pages * PAGE_SIZE;
+        printf("    0x%lx-0x%lx (", start, start + (bytes - 1));
+        print_size(bytes);
+        printf(", %lu pages), attributes 0x%lx\n", pages, desc->Attribute);
+    }
+}
+
 static void print_physical_map(const BOOT_INFO64 *info64,
                                const EFI_MEMORY_DESCRIPTOR *memory_map) {
     u64 count = info64->memory_map_size / info64->descriptor_size;
@@ -367,6 +424,11 @@ extern u64 bitmap_size;
 
 extern u64 rsdp_size;
 
+extern EFI_MEMORY_DESCRIPTOR *bios_map;
+extern BOOT_INFO64 *info0;
+extern BOOT_INFO32 *info1;
+
+
 static void print_region(const char *str, u64 start, u64 end, const char *status) {
     u64 size = end - start + 1;
     printf("%s %s (", str, status);
@@ -376,14 +438,14 @@ static void print_region(const char *str, u64 start, u64 end, const char *status
 
 static void print_region_special32(u64 start, u64 end, const char *status) {
     u64 size = end - start + 1;
-    printf("%ux to %ux: %s (", (u32)start, (u32)end, status);
+    printf("0x%ux to 0x%ux: %s (", (u32)start, (u32)end, status);
     print_size(size);
     printf(")\n"); 
 }
 
 static void print_region_special64(u64 start, u64 end, const char *status) {
     u64 size = end - start + 1;
-    printf("%lx to %lx: %s (", start, end, status);
+    printf("0x%lx to 0x%lx: %s (", start, end, status);
     print_size(size);
     printf(")\n"); 
 }
@@ -450,6 +512,8 @@ void print_kernel_memory_hardware(bool cons) {
     print_region_special64(BASE, KMALLOC_ST-1, "MMIO region");
     print_region_special64(KMALLOC_ST, KMALLOC_END, "kmalloc region 2");
 
+    print_region_special64(fb_virt, fb_virt+fb_size, "Framebuffer Virtual");
+
     printf("Virtual memory stats: \n");
     print_virtual_memory_stats();
     printf("Memory Usage:\n");
@@ -458,6 +522,13 @@ void print_kernel_memory_hardware(bool cons) {
     printf("Hardware devices: \n");
     print_devices();
 
+    printf("Kernel buffers: \n");
+    print_core_kernel_buffers(info0, info1, kernel_virt+stack_index, bios_map);
+
+    printf("physical and virtual memory maps: \n");
+    print_compressed_memory_map(info0, info1, (kernel_virt+stack_index), bios_map);
+
+    print_memory_map_full(info0, bios_map);
 
     memory_console = false;
 }

@@ -95,7 +95,7 @@ int size = 0;
 
 int mode = STDOUT;
 
-char memcons[16384] = {0};
+char memcons[0xffff] = {0};
 int memcons_index = 0;
 
 static const u64 memcons_size = sizeof memcons;
@@ -849,4 +849,18 @@ void cpy_memcons(void *buffer) {
 
 u64 get_memcons_size(void) {
     return memcons_size;
+}
+
+
+void ClearRow(int row) {
+    if (row >= rows)
+        return;
+
+    int y = row << 4;
+    // multiply by 16
+    
+    for (int i = y; i < (y+16); i++) {
+        for (int j = 0; j < p_scanln; j++)
+            draw_pixel(j, i, 0);
+    }
 }

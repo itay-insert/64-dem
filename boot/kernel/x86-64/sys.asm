@@ -36,6 +36,8 @@ extern Cursor_Getpos
 extern clear_screen
 extern cpy_memcons
 extern get_memcons_size
+extern draw_cursor
+extern ClearRow
 
 extern sys_exit
 
@@ -332,6 +334,20 @@ jne skip_memcons_size
 call get_memcons_size ; syscall to get memcons_size
 jmp exit
 skip_memcons_size:
+
+
+cmp rax, 30
+jne skip_draw_cursor ; syscall to draw_cursor
+call draw_cursor
+jmp exit
+skip_draw_cursor:
+
+
+cmp rax, 32
+jne skip_clear_row
+call ClearRow  ; syscall to clear row
+jmp exit
+skip_clear_row:
 
 exit:
 

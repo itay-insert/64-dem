@@ -110,6 +110,8 @@ void allocator_init(u8 *bitmap, EFI_MEMORY_DESCRIPTOR *memory_map, u64 memory_ma
 
 u64 former_count = 0;
 
+
+
 EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
     spin_lock(&bitmap_lock);
     EFI_MEMORY_DESCRIPTOR ret = {0};
@@ -119,6 +121,7 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
         spin_unlock(&bitmap_lock);
         return ret;
     }
+
     u64 count = former_count;
     u64 count_tar = count;
     u64 match_count = 0;
@@ -144,7 +147,10 @@ EFI_MEMORY_DESCRIPTOR alloc_frame(u64 PageCount) {
             count_tar = count;
         } 
     }
+
+    
     former_count = count;
+
     ret.PhysicalStart = count_tar<<12;
     ret.VirtualStart = count_tar<<12;
     ret.NumberOfPages = PageCount;

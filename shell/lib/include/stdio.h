@@ -151,4 +151,10 @@ static inline void Get(int *row, int *coulmn, u64 pos) {
 }
 
 
+static inline void MoveCursor(int amt, int color) {
+    move_cursor(amt);
+    draw_cursor(color);
+}
+
+
 #endif
