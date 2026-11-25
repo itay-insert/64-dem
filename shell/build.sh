@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-names=("hello" "mem" "cmd" "calc" "clock" "write")
+names=("hello" "mem" "cmd" "calc" "clock" "write" "memcons")
 
 for name in "${names[@]}"; do 
     nasm -f elf64 lib/sys.asm -o sys.o

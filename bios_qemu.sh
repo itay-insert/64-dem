@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${BIOS_IMAGE:-$ROOT_DIR/bios-disk.img}"
 IMAGE_SIZE_MIB="${BIOS_IMAGE_SIZE_MIB:-2048}"
+AUDIO_BACKEND="${BIOS_AUDIO_BACKEND:-none}"
 PARTITION_START=2048
 SECTOR_SIZE=512
 RUN_QEMU=true
@@ -88,10 +89,13 @@ if [[ "$BUILD" == true ]]; then
     (cd "$ROOT_DIR" && bash ./make.sh)
 fi
 
-for required_file in "$ROOT_DIR/EFI/boot/BOOTX64.efi" "$ROOT_DIR/boot/kernel.elf" "$ROOT_DIR/boot/stage2.bin" "$ROOT_DIR/shell/hello/hello.elf"; do
+BOOTLOADER="${BOOTLOADER:-$ROOT_DIR/EFI/boot/BOOTX64.efi}"
+BOOT_FILES=("$ROOT_DIR"/boot/{stage2.bin,stage3.bin,stage4.elf,kernel.elf})
+SHELL_FILES=("$ROOT_DIR"/shell/*.elf)
+for required_file in "${BOOT_FILES[@]}" "${SHELL_FILES[@]}" "$ROOT_DIR/shell/cmd.elf" "$ROOT_DIR/shell/sign.bin"; do
     [[ -r "$required_file" ]] || { echo "error: missing $required_file; run without --no-build first" >&2; exit 1; }
 done
-if [[ -n "$BOOTLOADER" && ! -r "$BOOTLOADER" ]]; then
+if [[ ! -r "$BOOTLOADER" ]]; then
     echo "error: bootloader is not readable: $BOOTLOADER" >&2
     exit 1
 fi
@@ -125,18 +129,21 @@ dd if="$BUILD_DIR/boot.bin" of="$IMAGE" bs=1 count="$BOOT_SIZE" conv=notrunc sta
 echo "Formatting the partition as FAT32..."
 mkfs.fat -F 32 --offset "$PARTITION_START" -n 64DEM "$IMAGE" "$FAT_SIZE_KIB"
 
-echo "Copying boot/, EFI/, and shell/ into the FAT32 filesystem..."
-mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$ROOT_DIR/boot" "$ROOT_DIR/EFI" "$ROOT_DIR/shell" ::/
-if [[ -n "$BOOTLOADER" ]]; then
-    mcopy -o -i "$IMAGE@@$PARTITION_OFFSET" "$BOOTLOADER" ::/EFI/boot/BOOTX64.efi
-fi
+echo "Copying boot stages, kernel, EFI loader, and shell programs..."
+mkdir -p "$BUILD_DIR"/{boot,EFI/boot,shell}
+cp -- "${BOOT_FILES[@]}" "$BUILD_DIR/boot/"
+cp -- "${SHELL_FILES[@]}" "$ROOT_DIR/shell/sign.bin" "$BUILD_DIR/shell/"
+cp -- "$BOOTLOADER" "$BUILD_DIR/EFI/boot/BOOTX64.efi"
+mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$BUILD_DIR/boot" "$BUILD_DIR/EFI" "$BUILD_DIR/shell" ::/
 
 echo "BIOS image ready: $IMAGE"
 
 if [[ "$RUN_QEMU" == true ]]; then
+    cleanup
+    trap - EXIT INT TERM
     exec qemu-system-x86_64 \
         -machine pc,pcspk-audiodev=spk \
-        -audiodev pa,id=spk \
+        -audiodev "$AUDIO_BACKEND,id=spk" \
         -m 512M \
         -drive "format=raw,file=$IMAGE" \
         -global "VGA.vgamem_mb=2" \

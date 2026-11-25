@@ -272,8 +272,16 @@ int main() {
                 move_cursor(-1);
         }
 
-        if (key == 0x1b)
+        if (key == 0x1b) {
+            if (file_buffer != NULL)
+                free(file_buffer);
+
+            if (buff != NULL)
+                free(buff);
+
+                
             return 0;
+        }
    
         
         exit:

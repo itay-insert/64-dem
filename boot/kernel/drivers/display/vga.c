@@ -497,6 +497,10 @@ text_data printf(const char *str, ...) {
     while (*p_str != '\0') {
         if (*p_str == '\n') {
             qemu_debug_putc('\n');
+            if (memory_console) {
+                memcons[memcons_index] = '\n';
+                memcons_index++;
+            }
             cursor.coulmn = 0;
             cursor.row++;
 			if (cursor.row >= (ver_res >> 4)) {
