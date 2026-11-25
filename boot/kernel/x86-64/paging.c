@@ -83,8 +83,6 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
 
 }
 
-
-
 u64 alloc_pages(u64 pages) {
     if (pages == 0) {
         return 0;
@@ -349,6 +347,8 @@ u64 *KernelPML4 = 0;
 extern u64 rsdp;
 
 #define IA32_PAT 0x277
+
+
 
 void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
     GbPageSupport = check_1gb_PageSupport();
