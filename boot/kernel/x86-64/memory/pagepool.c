@@ -5,32 +5,35 @@
 
 
 Page_Pool *pool = NULL; // pool pointer
-Page_Pool *start = NULL;
+Page_Pool *pool_start = NULL;
 
 Page_Pool *latest_entry = NULL;
 int pools_count = 0;
-u64 size = 0;
+u64 pool_size = 0;
 u64 entries = 0;
 u64 max_entry_index = 0;
 
-bool relocated = false;
+u64 pool_addr = 0;
+u64 pool_region = 0;
 
 void pool_init(void) {
-    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(2048); // allocate 8 megabytes for pool list
+    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(1024); // allocate 4 megabytes for pool list
 
+    pool_addr = alloc.PhysicalStart;
     pool = (Page_Pool *)alloc.PhysicalStart;
-    memset(pool, 0, (2048<<12)); // zero-initialize
-    size = 2048 << 12;
+    memset(pool, 0, (1024<<12)); // zero-initialize
+    pool_size = 1024 << 12;
 
-    start = pool;
+    pool_start = pool;
     max_entry_index++;
 
-    latest_entry = start;
+    latest_entry = pool_start;
 
-    entries = size / sizeof(Page_Pool);
+    entries = pool_size / sizeof(Page_Pool);
 
     alloc = alloc_frame(8192); // allocate 32 megabytes of memory for internal pool memory
 
+    pool_region = alloc.PhysicalStart;
     pool->PageBase = alloc.PhysicalStart;
     pool->PageCount = 8192;
 
@@ -45,8 +48,8 @@ static void delete_pool(Page_Pool *entry) {
         return; // invalid entry
 
 
-    if (start == entry)
-        start = NULL;
+    if (pool_start == entry)
+        pool_start = NULL;
 
     if (entry == latest_entry) {
         if (entry->father) 
@@ -94,7 +97,7 @@ static Page_Pool *find_new_entry(void) {
 
 
 u64 alloc_pages(u64 pages) {
-    Page_Pool *entry = start;
+    Page_Pool *entry = pool_start;
 
     while (entry != NULL) {
         if (entry->PageCount >= pages) {
@@ -107,16 +110,17 @@ u64 alloc_pages(u64 pages) {
                 entry->PageCount -= pages;
             }
 
+            memset((void *)addr, 0, pages<<12);
             return addr;
         }
 
         entry = entry->Son;
     }
 
-    if (relocated) { 
-        EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
-        return alloc.PhysicalStart;
-    }
+     
+    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
+    memset((void *)alloc.PhysicalStart, 0, alloc.NumberOfPages<<12);
+    return alloc.PhysicalStart;
 }
 
 
@@ -124,24 +128,18 @@ u64 alloc_pages(u64 pages) {
 void free_pages(u64 address, u64 pages) {
     latest_entry = find_new_entry();
     if (latest_entry == NULL) {
-        if (relocated) {
-            EFI_MEMORY_DESCRIPTOR alloc = {0};
-            alloc.PhysicalStart = address;
-            alloc.NumberOfPages = pages;
-            free_frame(alloc);
-        }
-
+        EFI_MEMORY_DESCRIPTOR alloc = {0};
+        alloc.PhysicalStart = address;
+        alloc.NumberOfPages = pages;
+        free_frame(alloc);
         return;
     }
 
-    if (start == NULL) 
-        start = latest_entry;
+    if (pool_start == NULL) 
+        pool_start = latest_entry;
     
     latest_entry->PageBase = address;
     latest_entry->PageCount = pages;
 
 }
 
-void relocate_pool(void) {
-    
-}

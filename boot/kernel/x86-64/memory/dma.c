@@ -6,6 +6,7 @@
 #include "x86-64/memory/virtual_allocator.h"
 #include "x86-64/memory/dma.h"
 #include "x86-64/memory/dma_internal.h"
+#include "x86-64/memory/pagepool.h"
 #include "drivers/display/vga.h"
 
 
@@ -41,11 +42,9 @@ dma_ret allocate_dma(u64 size) {
         dma_entries++;
         dma_header->SizeInPages--;
         spin_unlock(&dma_lock);
-        EFI_MEMORY_DESCRIPTOR frame = alloc_frame(pages);
-        if (frame.Attribute != 0) {
-            ret.status = 1;
-            return ret;
-        }
+        EFI_MEMORY_DESCRIPTOR frame = {0};
+        frame.PhysicalStart = alloc_pages(pages);
+    
         frame.VirtualStart = DMA_BASE;
         create_mapping(DMA_BASE, frame.PhysicalStart, pages, 0x03, KernelPML4);
         flush_pages(DMA_BASE, pages);
@@ -144,11 +143,8 @@ dma_ret allocate_dma(u64 size) {
     
 
     spin_unlock(&dma_lock);
-    EFI_MEMORY_DESCRIPTOR allocation = alloc_frame(pages);
-    if (allocation.Attribute != 0) {
-        ret.status = 1;
-        return ret;
-    }
+    EFI_MEMORY_DESCRIPTOR allocation = {0};
+    allocation.PhysicalStart = alloc_pages(pages);
     allocation.VirtualStart = free_base;
     create_mapping(free_base, allocation.PhysicalStart, pages, 0x03, KernelPML4);
     flush_pages(free_base, pages);
@@ -181,7 +177,7 @@ void free_dma(u64 Base) {
     allocation.NumberOfPages = ptr->SizeInPages;
     PAGING_LOOKUP_DESCRIPTOR lookup = paging_lookup(allocation.VirtualStart, KernelPML4);
     allocation.PhysicalStart = lookup.physical_address;
-    free_frame(allocation);
+    free_pages(allocation.PhysicalStart, allocation.NumberOfPages);
 
     for (int i = 0; i < entries_used; i++) {
         if (pool_entry->status != Header) {

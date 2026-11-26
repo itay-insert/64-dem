@@ -5,6 +5,7 @@
 #include "x86-64/lowlevel.h"
 #include "drivers/display/vga.h"
 #include "x86-64/memory/memory.h"
+#include "x86-64/memory/pagepool.h"
 #include "boot_info.h"
 #include "x86-64/spinlock.h"
 
@@ -83,29 +84,7 @@ PAGING_LOOKUP_DESCRIPTOR paging_lookup(u64 virtual_address, u64 *PML4) {
 
 }
 
-u64 alloc_pages(u64 pages) {
-    if (pages == 0) {
-        return 0;
-    }
-    EFI_MEMORY_DESCRIPTOR alloc = alloc_frame(pages);
-    u8 *region = (u8 *)alloc.PhysicalStart;
-    for (u64 i = 0; i < (pages << 12); i++) {
-        region[i] = 0;
-    }
-    __atomic_fetch_add(&paging_allocated_pages, pages, __ATOMIC_RELAXED);
-    return alloc.PhysicalStart;
-}
 
-void free_pages(u64 address, u64 pages) {
-    EFI_MEMORY_DESCRIPTOR free = {0, address, address, pages, 0};
-    free_frame(free);
-    u64 current = __atomic_load_n(&paging_allocated_pages, __ATOMIC_RELAXED);
-    while (current >= pages &&
-           !__atomic_compare_exchange_n(&paging_allocated_pages, &current,
-                                        current - pages, false,
-                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
-    }
-}
 
 void flush_pages(u64 virtual_address, u64 pages) {
     u64 virtual_end = virtual_address + (4096 * pages);
@@ -366,6 +345,8 @@ void SetupPaging(PAGING_SETUP_DESCRIPTOR ps) {
                    ps.info64->descriptor_size, ps.info64->kernel_start,
                    ps.info64->kernel_end, ps.info64->bitmap_size);
     qemu_debug_print("[paging] allocator initialized\n");
+    pool_init();
+    qemu_debug_print("[paging] allocated 32 MB for DMA and paging page pool\n");
     KernelPML4 = (u64 *)(uintptr_t)alloc_pages(1);
     if (KernelPML4 == 0)
         return;

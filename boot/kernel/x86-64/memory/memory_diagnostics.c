@@ -475,6 +475,9 @@ void print_kernel(const char *status, u64 start, u64 end, bool bit) {
 #define KMALLOC_ST 0xFFFFC00000000000 
 #define KMALLOC_END 0xFFFFFFFFFFFFEFFF
 
+extern u64 pool_addr;
+extern u64 pool_region;
+
 void print_kernel_memory_hardware(bool cons) {
     memory_console = cons;
     printf("Physical Mapped Memory: \n");
@@ -523,6 +526,8 @@ void print_kernel_memory_hardware(bool cons) {
     print_devices();
 
     printf("Kernel buffers: \n");
+    print_region_special32(pool_addr, pool_addr+(1024<<12), "PagePool metadata");
+    print_region_special32(pool_region, pool_region+(8192<<12), "PagePool");
     print_core_kernel_buffers(info0, info1, kernel_virt+stack_index, bios_map);
 
     printf("physical and virtual memory maps: \n");

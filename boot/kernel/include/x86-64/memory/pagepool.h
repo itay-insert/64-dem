@@ -19,7 +19,6 @@ struct Page_Pool {
 u64 alloc_pages(u64 pages);
 void free_pages(u64 address, u64 pages);
 void pool_init(void);
-void pool_relocate(void);
 
 
 KERNEL_EXTERN_C_END
