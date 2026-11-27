@@ -88,6 +88,11 @@ static inline void dellocate() {
 #define RIGHT 0x4D
 #define DOWN 0x50
 
+
+static char *combine_commands(char *command, char *arg) {
+    if ()
+}
+
 int main() {
 
     const char *commands[] = {
@@ -135,6 +140,7 @@ int main() {
                     memcpy(buffer, former_cmd, (u64)cmd_size);
                     buffer[cmd_size] = '\0';
                     printf(buffer);
+                    MoveCursor(-cmd_size, 7);
                 }
 
 
@@ -159,6 +165,7 @@ int main() {
                     memcpy(buffer, former_cmd, (u64)cmd_size);
                     buffer[cmd_size] = '\0';
                     printf(buffer);
+                    MoveCursor(-cmd_size, 7);
                 }
 
                 break;
@@ -204,9 +211,10 @@ int main() {
 
             if (memcmp(command, commands[i], size) == 0 &&
                 (command[size] == ' ' || command[size] == '\0')) {
-                increase_cmds(command, size);
                 switch (i) {
                     case 0 : {
+
+                        increase_cmds(command, size);
                         printf("%s", command + size + (command[size] == ' '));
                         goto exit;
                     }
