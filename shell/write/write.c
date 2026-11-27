@@ -8,71 +8,111 @@
 int rows = 0;
 int coulmns = 0;
 
+int row_start = 0;
+int row_end = 0;
 
-u8 *file_buffer = NULL;
+
 char *buff = NULL;
 
+char *row_str = NULL;
 
 extern u64 arg;
 
 u64 size = 0;
-u64 index = 0;
+u64 pos = 0;
+
+u64 file_top = 0;
+
+u64 max_size = 0;
+bool max = true;
 
 
-char *write_to_buffer(char ch, char *buffer, u64 *size_ptr, u64 *index_ptr, bool max) {
-    if (buffer == NULL || *size_ptr == 0) {
-        *size_ptr = (rows - 1) * coulmns;
-        buffer = (char *)malloc(*size_ptr);
-        
-        if (buffer[*index_ptr] != ch) 
-            buffer[*index_ptr] = ch;
-            
 
-        *index_ptr += 1;
-        return buffer;
-    }
+typedef struct {
+    bool newline;
+    int index;
+} row_desc;
 
-    if (*index_ptr == *size_ptr) {
-        if (max)
-            return buffer;
+row_desc *row_lines = NULL;
 
-        u64 new_size = *size_ptr + ((rows-1) * coulmns);
-        buffer = (char *)realloc(buffer, *size_ptr, new_size);
-        *size_ptr = new_size;
-    }
-
-    if (buffer[*index_ptr] != ch) 
-        buffer[*index_ptr] = ch;
-    
-    *index_ptr += 1;
-
-    return buffer;
-}
 
 bool erased = false;
 u64 file_size = 0;
-u64 file_top = 0;
+
+u64 rows_count = 0;
+
+static inline int make_row(int index) {
+    for (int i = index; i < (coulmns+index); i++) {
+        if (i >= file_size)
+            return file_size; // captured an infinite loop here
+
+        if (buff[i] == '\n') {
+            row_lines[rows_count].index = index;
+            row_lines[rows_count].newline = true;
+            index = i + 1;
+            rows_count++;
+            return index;
+        }
+    }
+
+    row_lines[rows_count].index = index;
+    row_lines[rows_count].newline = false;
+    index += coulmns;
+    rows_count++;
+    return index;
+}
 
 
-void erase_from_buffer(char *buffer, u64 *size_ptr, u64 *index_ptr) {
-    if (buffer == NULL || *size_ptr == 0)
+static inline void count_rows(void) {
+    int index = 0;
+    while (index < (file_size-1)) 
+        index = make_row(index);
+}
+
+
+static char *make_str(int index) {
+    int count = 0;
+    for (int i = index; i < (index+coulmns); i++) {
+        if (i >= max_size)
+            continue;
+
+        row_str[count] = buff[i];
+        if (row_str[count] == '\n') {
+            row_str[count+1] = '\0';
+            return row_str;
+        }
+        count++;
+    }
+
+    row_str[coulmns] = '\0';
+    return row_str;
+}
+
+
+static inline void display_row(int row) {
+    if (row >= (rows_count-1))
         return;
 
-    erased = true;
-
-    if (*index_ptr == 0) 
-        buffer[*index_ptr] = ' ';
-    else {
-        buffer[*index_ptr-1] = ' ';
-    }
-
-    if (*index_ptr < file_top) {
-        for (u64 i = (*index_ptr-1); i < (file_top-1); i++) 
-            buffer[i] = buffer[i+1];
-        
-        file_top--;
-    }
+    int index = row_lines[row].index;
+    printf(make_str(index));
 }
+
+static void display_rows(void) {
+    cursor_Setpos(0, 0); // start to print at 0, 0
+    int current_row = 0;
+    for (int i = row_start; i < row_end; i++) {
+        if (i >= (rows_count-1))
+            return;
+
+        clear_row(current_row);
+        display_row(i);
+        current_row++;
+    }
+
+    cursor_Setpos(pos % coulmns, pos / coulmns); // restore cursor coordinates
+}
+
+
 
 
 int open_file(void) {
@@ -93,19 +133,25 @@ int open_file(void) {
     }
 
     if (st.size > 0) {
-        buff = (char *)malloc(st.size);
-        fs_read(fd, buff, st.size);
         size = (rows - 1) * coulmns;
-        file_buffer = (char *)malloc(size);
-        memcpy(file_buffer, buff, st.size);
-        index = st.size;
+        buff = (char *)malloc(st.size+size);
+        fs_read(fd, buff, st.size);
+        if (st.size < size)
+            pos = st.size;
+        else 
+            pos = 0;
+
         file_size = st.size;
-        file_top = index;
+        file_top = st.size;
+        max_size = size + file_size;
+        count_rows();
         return fd;
     } else {
+        pos = 0;
         size = (rows - 1) * coulmns;
-        file_buffer = (char *)malloc(size);
-        memset(file_buffer, 0, size);
+        buff = (char *)malloc(size);
+        memset(buff, 0, size);
+        max_size = size + file_size;
         return fd;
     }
 }
@@ -113,30 +159,35 @@ int open_file(void) {
 
 bool printed = false;
 
-void draw_screen(void) {
-    char buffer[2] = {0};
-
-    int old_coulmn = 0;
-    int old_row = 0;
-    CursorGet(&old_row, &old_coulmn); // save old cursor coulmn and row
-
-    cursor_Setpos(0, 0); // set cursor position to the start
-
-    u64 cursor_pos = 0;
-    while (cursor_pos < file_top) {
-        buffer[0] = file_buffer[cursor_pos];
-        buffer[1] = '\0';
-        printf(buffer);
-        cursor_pos++;
+static void write_char(char ch) {
+    if (pos < max_size && pos >= 0) {
+        buff[pos] = ch;
+        if (file_top == pos)
+            file_top++;
     }
 
-    if (erased) {
-        erased = false;
-        if (index > 0)
-            index--;
+    if (pos <= ((rows-1)*coulmns)) {
+        pos++;
+        MoveCursor(1, 7);
     }
-
 }
+
+
+static void erase_char(void) {
+    if (pos > 0) {
+        buff[pos-1] = ' ';
+        if (file_top == pos)
+            file_top--;
+    }
+
+
+    if (pos > 0) {
+        pos--;
+        MoveCursor(-1, 7);
+    }
+}
+
+
 
 #define UP 0x48
 #define LEFT 0x4B
@@ -150,13 +201,18 @@ int main() {
 
     u64 shellsize = getshellsize();
 
+    row_str = (char *)malloc(coulmns+1); // allocate for row_str
+
     rows = (int)(shellsize >> 32);
     coulmns = (int)shellsize;
 
+    row_start = 0;
+    row_end = (rows-1);
 
     size = 0;
-    index = 0;
-    file_buffer = NULL;
+    pos = 0;
+  
+    row_lines = (row_desc *)malloc(rows*sizeof(row_lines));
 
 
     int fd = open_file();
@@ -165,7 +221,7 @@ int main() {
         return 1;
     }
 
-    cursor_Setpos(0, rows-1);
+    cursor_Setpos(0, rows-2);
     const char *cases[] = {
         "('New file')",
         "('file')"
@@ -175,12 +231,9 @@ int main() {
 
     bool case_index = (file_size > 0);
     printf("%s %s exit: Ctrl+X  save: Ctrl+S", cases[(u8)case_index], (char *)arg);
-    if (file_size > 0) {
-        cursor_Setpos(0, 0);
-        draw_screen();
-    }
 
-    cursor_Setpos((index % coulmns), (index / coulmns));
+
+    cursor_Setpos((pos % coulmns), (pos / coulmns));
 
     while (1) {
         u8 scancode = read_key(false, false);
@@ -190,20 +243,33 @@ int main() {
         // arrow key cursor movement
         switch (scancode) {
             case LEFT: {
-                
+                   // move cursor left if above first coulmn
+                if (pos > 0) {
+                    MoveCursor(-1, 7);
+                    pos--;
+                } else {
+                    if (row_start > 0) {
+                        row_start--;
+                        row_end--;
+                        printed = false;
+                    }
+                }
 
                 goto exit;
             }
 
 
             case RIGHT: {
-                if (index < size) {
-                    index++;
-                    int row;
-                    int coulmn;
-                    CursorGet(&row, &coulmn); // get cursor row and coulmn
-                    if (!((row == (rows-1)) && (coulmn == coulmns)))  // move cursor too but make sure it doesn't go past the screen
-                        move_cursor(1);
+                
+                if (pos < ((rows*coulmns) - 1)) {
+                    MoveCursor(1, 7);
+                    pos++;
+                } else {
+                    if (row_end < rows_count) {
+                        row_start++;
+                        row_end++;
+                        printed = false;
+                    }
                 }
                 
                 goto exit;
@@ -211,13 +277,16 @@ int main() {
 
 
             case UP: {
-                int row;
-                int coulmn;
-                CursorGet(&row, &coulmn); // get current cursor row and coulmn
-
-                if (row > 0) {
-                    row--;
-                    cursor_Setpos(coulmn, row);
+                
+                if ((pos / coulmns) > 0) {
+                    MoveCursor(-coulmns, 7); // if row larger than 0, move cursor row back by one row
+                    pos -= coulmns;
+                } else {
+                    if (row_start > 0) {
+                        row_start--;
+                        row_end--;
+                        printed = false;
+                    }
                 }
 
                 goto exit;
@@ -225,14 +294,17 @@ int main() {
 
 
             case DOWN: {
-                int row;
-                int coulmn;
-                CursorGet(&row, &coulmn); // get current cursor row and coulmn
-                
-                if (row < (rows-2)) {
-                    row++;
-                    cursor_Setpos(coulmn, row);
+                if ((pos / coulmns) < (rows-1)) { // if row smaller than last row, move cursor row forwards by one row
+                    MoveCursor(coulmns, 7);
+                    pos += coulmns;
+                } else {
+                    if (row_end < rows_count) {
+                        row_end++;
+                        row_start++;
+                        printed = false;
+                    }
                 }
+
 
                 goto exit;
             }
@@ -243,31 +315,23 @@ int main() {
             }
         }
 
-        if (key > 0 && key < 0x7f) {
+        if (key > 0 && key < 0x7f && key != '\b') {
             printed = false;
-            file_buffer = write_to_buffer(key, file_buffer, &size, &index, true);
-            int row;
-            int coulmn;
-            CursorGet(&row, &coulmn);
-            if (!((row == (rows-1)) && (coulmn == coulmns)))  // have no idea what i did here
-                move_cursor(1);
+            write_char(key);
             
         } else if (key == '\b') {
             printed = false;
-            erase_from_buffer(file_buffer, &size, &index);
-            int row;
-            int coulmn;
-            CursorGet(&row, &coulmn);
-            if (!((row == 0) && (coulmn == 0)))
-                move_cursor(-1);
+            erase_char();
         }
 
         if (key == 0x1b) {
-            if (file_buffer != NULL)
-                free(file_buffer);
 
             if (buff != NULL)
                 free(buff);
+
+
+            if (row_str)
+                free(row_str);
 
 
             return 0;
@@ -277,7 +341,8 @@ int main() {
         exit:
 
         if (!printed) {
-            draw_screen();
+            if (file_size > 0)
+                display_rows();
             printed = true;
         }
     }

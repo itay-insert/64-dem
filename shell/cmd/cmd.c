@@ -5,6 +5,12 @@
 #include "stdio.h"
 
 
+u64 *cmd_history = NULL;
+u16 command_count = 0;
+u16 cmd_index = 0;
+
+u16 user_index = 0xFFFF;
+
 static inline unsigned int make_hz(char *str, unsigned int *hz) {
     unsigned int count = 0;
     *hz = 0;
@@ -40,6 +46,48 @@ void take_values(char *str, unsigned int *hz, u64 *ms) {
 }
 
 
+static void increase_cmds(char *cmd, int size) {
+    char *new_cmd = (char *)malloc(size);
+    memcpy(new_cmd, cmd, size);
+
+    new_cmd[size] = '\0';
+
+    if (cmd_history == NULL || command_count == 0) {
+        cmd_history = (u64 *)malloc(256<<3);
+        command_count = 256;
+        memset(cmd_history, 0 , 256<<3);
+        cmd_history[0] = (u64)new_cmd;
+        cmd_index = 1;
+        return;
+    }
+
+
+    if (cmd_index == command_count)
+        cmd_index = 0;
+
+    if (cmd_history[cmd_index]) 
+        free((void *)cmd_history[cmd_index]);
+
+    cmd_history[cmd_index] = (u64)new_cmd;
+    cmd_index++;
+}
+
+static inline void dellocate() {
+    if (cmd_history) {
+        for (int i = 0; i < command_count; i++) {
+            if (cmd_history[i])
+                free((void *)cmd_history[i]);
+        }
+
+        free(cmd_history);
+    }
+}
+
+#define UP 0x48
+#define LEFT 0x4B
+#define RIGHT 0x4D
+#define DOWN 0x50
+
 int main() {
 
     const char *commands[] = {
@@ -64,6 +112,64 @@ int main() {
         int index = 0;
         again:
         u8 key = read_key(true, false);
+        u8 scancode = read_key(false, false);
+
+        switch (scancode) {
+            case UP: {
+                if (cmd_history == NULL)
+                    break;
+                
+                if (user_index == 0xFFFF) {
+                    user_index = cmd_index - 1;
+                } else {
+                    if (user_index > 0)
+                        user_index--;
+                    else 
+                        user_index = cmd_index;
+                }
+
+                if (cmd_history[user_index]) {
+                    char *former_cmd = (char *)cmd_history[user_index];
+
+                    int cmd_size = get_size(former_cmd);
+                    memcpy(buffer, former_cmd, (u64)cmd_size);
+                    buffer[cmd_size] = '\0';
+                    printf(buffer);
+                }
+
+
+                break;
+            }
+
+
+            case DOWN : {
+                if (cmd_history == NULL)
+                    break;
+
+
+                if (user_index == 0xFFFF) {
+                    user_index = cmd_index - 1;
+                } else if (user_index < cmd_index) 
+                    user_index++;
+
+                if (cmd_history[user_index]) {
+                    char *former_cmd = (char *)cmd_history[user_index];
+
+                    int cmd_size = get_size(former_cmd);
+                    memcpy(buffer, former_cmd, (u64)cmd_size);
+                    buffer[cmd_size] = '\0';
+                    printf(buffer);
+                }
+
+                break;
+            }
+
+
+            default: {
+                break;
+            }
+        }
+
         if (key >= ' ' && key < 0x7f) {
             buffer[index] = key;
             index = (index + 1) % 256;
@@ -77,10 +183,15 @@ int main() {
                 buffer[index+1] = '\0';
             }
         }
-        if (key == 0x1b)
+        if (key == 0x1b) {
+            dellocate();
             return 0;
+        }
+
         if (key != '\n')
             goto again;
+
+        user_index = 0xFFFF;
 
         printf("\n");
 
@@ -90,8 +201,10 @@ int main() {
             int size = get_size(commands[i]);
 
 
+
             if (memcmp(command, commands[i], size) == 0 &&
                 (command[size] == ' ' || command[size] == '\0')) {
+                increase_cmds(command, size);
                 switch (i) {
                     case 0 : {
                         printf("%s", command + size + (command[size] == ' '));
@@ -99,6 +212,7 @@ int main() {
                     }
 
                     case 1 : {
+                        dellocate();
                         return 0;
                     }
 

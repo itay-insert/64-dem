@@ -91,8 +91,7 @@ fi
 
 BOOTLOADER="${BOOTLOADER:-$ROOT_DIR/EFI/boot/BOOTX64.efi}"
 BOOT_FILES=("$ROOT_DIR"/boot/{stage2.bin,stage3.bin,stage4.elf,kernel.elf})
-SHELL_FILES=("$ROOT_DIR"/shell/*.elf)
-for required_file in "${BOOT_FILES[@]}" "${SHELL_FILES[@]}" "$ROOT_DIR/shell/cmd.elf" "$ROOT_DIR/shell/sign.bin"; do
+for required_file in "${BOOT_FILES[@]}" "$ROOT_DIR/shell/cmd.elf" "$ROOT_DIR/shell/sign.bin"; do
     [[ -r "$required_file" ]] || { echo "error: missing $required_file; run without --no-build first" >&2; exit 1; }
 done
 if [[ ! -r "$BOOTLOADER" ]]; then
@@ -129,10 +128,9 @@ dd if="$BUILD_DIR/boot.bin" of="$IMAGE" bs=1 count="$BOOT_SIZE" conv=notrunc sta
 echo "Formatting the partition as FAT32..."
 mkfs.fat -F 32 --offset "$PARTITION_START" -n 64DEM "$IMAGE" "$FAT_SIZE_KIB"
 
-echo "Copying boot stages, kernel, EFI loader, and shell programs..."
-mkdir -p "$BUILD_DIR"/{boot,EFI/boot,shell}
-cp -- "${BOOT_FILES[@]}" "$BUILD_DIR/boot/"
-cp -- "${SHELL_FILES[@]}" "$ROOT_DIR/shell/sign.bin" "$BUILD_DIR/shell/"
+echo "Copying boot, EFI, and shell directories..."
+cp -R -- "$ROOT_DIR"/{boot,EFI,shell} "$BUILD_DIR/"
+mkdir -p "$BUILD_DIR/EFI/boot"
 cp -- "$BOOTLOADER" "$BUILD_DIR/EFI/boot/BOOTX64.efi"
 mcopy -i "$IMAGE@@$PARTITION_OFFSET" -s "$BUILD_DIR/boot" "$BUILD_DIR/EFI" "$BUILD_DIR/shell" ::/
 
