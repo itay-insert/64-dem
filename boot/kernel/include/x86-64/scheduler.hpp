@@ -28,6 +28,8 @@ typedef struct {
     file_id *files;
     int file_count;
     bool halt;
+    int cursor_row;
+    int cursor_coulmn;
 } Proccess;
 
 

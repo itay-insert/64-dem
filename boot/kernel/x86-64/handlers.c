@@ -31,8 +31,10 @@ static char exception_names[32][24] = {
 
 static char unknown_exception[] = "Unknown";
 extern void terminate_procces(int index);
+extern void SwitchProccesses(void);
 extern int active_proccesses;
 extern int current_proccess;
+
 
 __attribute__((noreturn))
 void exception_handler(u64 vector, u64 error_code, u64 rip, u64 cs,
@@ -129,7 +131,7 @@ static bool stdout_parse(void) {
 
 u8 proccess_target = 20;
 u8 proccess_ticks = 0;
-int render_rights = 0;
+
 
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
@@ -147,10 +149,6 @@ void timer_handler(u64 cs, u64 rip) {
         }
     }
 
-
-    if (proccess_ticks == proccess_target) {
-    
-    }
 
     usb_background_tick(cs, rip);
 
@@ -170,7 +168,9 @@ void timer_handler(u64 cs, u64 rip) {
             draw_cursor(LightGray);
     }
 
+
 	lapic_write(0xB0, 0);
+
 }
 
 

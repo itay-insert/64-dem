@@ -15,6 +15,7 @@ extern "C" void clock();
 Proccess *pid = nullptr;
 int active_proccesses = 0;
 int current_proccess = 0;
+int render_rights = 0;
 
 int last_pid = 0;
 
@@ -156,6 +157,7 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
 
     Proccess *new_pid = increase_proccesses();
     current_proccess = active_proccesses - 1;
+    render_rights = current_proccess;
 
     if (active_proccesses > 1) {
         pid[current_proccess-1].halt = true;
@@ -183,6 +185,9 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
 
     load_elf_64(file_handle, fat32, new_pid->buffer);
 
+    new_pid->cursor_coulmn = 0;
+    new_pid->cursor_row = 0;
+    cursor_Setpos(0, 0);
     // The child replaces the caller's mappings. Put its argument above its initial stack.
     u64 child_argument = argument_size ? new_pid->rsp : 0;
     if (argument_size)
@@ -194,6 +199,8 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
 
 void resume_proccess(int index) {
     current_proccess = index;
+    render_rights = index;
+    cursor_Setpos(pid[index].cursor_coulmn, pid[index].cursor_row);
     u64 base = 0x40000000;
     for (u64 i = 0; i < pid[index].PageCount; i++) {
         int type = pid[index].MappedPages[i].Page_Type;
@@ -248,6 +255,16 @@ extern "C" void terminate_procces(int index) {
         resume_proccess(index - 1);
     }
     current_proccess = index < active_proccesses ? index : active_proccesses - 1;
+}
+
+
+extern "C" void SwitchProccesses(void) {
+    if (active_proccesses < 2)
+        return; // not enough active proccesses for multitasking
+
+    int index = current_proccess;
+    index = (index < (active_proccesses-1)) ? (index + 1) : 0;
+    resume_proccess(index);
 }
 
 

@@ -15,6 +15,9 @@ extern former_rflags
 extern former_rsp
 extern former_rip
 
+extern proccess_ticks
+extern proccess_target
+
 isr_timer:
 push rax
 push rbx
