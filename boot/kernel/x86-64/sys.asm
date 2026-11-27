@@ -30,13 +30,13 @@ extern set_begin
 extern read_freq
 extern write
 extern getshellsize
-extern cursor_Setpos
+extern sys_cursor_setpos
 extern move_cursor
 extern Cursor_Getpos
-extern clear_screen
+extern sys_clear_screen
 extern cpy_memcons
 extern get_memcons_size
-extern draw_cursor
+extern sys_draw_cursor
 extern ClearRow
 
 extern sys_exit
@@ -296,7 +296,7 @@ skip_fs_stat:
 
 cmp rax, 24
 jne skip_cursor_setpos
-call cursor_Setpos ; syscall to set up the cursor position
+call sys_cursor_setpos ; syscall to set up the cursor position
 jmp exit
 skip_cursor_setpos:
 
@@ -317,7 +317,7 @@ skip_Getpos:
     
 cmp rax, 27
 jne skip_clear
-call clear_screen ; syscall to clear screen
+call sys_clear_screen ; syscall to clear screen
 jmp exit
 skip_clear:
 
@@ -338,7 +338,7 @@ skip_memcons_size:
 
 cmp rax, 30
 jne skip_draw_cursor ; syscall to draw_cursor
-call draw_cursor
+call sys_draw_cursor
 jmp exit
 skip_draw_cursor:
 

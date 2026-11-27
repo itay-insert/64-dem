@@ -88,10 +88,15 @@ static inline void dellocate() {
 #define RIGHT 0x4D
 #define DOWN 0x50
 
-
-static char *combine_commands(char *command, char *arg) {
-    if ()
+static void inc_strings(char *str0, char *str1, int size0, int size1) {
+    char *new_str = (char *)malloc(size0+size1);
+    memcpy(new_str, str0, size0);
+    memcpy(new_str+size0, str1, size1);
+    increase_cmds(new_str, size0+size1);
+    free(new_str);   
 }
+
+
 
 int main() {
 
@@ -211,10 +216,9 @@ int main() {
 
             if (memcmp(command, commands[i], size) == 0 &&
                 (command[size] == ' ' || command[size] == '\0')) {
+                inc_strings(command, command+size, size, get_size(command+size));
                 switch (i) {
                     case 0 : {
-
-                        increase_cmds(command, size);
                         printf("%s", command + size + (command[size] == ' '));
                         goto exit;
                     }

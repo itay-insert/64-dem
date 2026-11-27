@@ -127,9 +127,14 @@ static bool stdout_parse(void) {
     return false;
 }
 
+u8 proccess_target = 20;
+u8 proccess_ticks = 0;
+int render_rights = 0;
+
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
     cursor_ticks++;
+    proccess_ticks++;
 
     if (cursor_ticks == 500) {
         cursor_ticks = 0;
@@ -140,6 +145,11 @@ void timer_handler(u64 cs, u64 rip) {
             hide_cursor();
             blink = false;
         }
+    }
+
+
+    if (proccess_ticks == proccess_target) {
+    
     }
 
     usb_background_tick(cs, rip);
@@ -169,7 +179,12 @@ u64 get_ticks(void) {
 }
 
 
+extern int current_proccess;
+
 void write(char *buf, int len) {
+    if (render_rights != current_proccess)
+        return;
+
     for (int i = 0; i < len; i++) {
         stdout[(stdout_wc + i) % 4096] = buf[i];
     }
