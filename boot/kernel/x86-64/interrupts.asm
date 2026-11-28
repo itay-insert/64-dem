@@ -4,10 +4,34 @@ extern APIC_base
 extern exception_handler
 extern timer_handler
 
+extern current_proccess
+extern resume_proccess
+
 global spurious_stub
 global isr_eoi
 global exception_stub_table
 global timer_stub
+
+global enable
+
+global save_rax
+global save_rbx
+global save_rcx
+global save_rdx
+global save_rbp
+global save_rdi
+global save_rsi
+global save_r8
+global save_r9
+global save_r10
+global save_r11
+global save_r12
+global save_r13
+global save_r14
+global save_r15
+
+global save_registers
+global restore_registers
 
 extern former_ss
 extern former_cs
@@ -17,6 +41,68 @@ extern former_rip
 
 extern proccess_ticks
 extern proccess_target
+
+save_rax dq 0
+save_rbx dq 0
+save_rcx dq 0
+save_rdx dq 0
+save_rbp dq 0
+save_rdi dq 0
+save_rsi dq 0
+save_r8 dq 0
+save_r9 dq 0
+save_r10 dq 0
+save_r11 dq 0
+save_r12 dq 0
+save_r13 dq 0
+save_r14 dq 0
+save_r15 dq 0
+
+enable db 0
+
+save_registers:
+    mov qword [rel save_rax], rax
+    mov qword [rel save_rbx], rbx 
+    mov qword [rel save_rcx], rcx
+    mov qword [rel save_rdx], rdx
+    mov qword [rel save_rbp], rbp
+    mov qword [rel save_rdi], rdi
+    mov qword [rel save_rsi], rsi
+    mov qword [rel save_r8], r8
+    mov qword [rel save_r9], r9
+    mov qword [rel save_r10], r10
+    mov qword [rel save_r11], r11
+    mov qword [rel save_r12], r12
+    mov qword [rel save_r13], r13
+    mov qword [rel save_r14], r14
+    mov qword [rel save_r15], r15
+    ret
+
+restore_registers:
+    mov rax, qword [rel save_rax]
+    mov rbx, qword [rel save_rbx]
+    mov rcx, qword [rel save_rcx]
+    mov rdx, qword [rel save_rdx]
+    mov rbp, qword [rel save_rbp]
+    mov rdi, qword [rel save_rdi]
+    mov rsi, qword [rel save_rsi]
+    mov r8, qword [rel save_r8]
+    mov r9, qword [rel save_r9]
+    mov r10, qword [rel save_r10]
+    mov r11, qword [rel save_r11]
+    mov r12, qword [rel save_r12]
+    mov r13, qword [rel save_r13]
+    mov r14, qword [rel save_r14]
+    mov r15, qword [rel save_r15]
+    ret
+
+switch_proccess:
+add rsp, 40 ; restore stack space instead of popping registers
+mov edx, dword [rel current_proccess]
+call resume_proccess
+halt:
+    jmp halt
+
 
 isr_timer:
 push rax
@@ -62,6 +148,8 @@ pop rdx
 pop rcx
 pop rbx
 pop rax
+cmp byte [rel enable], 1
+je switch_proccess
 iretq
 
 isr_spurious:

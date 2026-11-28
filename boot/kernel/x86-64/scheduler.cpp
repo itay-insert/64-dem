@@ -7,6 +7,7 @@
 #include "x86-64/efi_memory_types.h"
 #include "x86-64/memory/kmalloc.h"
 #include "drivers/display/vga.h"
+#include "x86-64/interrupts.h"
 
 extern int GbPageSupport;
 extern BootFileSystem *fat32_fs;
@@ -135,6 +136,45 @@ void construct_mapping(Proccess *proc, u64 size, u64 physical_address) {
 
 }
 
+extern "C" void SaveProccessRegs(void) {
+    Proccess *proc = &pid[current_proccess];
+    proc->rax = save_rax;
+    proc->rbx = save_rbx;
+    proc->rcx = save_rcx;
+    proc->rdx = save_rdx;
+    proc->rdi = save_rdi;
+    proc->rsi = save_rsi;
+    proc->rbp = save_rbp;
+    proc->r8 = save_r8;
+    proc->r9 = save_r9;
+    proc->r10 = save_r10;
+    proc->r11 = save_r11;
+    proc->r12 = save_r12;
+    proc->r13 = save_r13;
+    proc->r14 = save_r14;
+    proc->r15 = save_r15;
+}
+
+
+void RestoreProccessRegs(void) {
+    const Proccess *proc = &pid[current_proccess];
+    save_rax = proc->rax;
+    save_rbx = proc->rbx;
+    save_rcx = proc->rcx;
+    save_rdx = proc->rdx;
+    save_rdi = proc->rdi;
+    save_rsi = proc->rsi;
+    save_rbp = proc->rbp;
+    save_r8 = proc->r8;
+    save_r9 = proc->r9;
+    save_r10 = proc->r10;
+    save_r11 = proc->r11;
+    save_r12 = proc->r12;
+    save_r13 = proc->r13;
+    save_r14 = proc->r14;
+    save_r15 = proc->r15;
+}
+
 
 void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
     constexpr u64 user_base = 0x40000000;
@@ -197,9 +237,10 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
 }
 
 
-void resume_proccess(int index) {
+extern "C" void resume_proccess(int index) {
     current_proccess = index;
     render_rights = index;
+    RestoreProccessRegs();
     cursor_Setpos(pid[index].cursor_coulmn, pid[index].cursor_row);
     u64 base = 0x40000000;
     for (u64 i = 0; i < pid[index].PageCount; i++) {
@@ -272,5 +313,4 @@ extern "C" void sys_exit() {
     terminate_procces(current_proccess);
     clock();
 }
-
 

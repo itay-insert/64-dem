@@ -637,8 +637,6 @@ u8 str_size(const char *str) {
 }
 
 
-extern int current_proccess;
-extern int render_rights;
 
 void kprintf(const char *str) {
     const char *p_str = str;

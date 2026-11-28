@@ -4,6 +4,10 @@ global get_syscall
 global enter_userspace
 global resume_userspace
 
+extern save_registers
+extern restore_registers
+extern SaveProccessRegs
+
 extern kernel_stack
 extern current_user_rsp
 extern kprintf
@@ -94,6 +98,8 @@ pop rax
 mov qword [rel former_user_rsp], rsp
 mov rsp, qword [rel save_rsp]
 
+call restore_registers
+
 push qword 0x1B
 push qword [rel former_user_rsp]
 push qword [rel rflags]
@@ -108,8 +114,11 @@ mov qword [rel rflags], rax
 
 mov rax, qword [rsp + 8]
 mov qword [rel rip], rax
+call save_registers
+call SaveProccessRegs
 call fs_start
 jmp exit
+
 
 syscall_entry:
 push rax
