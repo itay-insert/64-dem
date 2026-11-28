@@ -4,15 +4,10 @@ extern APIC_base
 extern exception_handler
 extern timer_handler
 
-extern current_proccess
-extern resume_proccess
-
 global spurious_stub
 global isr_eoi
 global exception_stub_table
 global timer_stub
-
-global enable
 
 global save_rax
 global save_rbx
@@ -39,9 +34,6 @@ extern former_rflags
 extern former_rsp
 extern former_rip
 
-extern proccess_ticks
-extern proccess_target
-
 save_rax dq 0
 save_rbx dq 0
 save_rcx dq 0
@@ -57,8 +49,6 @@ save_r12 dq 0
 save_r13 dq 0
 save_r14 dq 0
 save_r15 dq 0
-
-enable db 0
 
 save_registers:
     mov qword [rel save_rax], rax
@@ -95,14 +85,6 @@ restore_registers:
     mov r14, qword [rel save_r14]
     mov r15, qword [rel save_r15]
     ret
-
-switch_proccess:
-add rsp, 40 ; restore stack space instead of popping registers
-mov edx, dword [rel current_proccess]
-call resume_proccess
-halt:
-    jmp halt
-
 
 isr_timer:
 push rax
@@ -148,8 +130,6 @@ pop rdx
 pop rcx
 pop rbx
 pop rax
-cmp byte [rel enable], 1
-je switch_proccess
 iretq
 
 isr_spurious:

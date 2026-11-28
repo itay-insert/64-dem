@@ -31,10 +31,8 @@ static char exception_names[32][24] = {
 
 static char unknown_exception[] = "Unknown";
 extern void terminate_procces(int index);
-extern void SwitchProccesses(void);
 extern int active_proccesses;
 extern int current_proccess;
-extern bool enable;
 
 
 __attribute__((noreturn))
@@ -130,14 +128,9 @@ static bool stdout_parse(void) {
     return false;
 }
 
-u8 proccess_target = 20;
-u8 proccess_ticks = 0;
-
-
 void timer_handler(u64 cs, u64 rip) {
 	timer_ticks++;
     cursor_ticks++;
-    proccess_ticks++;
 
     if (cursor_ticks == 500) {
         cursor_ticks = 0;
@@ -169,17 +162,6 @@ void timer_handler(u64 cs, u64 rip) {
             draw_cursor(LightGray);
     }
 
-    if (proccess_ticks == proccess_target) {
-        proccess_ticks = 0;
-        if (active_proccesses > 1) {
-            enable = true;
-            if (current_proccess < (active_proccesses - 1)) 
-                current_proccess++;
-            else if (current_proccess == (active_proccesses - 1)) 
-                current_proccess = 0;
-        }
-    }
-
 	lapic_write(0xB0, 0);
 
 }
@@ -190,12 +172,9 @@ u64 get_ticks(void) {
 }
 
 
-extern int current_proccess;
 
 void write(char *buf, int len) {
-    if (render_rights != current_proccess)
-        return;
-
+    
     for (int i = 0; i < len; i++) {
         stdout[(stdout_wc + i) % 4096] = buf[i];
     }

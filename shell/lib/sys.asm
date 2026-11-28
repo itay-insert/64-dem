@@ -44,165 +44,165 @@ kprintf:
 
 
 read_key:
-    mov rax, 1 ; read key
+    mov rax, 0x100000000 ; read key
     syscall
     ret
 
 malloc:
-    mov rax, 2 ; memory services
+    mov rax, 0x200000000 ; memory services
     mov rsi, rdi
     mov rdi, 0 ; select malloc
     syscall
     ret
 
 free:
-    mov rax, 2 ; memory services
+    mov rax, 0x200000000 ; memory services
     mov rsi, rdi
     mov rdi, 1 ; select free
     syscall
     ret
 
 realloc:
-    mov rax, 3 ; realloc
+    mov rax, 0x200000001 ; realloc
     syscall
     ret
 
 sys_exit:
-    mov rax, 4
+    mov rax, 0x400000000 ; sys_exit
     syscall
 
 sleep_ms:
-    mov rax, 5
+    mov rax, 0x300000000 ; sys_sleep_ms()
     syscall
     ret
 
 get_dateAndTime:
-    mov rax, 6
+    mov rax, 0x300000001 ; syscall to get current date and time
     syscall
     ret
 
 
 print_mem:
-    mov rax, 7
+    mov rax, 1 ; syscall to print mem
     syscall
     ret
 
 acpi:
-    mov rax, 8
+    mov rax, 0x500000000
     syscall
     ret
 
 ls:
-    mov rax, 9
+    mov rax, 2
     syscall
     ret
 
 backspace:
-    mov rax, 10
+    mov rax, 3
     syscall
     ret
 
 fs_open:
-    mov rax, 11
+    mov rax, 0x600000000 ; syscall to open a file
     syscall
     ret
 
 fs_read:
-    mov rax, 12
+    mov rax, 0x600000001 ; syscall to read file
     syscall
     ret
 
 fs_write:
-    mov rax, 13
+    mov rax, 0x600000002 ; syscall to write a file
     syscall
     ret
 
 fs_seek:
-    mov rax, 14
+    mov rax, 0x600000003 ; syscall to change file offset
     syscall
     ret
 
 fs_close:
-    mov rax, 15
+    mov rax, 0x600000004 ; syscall to close a file
     syscall
     ret
 
 fs_start:
-    mov rax, 16
+    mov rax, 0x600000005 ; syscall to start a program
     syscall
     ret
 
 print_drives:
-    mov rax, 17
+    mov rax, 4 ; syscall to print_drives()
     syscall
     ret
 
 beep:
-    mov rax, 18
+    mov rax, 0x700000000 ; sys_beep()
     syscall
     ret
 
 set_begin:
-    mov rax, 19
+    mov rax, 5 
     syscall
     ret
 
 read_freq:
-    mov rax, 20
+    mov rax, 0x300000003 ; syscall to read timer frequency
     syscall
     ret
 
 stdout_write:
-    mov rax, 21
+    mov rax, 6 ; syscall to write to stdout
     syscall
     ret
 
 getshellsize:
-    mov rax, 22
+    mov rax, 7 ; syscall to get shellsize
     syscall
     ret
 
 fs_stat:
-    mov rax, 23
+    mov rax, 0x600000006 ; syscall to get the stat of a file
     syscall
     ret
 
 cursor_Setpos:
-    mov rax, 24
+    mov rax, 8 ; syscall to set cursor position
     syscall
     ret
 
 move_cursor:
-    mov rax, 25
+    mov rax, 9 ; syscall to move cursor
     syscall
     ret
 
 Cursor_Getpos:
-    mov rax, 26
+    mov rax, 10 ; syscall to get position of cursor
     syscall
     ret
 
 clear_screen:
-    mov rax, 27
+    mov rax, 11 ; syscall to clear screen
     syscall
     ret
 
 get_memcons:
-    mov rax, 28
+    mov rax, 12
     syscall
     ret
 
 get_memcons_size:
-    mov rax, 29
+    mov rax, 13
     syscall
     ret
 
 draw_cursor:
-    mov rax, 30
+    mov rax, 14
     syscall
     ret
 
 clear_row:
-    mov rax, 32
+    mov rax, 15
     syscall
     ret

@@ -219,7 +219,7 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
     EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)((u8 *)new_pid->buffer - sizeof(EFI_MEMORY_DESCRIPTOR));
     new_pid->allocated_bytes = desc->NumberOfPages * 4096ULL;
     u64 physical_address = desc->PhysicalStart;
-    construct_mapping(new_pid, size, physical_address);
+    construct_mapping(new_pid, new_pid->allocated_bytes, physical_address);
 
     memset(new_pid->buffer, 0, size);
 
@@ -227,7 +227,6 @@ void StartProccess(u64 file_handle, BootFileSystem *fat32, u64 arg) {
 
     new_pid->cursor_coulmn = 0;
     new_pid->cursor_row = 0;
-    cursor_Setpos(0, 0);
     // The child replaces the caller's mappings. Put its argument above its initial stack.
     u64 child_argument = argument_size ? new_pid->rsp : 0;
     if (argument_size)
@@ -241,7 +240,6 @@ extern "C" void resume_proccess(int index) {
     current_proccess = index;
     render_rights = index;
     RestoreProccessRegs();
-    cursor_Setpos(pid[index].cursor_coulmn, pid[index].cursor_row);
     u64 base = 0x40000000;
     for (u64 i = 0; i < pid[index].PageCount; i++) {
         int type = pid[index].MappedPages[i].Page_Type;
@@ -253,10 +251,11 @@ extern "C" void resume_proccess(int index) {
         else if (type == GB)
             size = 0x40000000;
 
-        create_mapping(base, pid[index].MappedPages[i].physical_address, size, 0x07, KernelPML4);
+        create_mapping(base, pid[index].MappedPages[i].physical_address, size >> 12, 0x07, KernelPML4);
         base += size;
     }
 
+    flush_pages(0x40000000, pid[index].allocated_bytes >> 12);
     resume_userspace();
 }
 
@@ -296,16 +295,6 @@ extern "C" void terminate_procces(int index) {
         resume_proccess(index - 1);
     }
     current_proccess = index < active_proccesses ? index : active_proccesses - 1;
-}
-
-
-extern "C" void SwitchProccesses(void) {
-    if (active_proccesses < 2)
-        return; // not enough active proccesses for multitasking
-
-    int index = current_proccess;
-    index = (index < (active_proccesses-1)) ? (index + 1) : 0;
-    resume_proccess(index);
 }
 
 
