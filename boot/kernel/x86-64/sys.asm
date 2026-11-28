@@ -119,6 +119,135 @@ call SaveProccessRegs
 call fs_start
 jmp exit
 
+save_sysnum dq 0
+
+vga_dispatcher:
+sub rsp, 8
+mov dword [rel save_sysnum + 4], 0 ; only low 32 bits
+
+; kprintf
+cmp qword [rel save_sysnum], 0
+jne skip_kprintf
+call kprintf
+jmp vga_exit
+skip_kprintf:
+
+
+; mem_print
+cmp qword [rel save_sysnum], 1
+jne skip_mem
+call print_physical_memory_stats
+call print_proccess_mem
+jmp vga_exit
+skip_mem:
+
+
+; ls
+cmp qword [rel save_sysnum], 2
+jne skip_ls
+call ls
+jmp vga_exit
+skip_ls:
+
+
+; backspace
+cmp qword [rel save_sysnum], 3
+jne skip_backspace
+call backspace
+jmp vga_exit
+skip_backspace:
+
+
+; print_drives()
+cmp qword [rel save_sysnum], 4
+jne skip_print_drives
+call print_drives
+jmp vga_exit
+skip_print_drives:
+
+
+; sys_begin()
+cmp qword [rel save_sysnum], 5
+jne skip_sysbegin
+call set_begin
+jmp vga_exit
+skip_sysbegin:
+
+
+cmp qword [rel save_sysnum], 6
+jne skip_write ; sys_write to stdout
+call write
+jmp vga_exit
+skip_write:
+
+
+cmp qword [rel save_sysnum], 7
+jne skip_getshell
+call getshellsize ; get rows and coulmns
+jmp vga_exit
+skip_getshell:
+
+
+cmp qword [rel save_sysnum], 8
+jne skip_cursor_setpos
+call sys_cursor_setpos ; syscall to set up the cursor position
+jmp vga_exit
+skip_cursor_setpos:
+
+
+cmp qword [rel save_sysnum], 9
+jne skip_move_cursor
+call move_cursor ; syscall to move the cursor
+jmp vga_exit
+skip_move_cursor:
+
+
+cmp qword [rel save_sysnum], 10
+jne skip_Getpos
+call Cursor_Getpos ; syscall to get current cursor row and coulmn as a single 64-bit qword
+jmp vga_exit
+skip_Getpos:
+
+
+cmp qword [rel save_sysnum], 11
+jne skip_clear
+call sys_clear_screen ; syscall to clear screen
+jmp vga_exit
+skip_clear:
+
+
+cmp qword [rel save_sysnum], 12
+jne skip_memcons
+call cpy_memcons ; syscall to initialize and get the memory console buffer
+jmp vga_exit
+skip_memcons:
+
+
+cmp qword [rel save_sysnum], 13
+jne skip_memcons_size
+call get_memcons_size ; syscall to get memcons_size
+jmp vga_exit
+skip_memcons_size:
+
+
+cmp qword [rel save_sysnum], 14
+jne skip_draw_cursor ; syscall to draw_cursor
+call sys_draw_cursor
+jmp vga_exit
+skip_draw_cursor:
+
+
+cmp qword [rel save_sysnum], 15
+jne skip_clear_row
+call ClearRow  ; syscall to clear row
+jmp vga_exit
+skip_clear_row:
+
+
+vga_exit:
+add rsp, 8
+ret
+
 
 syscall_entry:
 push rax
@@ -149,11 +278,16 @@ push r11
 
 sti ; enable interrupts after jumping to handler disabled
 
+mov qword [rel save_sysnum], rax
+
+shr rax, 32
+
 cmp rax, 0
-jne skip_kprintf
-call kprintf    ; sys_print, rax = 0
+jne skip_vga
+call vga_dispatcher
 jmp exit
-skip_kprintf:
+skip_vga:
+
 
 cmp rax, 1
 jne skip_get_key
@@ -191,32 +325,12 @@ jmp exit
 skip_date:
 
 
-cmp rax, 7 ; print memory status
-jne skip_mem
-call print_physical_memory_stats
-call print_proccess_mem
-jmp exit
-skip_mem:
-
 cmp rax, 8 ; acpi
 jne skip_acpi
 call acpi_services
 jmp exit
 skip_acpi:
 
-
-cmp rax, 9 ; ls
-jne skip_ls
-call ls
-jmp exit
-skip_ls:
-
-
-cmp rax, 10
-jne skip_backspace  ; backspace
-call backspace
-jmp exit
-skip_backspace:
 
 cmp rax, 11
 jne skip_fs_open ; sys_fs_open()
@@ -256,25 +370,11 @@ jmp exit
 skip_fs_start:
 
 
-cmp rax, 17
-jne skip_print_drives ; sys print_drives()
-call print_drives
-jmp exit
-skip_print_drives:
-
-
 cmp rax, 18
 jne skip_beep   ; sys_beep
 call beep
 jmp exit
 skip_beep:
-
-
-cmp rax, 19
-jne skip_sysbegin ; sys_begin
-call set_begin
-jmp exit
-skip_sysbegin:
 
 
 cmp rax, 20
@@ -284,79 +384,12 @@ jmp exit
 skip_readfreq:
 
 
-cmp rax, 21
-jne skip_write ; sys_write to stdout
-call write
-jmp exit
-skip_write:
-
-cmp rax, 22
-jne skip_getshell
-call getshellsize ; get rows and coulmns
-jmp exit
-skip_getshell:
-
 cmp rax, 23
 jne skip_fs_stat ; get stat of file
 call stat
 jmp exit
 skip_fs_stat:
 
-
-cmp rax, 24
-jne skip_cursor_setpos
-call sys_cursor_setpos ; syscall to set up the cursor position
-jmp exit
-skip_cursor_setpos:
-
-
-cmp rax, 25
-jne skip_move_cursor
-call move_cursor ; syscall to move the cursor
-jmp exit
-skip_move_cursor:
-
-
-cmp rax, 26
-jne skip_Getpos
-call Cursor_Getpos ; syscall to get current cursor row and coulmn as a single 64-bit qword
-jmp exit
-skip_Getpos:
-
-    
-cmp rax, 27
-jne skip_clear
-call sys_clear_screen ; syscall to clear screen
-jmp exit
-skip_clear:
-
-
-cmp rax, 28
-jne skip_memcons
-call cpy_memcons ; syscall to initialize and get the memory console buffer
-jmp exit
-skip_memcons:
-
-
-cmp rax, 29
-jne skip_memcons_size
-call get_memcons_size ; syscall to get memcons_size
-jmp exit
-skip_memcons_size:
-
-
-cmp rax, 30
-jne skip_draw_cursor ; syscall to draw_cursor
-call sys_draw_cursor
-jmp exit
-skip_draw_cursor:
-
-
-cmp rax, 32
-jne skip_clear_row
-call ClearRow  ; syscall to clear row
-jmp exit
-skip_clear_row:
 
 exit:
 

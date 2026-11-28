@@ -203,3 +203,4 @@ void write(char *buf, int len) {
     stdout_wc = (stdout_wc + len) % 4096;
 
 }
+
